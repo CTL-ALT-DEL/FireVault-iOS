@@ -2,7 +2,7 @@
 //  FieldWorkspace.swift
 //  FireVault
 //
-//  Native, field-first Account workspace for Build 1.03.30.
+//  Native, field-first Account workspace for Build 1.03.31.
 //
 
 import SwiftUI
@@ -833,20 +833,22 @@ private enum FieldWorkspacePalette {
     static let purple = Color(red: 0.70, green: 0.49, blue: 1.00)
 }
 
-#Preview {
-    FieldWorkspaceView(
-        account: .init(
-            id: "demo", name: "Boise River Medical Center",
-            address: "1550 Demo Medical Way, Boise, ID 83702",
-            category: "CLSS", accountId: "G7CB01-01", phone: "2085550100", favorite: true,
-            latitude: 43.6178, longitude: -116.197,
-            tags: ["Healthcare", "Multi-Building"],
-            notes: [.init(id: "n1", title: "Today, 9:15 AM", text: "Verified panel room access and updated the equipment map.", date: "Today")],
-            documents: [.init(id: "d1", title: "Fire alarm riser diagram", subtitle: "3-page scan", kind: "scan", date: "Jul 21")],
-            equipment: [.init(id: "e1", title: "Notifier NFS2-3030", subtitle: "Main electrical room", status: "Active")],
-            locations: [.init(id: "l1", label: "Main Entrance", subtitle: "South doors", type: "Entrance", plusCode: "JRM3+4C", latitude: 43.6177, longitude: -116.1968)],
-            recent: [.init(id: "r1", title: "Fire alarm riser diagram", subtitle: "3-page scan added", kind: "document", date: "Today")]
-        ),
-        bridge: FireVaultWorkspaceBridge()
-    )
+private struct FieldWorkspaceView_Previews: PreviewProvider {
+    static var previews: some View {
+        FieldWorkspaceView(
+            account: .init(
+                id: "demo", name: "Boise River Medical Center",
+                address: "1550 Demo Medical Way, Boise, ID 83702",
+                category: "CLSS", accountId: "G7CB01-01", phone: "2085550100", favorite: true,
+                latitude: 43.6178, longitude: -116.197,
+                tags: ["Healthcare", "Multi-Building"],
+                notes: [.init(id: "n1", title: "Today, 9:15 AM", text: "Verified panel room access and updated the equipment map.", date: "Today")],
+                documents: [.init(id: "d1", title: "Fire alarm riser diagram", subtitle: "3-page scan", kind: "scan", date: "Jul 21")],
+                equipment: [.init(id: "e1", title: "Notifier NFS2-3030", subtitle: "Main electrical room", status: "Active")],
+                locations: [.init(id: "l1", label: "Main Entrance", subtitle: "South doors", type: "Entrance", plusCode: "JRM3+4C", latitude: 43.6177, longitude: -116.1968)],
+                recent: [.init(id: "r1", title: "Fire alarm riser diagram", subtitle: "3-page scan added", kind: "document", date: "Today")]
+            ),
+            bridge: FireVaultWorkspaceBridge()
+        )
+    }
 }

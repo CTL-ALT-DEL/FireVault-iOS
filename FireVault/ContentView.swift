@@ -168,7 +168,7 @@ private struct FireVaultWebView: UIViewRepresentable {
         webView.scrollView.backgroundColor = UIColor(FireVaultTheme.background)
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.allowsBackForwardNavigationGestures = true
-        webView.customUserAgent = "FireVault-iOS/1.03.30"
+        webView.customUserAgent = "FireVault-iOS/1.03.31"
 
         context.coordinator.webView = webView
         appShellBridge.webView = webView
@@ -868,6 +868,8 @@ private enum FireVaultTheme {
     static let warning = Color(red: 0.96, green: 0.68, blue: 0.30)
 }
 
-#Preview {
-    ContentView()
+private struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+    }
 }

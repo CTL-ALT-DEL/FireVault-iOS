@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.03.30.
+//  Native everyday navigation for Build 1.03.31.
 //
 
 import SwiftUI
@@ -92,6 +92,24 @@ struct FireVaultNativeSettingItem: Codable, Identifiable, Equatable {
     let subtitle: String
     let symbol: String
     let status: String
+
+    var accessibilityLabel: String {
+        [title, subtitle]
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+    }
+}
+
+struct FireVaultVersionInfo: Equatable {
+    let version: String
+    let build: String
+
+    init(bundle: Bundle = .main) {
+        version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+        build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
+    }
+
+    var displayText: String { "Version \(version) (\(build))" }
 }
 
 private enum FireVaultShellTab: String, CaseIterable, Identifiable {
@@ -427,6 +445,7 @@ private struct NativeSettingsView: View {
     let payload: FireVaultAppPayload
     @ObservedObject var bridge: FireVaultAppShellBridge
     @State private var search = ""
+    private let versionInfo = FireVaultVersionInfo()
 
     private var groups: [FireVaultNativeSettingsGroup] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -475,6 +494,7 @@ private struct NativeSettingsView: View {
             .searchable(text: $search, prompt: "Search settings")
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
+            .accessibilityIdentifier("native-settings-list")
         }
     }
 
@@ -507,6 +527,8 @@ private struct NativeSettingsView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(payload.technicianName.isEmpty ? "Technician Profile" : payload.technicianName)
+            .accessibilityValue(payload.demoMode ? "Demo Mode" : "Field technician profile")
             .accessibilityElement(children: .combine)
             .accessibilityHint("Opens technician profile settings")
         }
@@ -525,6 +547,8 @@ private struct NativeSettingsView: View {
                     FVSettingsRow(item: item, tint: NativeShellPalette.tint(group.tint))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(item.accessibilityLabel)
+                .accessibilityValue(item.status)
                 .accessibilityHint("Opens \(item.title)")
             }
         } header: {
@@ -542,7 +566,7 @@ private struct NativeSettingsView: View {
             HStack {
                 Text("FireVault")
                 Spacer()
-                Text("Version \(payload.build)")
+                Text(versionInfo.displayText)
                     .foregroundStyle(.secondary)
             }
             .font(.footnote)
@@ -595,8 +619,7 @@ private struct FVSettingsRow: View {
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(item.status)
+        .accessibilityElement(children: .ignore)
     }
 }
 
