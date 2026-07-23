@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.06.05.
+//  Native everyday navigation for Build 1.06.06.
 //
 
 import SwiftUI
@@ -15,7 +15,8 @@ struct FireVaultAppPayload: Codable, Equatable {
     let build: String
     let initialTab: String
     let demoMode: Bool
-    let today: String
+    let todayWeekday: String
+    let todayDate: String
     let technicianName: String
     let locationStatus: String
     let accounts: [FireVaultNativeAccount]
@@ -334,7 +335,7 @@ private struct NativeNearbyView: View {
     }
 
     private var statusHeader: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(payload.demoMode ? "DEMO VAULT" : "FIELD VAULT")
                     .font(.caption2.bold()).tracking(1.2)
@@ -342,12 +343,20 @@ private struct NativeNearbyView: View {
                 Text(payload.locationStatus).font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
-            Text(payload.today)
-                .font(.system(size: 26, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
-                .accessibilityLabel("Today, \(payload.today)")
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(payload.todayWeekday)
+                    .font(.system(size: 27, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+
+                Text(payload.todayDate)
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Today, \(payload.todayWeekday), \(payload.todayDate)")
         }
     }
 

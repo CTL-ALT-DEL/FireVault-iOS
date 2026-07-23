@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  FireVault
 //
-//  Pure SwiftUI application root for Build 1.06.05.
+//  Pure SwiftUI application root for Build 1.06.06.
 //
 
 import SwiftUI

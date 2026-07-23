@@ -75,6 +75,14 @@ final class FireVaultStore: ObservableObject {
         userCoordinate: CLLocationCoordinate2D?,
         liveLocationStatus: String
     ) -> FireVaultAppPayload {
+        let today = Date()
+        let dateComponents = Calendar.current.dateComponents([.month, .day, .year], from: today)
+        let numericDate = String(
+            format: "%02d/%02d/%04d",
+            dateComponents.month ?? 0,
+            dateComponents.day ?? 0,
+            dateComponents.year ?? 0
+        )
         let nativeAccounts = accounts.map(Self.nativeAccount)
         let distanceCoordinate = demoMode ? demoCoordinate : userCoordinate
         let userLocation = distanceCoordinate.map {
@@ -96,7 +104,8 @@ final class FireVaultStore: ObservableObject {
             build: FireVaultVersionInfo().version,
             initialTab: selectedTab.rawValue,
             demoMode: demoMode,
-            today: Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()),
+            todayWeekday: today.formatted(.dateTime.weekday(.wide)),
+            todayDate: numericDate,
             technicianName: demoMode ? "Demo Technician" : "Field Technician",
             locationStatus: demoMode ? locationStatus : liveLocationStatus,
             accounts: nativeAccounts,
