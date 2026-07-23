@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.03.32.
+//  Native everyday navigation for Build 1.03.33.
 //
 
 import SwiftUI
@@ -97,6 +97,14 @@ struct FireVaultNativeSettingItem: Codable, Identifiable, Equatable {
         [title, subtitle]
             .filter { !$0.isEmpty }
             .joined(separator: ", ")
+    }
+
+    func displayStatus(nativeVersion: String) -> String {
+        switch id {
+        case "about": "Version \(nativeVersion)"
+        case "updates": "Build \(nativeVersion)"
+        default: status
+        }
     }
 }
 
@@ -537,6 +545,7 @@ private struct NativeSettingsView: View {
     private func settingsSection(_ group: FireVaultNativeSettingsGroup) -> some View {
         Section {
             ForEach(group.items) { item in
+                let status = item.displayStatus(nativeVersion: versionInfo.version)
                 Button {
                     bridge.perform(
                         "openSetting",
@@ -544,11 +553,15 @@ private struct NativeSettingsView: View {
                         hideShell: true
                     )
                 } label: {
-                    FVSettingsRow(item: item, tint: NativeShellPalette.tint(group.tint))
+                    FVSettingsRow(
+                        item: item,
+                        status: status,
+                        tint: NativeShellPalette.tint(group.tint)
+                    )
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(item.accessibilityLabel)
-                .accessibilityValue(item.status)
+                .accessibilityValue(status)
                 .accessibilityHint("Opens \(item.title)")
             }
         } header: {
@@ -579,6 +592,7 @@ private struct NativeSettingsView: View {
 
 private struct FVSettingsRow: View {
     let item: FireVaultNativeSettingItem
+    let status: String
     let tint: Color
 
     var body: some View {
@@ -604,8 +618,8 @@ private struct FVSettingsRow: View {
 
             Spacer(minLength: 8)
 
-            if !item.status.isEmpty {
-                Text(item.status)
+            if !status.isEmpty {
+                Text(status)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing)

@@ -17,59 +17,114 @@ enum FireVaultWebIntegration {
         """
         (() => {
           const nativeVersion = "\(version)";
-          const styleID = "firevault-native-integration-10332";
+          const styleID = "firevault-native-integration-10333";
+          const editableSelector = 'input:not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"]), textarea, select, [contenteditable="true"]';
+          const isEditable = element => Boolean(element?.matches?.(editableSelector));
 
-          if (!document.getElementById(styleID)) {
+          const setNativeKeyboardActive = active => {
+            document.documentElement.style.setProperty("--fv-keyboard-offset0802", "0px");
+            document.body?.classList.remove("fvKeyboardOpen0802");
+            document.body?.classList.toggle("fvNativeKeyboard10333", Boolean(active));
+          };
+
+          const revealNativeField = element => {
+            if (!isEditable(element)) return;
+            const viewport = window.visualViewport;
+            const rect = element.getBoundingClientRect();
+            const top = (viewport?.offsetTop || 0) + 18;
+            const bottom = (viewport?.offsetTop || 0) + (viewport?.height || window.innerHeight) - 18;
+            if (rect.top < top || rect.bottom > bottom) {
+              element.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+            }
+          };
+
+          // FireVault's browser build installs a second keyboard-offset system.
+          // Own these events first inside WKWebView so UIKit and the page do not
+          // both resize and repeatedly scroll the same focused control.
+          document.addEventListener("focusin", event => {
+            if (!isEditable(event.target)) return;
+            event.stopImmediatePropagation();
+            setNativeKeyboardActive(true);
+            requestAnimationFrame(() => revealNativeField(event.target));
+            window.setTimeout(() => revealNativeField(event.target), 120);
+            window.setTimeout(() => revealNativeField(event.target), 320);
+          }, true);
+
+          document.addEventListener("focusout", event => {
+            if (!isEditable(event.target)) return;
+            event.stopImmediatePropagation();
+            window.setTimeout(() => {
+              if (!isEditable(document.activeElement)) setNativeKeyboardActive(false);
+            }, 120);
+          }, true);
+
+          ["resize", "scroll"].forEach(type => {
+            window.visualViewport?.addEventListener(type, event => {
+              if (!isEditable(document.activeElement)) return;
+              event.stopImmediatePropagation();
+              setNativeKeyboardActive(true);
+              requestAnimationFrame(() => revealNativeField(document.activeElement));
+            }, { capture: true, passive: true });
+          });
+
+          const installDOMIntegration = () => {
+            if (document.getElementById(styleID)) return;
             const style = document.createElement("style");
             style.id = styleID;
             style.textContent = `
-              body.fvNativeShellActive10332 #appNav,
-              body.fvNativeShellActive10332 .nearbyBottomNav069 {
+              body.fvNativeShellActive10333 #appNav,
+              body.fvNativeShellActive10333 .nearbyBottomNav069 {
                 display: none !important;
                 visibility: hidden !important;
                 pointer-events: none !important;
               }
 
-              body.fvNativeIOS10332.fvKeyboardOpen0802 main#app {
+              body.fvNativeIOS10333::after {
+                display: none !important;
+                height: 0 !important;
+              }
+              body.fvNativeIOS10333.fvNativeKeyboard10333 main#app {
                 padding-bottom: 8px !important;
               }
-              body.fvNativeIOS10332.fvKeyboardOpen0802 .screen,
-              body.fvNativeIOS10332.fvKeyboardOpen0802 .form,
-              body.fvNativeIOS10332.fvKeyboardOpen0802 .list,
-              body.fvNativeIOS10332.fvKeyboardOpen0802 .settingsDetailBody488 {
-                scroll-padding-bottom: 32px !important;
+              body.fvNativeIOS10333.fvNativeKeyboard10333 .screen,
+              body.fvNativeIOS10333.fvNativeKeyboard10333 .form,
+              body.fvNativeIOS10333.fvNativeKeyboard10333 .list,
+              body.fvNativeIOS10333.fvNativeKeyboard10333 .settingsDetailBody488 {
+                scroll-padding-bottom: 24px !important;
               }
-              body.fvNativeIOS10332.fvKeyboardOpen0802 input:focus,
-              body.fvNativeIOS10332.fvKeyboardOpen0802 textarea:focus,
-              body.fvNativeIOS10332.fvKeyboardOpen0802 select:focus {
-                scroll-margin-top: 82px !important;
-                scroll-margin-bottom: 32px !important;
+              body.fvNativeIOS10333.fvNativeKeyboard10333 input:focus,
+              body.fvNativeIOS10333.fvNativeKeyboard10333 textarea:focus,
+              body.fvNativeIOS10333.fvNativeKeyboard10333 select:focus {
+                scroll-margin-top: 18px !important;
+                scroll-margin-bottom: 18px !important;
               }
 
-              body.fvNativeIOS10332 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032 {
+              body.fvNativeIOS10333 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032 {
                 grid-template-columns: 58px minmax(0, 1fr) auto 58px !important;
                 gap: 10px !important;
               }
-              body.fvNativeIOS10332 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032
+              body.fvNativeIOS10333 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032
                 > #settingsBackBtn,
-              body.fvNativeIOS10332 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032
+              body.fvNativeIOS10333 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032
                 > #settingsDoneBtn {
                 width: 58px !important;
                 min-width: 58px !important;
               }
-              body.fvNativeIOS10332 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032
+              body.fvNativeIOS10333 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032
                 .settingsDetailTitle0880 {
                 min-width: 0 !important;
                 padding-inline: 2px !important;
               }
               @media (max-width: 430px) {
-                body.fvNativeIOS10332 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032 {
+                body.fvNativeIOS10333 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032 {
                   grid-template-columns: 58px minmax(0, 1fr) 58px !important;
                 }
               }
             `;
             document.head.appendChild(style);
-          }
+            document.body?.classList.add("fvNativeIOS10333");
+            setNativeKeyboardActive(isEditable(document.activeElement));
+          };
 
           const syncVisibleVersion = () => {
             document.querySelectorAll(
@@ -79,18 +134,25 @@ enum FireVaultWebIntegration {
             });
           };
 
-          document.body?.classList.add("fvNativeIOS10332");
-          syncVisibleVersion();
-
-          if (!window.__fireVaultNativeVersionObserver10332) {
-            const observer = new MutationObserver(syncVisibleVersion);
-            observer.observe(document.documentElement, { childList: true, subtree: true });
-            window.__fireVaultNativeVersionObserver10332 = observer;
+          if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", () => {
+              installDOMIntegration();
+              syncVisibleVersion();
+            }, { once: true });
+          } else {
+            installDOMIntegration();
+            syncVisibleVersion();
           }
 
-          window.fireVaultNativeIntegration10332 = {
+          if (!window.__fireVaultNativeVersionObserver10333) {
+            const observer = new MutationObserver(syncVisibleVersion);
+            observer.observe(document, { childList: true, subtree: true });
+            window.__fireVaultNativeVersionObserver10333 = observer;
+          }
+
+          window.fireVaultNativeIntegration10333 = {
             setShellActive(active) {
-              document.body?.classList.toggle("fvNativeShellActive10332", Boolean(active));
+              document.body?.classList.toggle("fvNativeShellActive10333", Boolean(active));
             },
             syncVisibleVersion
           };
@@ -116,6 +178,7 @@ struct ContentView: View {
                 workspaceBridge: workspaceBridge
             )
                 .ignoresSafeArea(.container, edges: .bottom)
+                .ignoresSafeArea(.keyboard, edges: .bottom)
 
             if loadState == .loading {
                 loadingView
@@ -249,7 +312,7 @@ private struct FireVaultWebView: UIViewRepresentable {
         configuration.userContentController.addUserScript(
             WKUserScript(
                 source: FireVaultWebIntegration.source(version: FireVaultVersionInfo().version),
-                injectionTime: .atDocumentEnd,
+                injectionTime: .atDocumentStart,
                 forMainFrameOnly: true
             )
         )
@@ -263,7 +326,7 @@ private struct FireVaultWebView: UIViewRepresentable {
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.keyboardDismissMode = .interactive
         webView.allowsBackForwardNavigationGestures = true
-        webView.customUserAgent = "FireVault-iOS/1.03.32"
+        webView.customUserAgent = "FireVault-iOS/1.03.33"
 
         context.coordinator.webView = webView
         appShellBridge.webView = webView
@@ -318,7 +381,7 @@ private struct FireVaultWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             webView.evaluateJavaScript(
-                "window.fireVaultNativeIntegration10332?.syncVisibleVersion();"
+                "window.fireVaultNativeIntegration10333?.syncVisibleVersion();"
             )
             setNativeShellActive(nativeShellActive)
             loadState = .ready
@@ -436,7 +499,7 @@ private struct FireVaultWebView: UIViewRepresentable {
         private func setNativeShellActive(_ active: Bool) {
             nativeShellActive = active
             webView?.evaluateJavaScript(
-                "window.fireVaultNativeIntegration10332?.setShellActive(\(active));"
+                "window.fireVaultNativeIntegration10333?.setShellActive(\(active));"
             )
         }
 
