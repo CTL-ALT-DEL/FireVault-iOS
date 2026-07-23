@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.06.06.
+//  Native everyday navigation for Build 1.06.07.
 //
 
 import SwiftUI
@@ -351,8 +351,7 @@ private struct NativeNearbyView: View {
                     .minimumScaleFactor(0.78)
 
                 Text(payload.todayDate)
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .foregroundStyle(.secondary)
             }
             .accessibilityElement(children: .ignore)
