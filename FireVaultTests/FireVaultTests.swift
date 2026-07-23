@@ -59,8 +59,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.05.04"), "Version 1.05.04")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.05.04"), "Build 1.05.04")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.05.05"), "Version 1.05.05")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.05.05"), "Build 1.05.05")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
@@ -120,6 +120,17 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(rows[1][0], "Acme, Inc.")
         XCTAssertEqual(rows[1][1], "12 Main St, Boise")
         XCTAssertEqual(rows[1][2], "Panel says \"East\"")
+    }
+
+    func testNativeCSVParserRecognizesWindowsCRLFRecords() {
+        let csv = "Account Id,Account Name,Address\r\nA-1,First Account,100 Main St\r\nA-2,Second Account,200 Main St\r\n"
+
+        let rows = FireVaultStore.parseCSV(csv)
+
+        XCTAssertEqual(rows.count, 3)
+        XCTAssertEqual(rows[0].count, 3)
+        XCTAssertEqual(rows[1][0], "A-1")
+        XCTAssertEqual(rows[2][0], "A-2")
     }
 
     func testNativeCSVImportAddsAccountsAndSkipsDuplicateAccountID() throws {

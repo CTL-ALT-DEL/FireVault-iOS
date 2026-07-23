@@ -2,7 +2,7 @@
 //  FireVaultStore.swift
 //  FireVault
 //
-//  Native application and demo-data authority for Build 1.05.04.
+//  Native application and demo-data authority for Build 1.05.05.
 //
 
 import Foundation
@@ -222,6 +222,7 @@ final class FireVaultStore: ObservableObject {
         guard var source = Self.decodeCSV(data) else {
             throw CocoaError(.fileReadInapplicableStringEncoding)
         }
+        source = Self.normalizedLineEndings(source)
 
         var explicitDelimiter: Character?
         if let firstBreak = source.firstIndex(where: { $0 == "\n" || $0 == "\r" }) {
@@ -433,6 +434,7 @@ final class FireVaultStore: ObservableObject {
     }
 
     static func parseCSV(_ source: String, delimiter explicitDelimiter: Character? = nil) -> [[String]] {
+        let source = normalizedLineEndings(source)
         let delimiter = explicitDelimiter ?? detectedDelimiter(in: source)
         var rows: [[String]] = []
         var row: [String] = []
@@ -473,6 +475,12 @@ final class FireVaultStore: ObservableObject {
         row.append(field)
         if row.contains(where: { !$0.isEmpty }) { rows.append(row) }
         return rows
+    }
+
+    private static func normalizedLineEndings(_ source: String) -> String {
+        source
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
     }
 
     private static func detectedDelimiter(in source: String) -> Character {
