@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.06.02.
+//  Native everyday navigation for Build 1.06.03.
 //
 
 import SwiftUI
@@ -610,6 +610,9 @@ private struct NativeNearbyView: View {
                 }
                 .scrollIndicators(.hidden)
                 .scrollPosition(id: $scrollAccountID, anchor: .top)
+                .scrollTargetBehavior(
+                    .viewAligned(limitBehavior: .never, anchor: .top)
+                )
                 .onScrollPhaseChange { _, newPhase in
                     if newPhase.isScrolling {
                         accountScrollWasActive = true
@@ -648,44 +651,45 @@ private struct NativeNearbyView: View {
                     .padding(.top, 1)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(row.account.name)
-                            .font(.subheadline.bold())
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-
-                        Spacer(minLength: 4)
-
-                        Text(row.distanceLabel)
-                            .font(.caption.bold())
-                            .foregroundStyle(NativeShellPalette.green)
-                            .fixedSize()
-                    }
+                    Text(row.account.name)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
 
                     Text(row.account.address)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
 
-                    HStack(spacing: 10) {
-                        Label(
-                            row.account.accountId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                ? "No Account ID"
-                                : row.account.accountId,
-                            systemImage: "number"
-                        )
-                        .lineLimit(1)
+                    HStack(alignment: .lastTextBaseline, spacing: 10) {
+                        HStack(spacing: 10) {
+                            Label(
+                                row.account.accountId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    ? "No Account ID"
+                                    : row.account.accountId,
+                                systemImage: "number"
+                            )
+                            .lineLimit(1)
 
-                        Label(
-                            row.account.category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                ? "Uncategorized"
-                                : row.account.category,
-                            systemImage: "tag.fill"
-                        )
-                        .lineLimit(1)
+                            Label(
+                                row.account.category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    ? "Uncategorized"
+                                    : row.account.category,
+                                systemImage: "tag.fill"
+                            )
+                            .lineLimit(1)
+                        }
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+
+                        Spacer(minLength: 6)
+
+                        Text(row.distanceLabel)
+                            .font(.title3.bold())
+                            .monospacedDigit()
+                            .foregroundStyle(NativeShellPalette.green)
+                            .fixedSize()
                     }
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 12)
@@ -709,6 +713,11 @@ private struct NativeNearbyView: View {
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onLongPressGesture(minimumDuration: 0.55, maximumDistance: 24) {
+            delayedMapFocusTask?.cancel()
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            store.openAccount(row.account.id)
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             [
@@ -719,9 +728,12 @@ private struct NativeNearbyView: View {
                 row.distanceLabel
             ].joined(separator: ", ")
         )
-        .accessibilityHint("Selects this account on the map")
+        .accessibilityHint("Tap to select on the map. Long press to open account details.")
         .accessibilityValue(selectedID == row.id ? "Selected" : "Not selected")
         .accessibilityAddTraits(selectedID == row.id ? .isSelected : [])
+        .accessibilityAction(named: "Open Account Details") {
+            store.openAccount(row.account.id)
+        }
         .accessibilityIdentifier("nearby-account-\(row.id)")
     }
 

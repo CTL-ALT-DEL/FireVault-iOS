@@ -61,8 +61,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.06.02"), "Version 1.06.02")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.06.02"), "Build 1.06.02")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.06.03"), "Version 1.06.03")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.06.03"), "Build 1.06.03")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {

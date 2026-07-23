@@ -27,7 +27,9 @@ final class FireVaultUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        app.buttons["main-navigation-settings"].tap()
+        let settingsTab = app.buttons["main-navigation-settings"]
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
+        settingsTab.tap()
 
         let technicianRow = app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH %@", "Technician Profile")
