@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.07.02.
+//  Native everyday navigation for Build 1.07.03.
 //
 
 import SwiftUI
@@ -209,6 +209,30 @@ struct NativeAppShellView: View {
     }
 }
 
+private enum FireVaultMapLayer: String, CaseIterable, Identifiable {
+    case standard
+    case satellite
+    case hybrid
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .standard: "Standard"
+        case .satellite: "Satellite"
+        case .hybrid: "Hybrid"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .standard: "map"
+        case .satellite: "globe.americas.fill"
+        case .hybrid: "square.3.layers.3d"
+        }
+    }
+}
+
 private struct NativeNearbyView: View {
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
@@ -222,6 +246,8 @@ private struct NativeNearbyView: View {
     @State private var accountScrollWasActive = false
     @State private var suppressNextIdleFocus = false
     @State private var delayedMapFocusTask: Task<Void, Never>?
+    @State private var mapLayer: FireVaultMapLayer = .standard
+    @State private var mapIs3D = false
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -299,7 +325,7 @@ private struct NativeNearbyView: View {
         .task {
             scrollAccountID = nearbyRows.first?.id
             if payload.demoMode {
-                cameraPosition = .region(overviewRegion)
+                cameraPosition = overviewCameraPosition
             } else if locationService.coordinate != nil {
                 centerMapOnUser()
             } else {
@@ -448,44 +474,7 @@ private struct NativeNearbyView: View {
                     )
                 }
             } else {
-                Map(position: $cameraPosition) {
-                    if !payload.demoMode, let currentLocation = locationService.coordinate {
-                        Annotation("Your Location", coordinate: currentLocation) {
-                            ZStack {
-                                Circle()
-                                    .fill(NativeShellPalette.blue.opacity(0.22))
-                                    .frame(width: 38, height: 38)
-                                Circle()
-                                    .fill(.white)
-                                    .frame(width: 22, height: 22)
-                                Circle()
-                                    .fill(NativeShellPalette.blue)
-                                    .frame(width: 14, height: 14)
-                            }
-                            .shadow(radius: 4)
-                            .accessibilityElement()
-                            .accessibilityLabel("Your current location")
-                            .accessibilityIdentifier("nearby-current-location")
-                        }
-                    }
-                    ForEach(Array(nearbyRows.enumerated()), id: \.element.id) { index, row in
-                        if let coordinate = row.account.coordinate {
-                            Annotation(row.account.name, coordinate: coordinate) {
-                                Button {
-                                    selectAccount(row, scrollToCard: true)
-                                } label: {
-                                    Text("\(index + 1)")
-                                        .font(.caption.bold()).foregroundStyle(.white)
-                                        .frame(width: 32, height: 32)
-                                        .background(selected?.id == row.id ? NativeShellPalette.red : NativeShellPalette.blue, in: Circle())
-                                        .overlay { Circle().stroke(.white.opacity(0.85), lineWidth: 2) }
-                                        .shadow(radius: 5)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
+                styledMap
                 .frame(height: 270)
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .overlay { RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.white.opacity(0.10), lineWidth: 1) }
@@ -510,6 +499,10 @@ private struct NativeNearbyView: View {
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel("\(selected.account.name), \(selected.account.address)")
                     }
+                }
+                .overlay(alignment: .topTrailing) {
+                    mapOptionsMenu
+                        .padding(10)
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if let selected {
@@ -565,6 +558,102 @@ private struct NativeNearbyView: View {
         }
     }
 
+    @ViewBuilder
+    private var styledMap: some View {
+        switch mapLayer {
+        case .standard:
+            configuredMap(.standard(elevation: .realistic))
+        case .satellite:
+            configuredMap(.imagery(elevation: .realistic))
+        case .hybrid:
+            configuredMap(.hybrid(elevation: .realistic))
+        }
+    }
+
+    private func configuredMap(_ style: MapStyle) -> some View {
+        Map(position: $cameraPosition) {
+            if !payload.demoMode, let currentLocation = locationService.coordinate {
+                Annotation("Your Location", coordinate: currentLocation) {
+                    ZStack {
+                        Circle()
+                            .fill(NativeShellPalette.blue.opacity(0.22))
+                            .frame(width: 38, height: 38)
+                        Circle()
+                            .fill(.white)
+                            .frame(width: 22, height: 22)
+                        Circle()
+                            .fill(NativeShellPalette.blue)
+                            .frame(width: 14, height: 14)
+                    }
+                    .shadow(radius: 4)
+                    .accessibilityElement()
+                    .accessibilityLabel("Your current location")
+                    .accessibilityIdentifier("nearby-current-location")
+                }
+            }
+
+            ForEach(Array(nearbyRows.enumerated()), id: \.element.id) { index, row in
+                if let coordinate = row.account.coordinate {
+                    Annotation(row.account.name, coordinate: coordinate) {
+                        Button {
+                            selectAccount(row, scrollToCard: true)
+                        } label: {
+                            Text("\(index + 1)")
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                                .frame(width: 32, height: 32)
+                                .background(
+                                    selected?.id == row.id
+                                        ? NativeShellPalette.red
+                                        : NativeShellPalette.blue,
+                                    in: Circle()
+                                )
+                                .overlay {
+                                    Circle().stroke(.white.opacity(0.85), lineWidth: 2)
+                                }
+                                .shadow(radius: 5)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .mapStyle(style)
+        .onChange(of: mapIs3D) { _, _ in
+            updateMapPerspective()
+        }
+    }
+
+    private var mapOptionsMenu: some View {
+        Menu {
+            Picker("Map Layer", selection: $mapLayer) {
+                ForEach(FireVaultMapLayer.allCases) { layer in
+                    Label(layer.title, systemImage: layer.symbol)
+                        .tag(layer)
+                }
+            }
+
+            Divider()
+
+            Toggle(isOn: $mapIs3D) {
+                Label("3D View", systemImage: "view.3d")
+            }
+        } label: {
+            Image(systemName: mapIs3D ? "square.3.layers.3d.top.filled" : mapLayer.symbol)
+                .font(.headline)
+                .foregroundStyle(NativeShellPalette.blue)
+                .frame(width: 42, height: 42)
+                .background(Color.black.opacity(0.86), in: Circle())
+                .overlay {
+                    Circle().stroke(.white.opacity(0.18), lineWidth: 1)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Map options")
+        .accessibilityValue("\(mapLayer.title), \(mapIs3D ? "3D" : "2D")")
+        .accessibilityIdentifier("nearby-map-options")
+    }
+
     private var nearbyRadiusBinding: Binding<Double> {
         Binding(
             get: { settings.gps.nearbyRadiusMiles },
@@ -586,7 +675,7 @@ private struct NativeNearbyView: View {
 
         withAnimation(.easeInOut(duration: 0.35)) {
             if payload.demoMode {
-                cameraPosition = .region(overviewRegion)
+                cameraPosition = overviewCameraPosition
             } else if locationService.coordinate != nil {
                 centerMapOnUser()
             }
@@ -805,9 +894,7 @@ private struct NativeNearbyView: View {
             }
         }
         withAnimation(.easeInOut(duration: 0.3)) {
-            cameraPosition = .region(
-                FireVaultNearbyMapCamera.accountRegion(coordinate: coordinate)
-            )
+            cameraPosition = accountCameraPosition(coordinate)
         }
     }
 
@@ -815,12 +902,75 @@ private struct NativeNearbyView: View {
         guard let coordinate = locationService.coordinate else { return }
         selectedID = nil
         withAnimation(.easeInOut(duration: 0.3)) {
-            cameraPosition = .region(
+            cameraPosition = userCameraPosition(coordinate)
+        }
+    }
+
+    private var overviewCameraPosition: MapCameraPosition {
+        guard mapIs3D else {
+            return .region(overviewRegion)
+        }
+
+        let latitudeDistance = overviewRegion.span.latitudeDelta * 111_000
+        let longitudeDistance = overviewRegion.span.longitudeDelta * 85_000
+        return .camera(
+            MapCamera(
+                centerCoordinate: overviewRegion.center,
+                distance: max(1_500, max(latitudeDistance, longitudeDistance) * 1.8),
+                heading: 0,
+                pitch: 55
+            )
+        )
+    }
+
+    private func accountCameraPosition(_ coordinate: CLLocationCoordinate2D) -> MapCameraPosition {
+        guard mapIs3D else {
+            return .region(
+                FireVaultNearbyMapCamera.accountRegion(coordinate: coordinate)
+            )
+        }
+
+        return .camera(
+            MapCamera(
+                centerCoordinate: coordinate,
+                distance: 900,
+                heading: 0,
+                pitch: 58
+            )
+        )
+    }
+
+    private func userCameraPosition(_ coordinate: CLLocationCoordinate2D) -> MapCameraPosition {
+        guard mapIs3D else {
+            return .region(
                 FireVaultNearbyMapCamera.userRegion(
                     coordinate: coordinate,
                     radiusMiles: settings.gps.nearbyRadiusMiles
                 )
             )
+        }
+
+        return .camera(
+            MapCamera(
+                centerCoordinate: coordinate,
+                distance: max(900, settings.gps.nearbyRadiusMiles * 1_609.344 * 2.2),
+                heading: 0,
+                pitch: 55
+            )
+        )
+    }
+
+    private func updateMapPerspective() {
+        withAnimation(.easeInOut(duration: 0.35)) {
+            if let selected,
+               let coordinate = selected.account.coordinate {
+                cameraPosition = accountCameraPosition(coordinate)
+            } else if !payload.demoMode,
+                      let coordinate = locationService.coordinate {
+                cameraPosition = userCameraPosition(coordinate)
+            } else {
+                cameraPosition = overviewCameraPosition
+            }
         }
     }
 
@@ -842,7 +992,7 @@ private struct NativeNearbyView: View {
 
         if payload.demoMode {
             withAnimation(.easeInOut(duration: 0.3)) {
-                cameraPosition = .region(overviewRegion)
+                cameraPosition = overviewCameraPosition
             }
         } else {
             centerMapOnUser()

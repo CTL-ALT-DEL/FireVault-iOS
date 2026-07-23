@@ -232,22 +232,33 @@ struct FireVaultOverlayPreview: View {
     let category: String
 
     var body: some View {
-        ZStack {
-            Image("NotifierPanelSample")
-                .resizable()
-                .scaledToFill()
+        GeometryReader { geometry in
+            let designWidth: CGFloat = 430
+            let designHeight: CGFloat = 322.5
+            let previewScale = geometry.size.width / designWidth
 
-            FireVaultPhotoOverlayView(
-                preferences: preferences,
-                technicianName: technicianName,
-                siteName: siteName,
-                address: address,
-                accountID: accountID,
-                category: category,
-                timestamp: .now
-            )
+            ZStack {
+                Image("NotifierPanelSample")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: designWidth, height: designHeight)
+                    .clipped()
+
+                FireVaultPhotoOverlayView(
+                    preferences: preferences,
+                    technicianName: technicianName,
+                    siteName: siteName,
+                    address: address,
+                    accountID: accountID,
+                    category: category,
+                    timestamp: .now
+                )
+                .frame(width: designWidth, height: designHeight)
+            }
+            .frame(width: designWidth, height: designHeight)
+            .scaleEffect(previewScale, anchor: .topLeading)
         }
-        .frame(height: 220)
+        .aspectRatio(4.0 / 3.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)

@@ -108,6 +108,21 @@ final class FireVaultUITests: XCTestCase {
     }
 
     @MainActor
+    func testNearbyMapOptionsAreReachable() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let nearbyTab = app.buttons["main-navigation-nearby"]
+        XCTAssertTrue(nearbyTab.waitForExistence(timeout: 8))
+        nearbyTab.tap()
+
+        let mapOptions = app.buttons["nearby-map-options"]
+        XCTAssertTrue(mapOptions.waitForExistence(timeout: 5))
+        XCTAssertTrue(mapOptions.label.contains("Map options"))
+        XCTAssertFalse(app.webViews.firstMatch.exists, "Native Nearby must never display a web view")
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
