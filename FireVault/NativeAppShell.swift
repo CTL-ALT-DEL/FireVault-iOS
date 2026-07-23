@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.03.33.
+//  Native everyday navigation for Build 1.03.34.
 //
 
 import SwiftUI
@@ -195,7 +195,6 @@ struct NativeAppShellView: View {
         .padding(5)
         .background(NativeShellPalette.surface.opacity(0.92), in: Capsule())
         .overlay { Capsule().stroke(.white.opacity(0.10), lineWidth: 1) }
-        .glassEffect()
     }
 }
 

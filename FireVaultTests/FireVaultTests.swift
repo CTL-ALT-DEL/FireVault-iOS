@@ -43,22 +43,24 @@ final class FireVaultTests: XCTestCase {
     }
 
     func testWebIntegrationTargetsSharedKeyboardAndNavigationLayers() {
-        let source = FireVaultWebIntegration.source(version: "1.03.33")
+        let source = FireVaultWebIntegration.source(version: "1.03.34")
 
-        XCTAssertTrue(source.contains("fvNativeKeyboard10333 main#app"))
-        XCTAssertTrue(source.contains("fvNativeShellActive10333 #appNav"))
+        XCTAssertTrue(source.contains("fvNativeKeyboard10334 main#app"))
+        XCTAssertTrue(source.contains("fvNativeIOS10334 #appNav"))
         XCTAssertTrue(source.contains(".nearbyBottomNav069"))
-        XCTAssertTrue(source.contains("body.fvNativeIOS10333::after"))
+        XCTAssertTrue(source.contains("body.fvNativeIOS10334::after"))
         XCTAssertTrue(source.contains("event.stopImmediatePropagation()"))
+        XCTAssertTrue(source.contains("nearestScrollContainer"))
+        XCTAssertFalse(source.contains("scrollIntoView"))
     }
 
     func testWebIntegrationSynchronizesVisibleVersionAndPhotoOverlayHeader() {
-        let source = FireVaultWebIntegration.source(version: "1.03.33")
+        let source = FireVaultWebIntegration.source(version: "1.03.34")
 
         XCTAssertTrue(source.contains(".splashBuild492"))
         XCTAssertTrue(source.contains(".aboutGrid540"))
         XCTAssertTrue(source.contains("photoOverlayDetailHeader1032"))
-        XCTAssertTrue(source.contains("1.03.33"))
+        XCTAssertTrue(source.contains("1.03.34"))
     }
 
     func testNativeSettingsVersionStatusesOverrideOlderWebPayload() {
@@ -77,7 +79,7 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.03.33"), "Version 1.03.33")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.03.33"), "Build 1.03.33")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.03.34"), "Version 1.03.34")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.03.34"), "Build 1.03.34")
     }
 }

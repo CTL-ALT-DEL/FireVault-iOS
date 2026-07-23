@@ -1,8 +1,8 @@
-# FireVault iPhone App — Build 1.03.33 · Keyboard and Version Repair
+# FireVault iPhone App — Build 1.03.34 · Focused Field and Navigation Repair
 
 This Xcode project installs FireVault’s native SwiftUI app shell, the Account Field Workspace, Apple Maps, Liquid Glass controls, the FireVault flame icon, and Apple’s built-in document camera. Nearby, Accounts, Photo access, and the simplified five-area Settings hub now use the native shell. Established editors continue using the deployed FireVault vault engine so existing data and save workflows remain compatible.
 
-This build uses native build number 34 and marketing version 1.03.33. It preserves the existing web bridge and stored-data behavior while giving WKWebView a single keyboard-visibility handler, removing the obsolete bottom backing layer, and deriving Settings version labels from the installed native app.
+This build uses native build number 35 and marketing version 1.03.34. It preserves the existing web bridge and stored-data behavior while limiting keyboard reveal to the nearest internal scroll panel, removing the duplicate web navigation layer, and simplifying the native bottom navigation to one visible capsule.
 
 ## Install in the correct order
 
