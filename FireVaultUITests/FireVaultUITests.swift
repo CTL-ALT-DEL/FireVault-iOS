@@ -70,6 +70,10 @@ final class FireVaultUITests: XCTestCase {
         XCTAssertTrue(app.buttons["native-take-photo"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["native-scan-document"].exists)
         XCTAssertTrue(app.buttons["native-choose-photo"].exists)
+        XCTAssertTrue(app.otherElements["native-capture-destination"].exists)
+
+        app.buttons["native-scan-document"].tap()
+        XCTAssertTrue(app.navigationBars["Choose Account"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.webViews.firstMatch.exists, "Native Photo must never display a web view")
     }
 

@@ -46,6 +46,7 @@ struct FireVaultWorkspaceDocument: Codable, Identifiable, Equatable {
     var subtitle: String
     var kind: String
     var date: String
+    var mediaFileName: String? = nil
 }
 
 struct FireVaultWorkspaceEquipment: Codable, Identifiable, Equatable {

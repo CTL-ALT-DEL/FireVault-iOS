@@ -84,6 +84,7 @@ struct NativeTechnicianSettingsView: View {
 struct NativeOverlaySettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var draft: FireVaultNativePreferences
+    @FocusState private var focused: Bool
 
     init(settings: FireVaultNativeSettingsStore) {
         self.settings = settings
@@ -98,9 +99,33 @@ struct NativeOverlaySettingsView: View {
                     technicianName: draft.technician.name.isEmpty
                         ? "Demo Technician"
                         : draft.technician.name,
-                    accountName: "Demo Account"
+                    siteName: "Demo Account",
+                    address: "100 FireVault Way, Boise, ID 83702",
+                    accountID: "FV-1001"
                 )
                 .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
+            }
+            Section {
+                TextField("Tagline", text: $draft.overlay.tagline)
+                    .focused($focused)
+
+                TextField(
+                    "Overlay field format",
+                    text: $draft.overlay.fieldTemplate,
+                    axis: .vertical
+                )
+                .lineLimit(4...8)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($focused)
+                .accessibilityLabel("Overlay field format")
+            } header: {
+                Text("Overlay Text")
+            } footer: {
+                Text(
+                    "Available fields: {site}, {address}, {accountID}, {technician}, {date}, and {time}. "
+                    + "Site, address, and account ID remain required; the account ID line is hidden when an account has no ID."
+                )
             }
             Section("Layout") {
                 Picker("Position", selection: $draft.overlay.alignment) {
@@ -122,13 +147,18 @@ struct NativeOverlaySettingsView: View {
             }
             Section("Branding") {
                 Toggle("Show FireVault logo", isOn: $draft.overlay.showLogo)
-                Toggle("Show category tagline", isOn: $draft.overlay.showTagline)
+                Toggle("Show tagline", isOn: $draft.overlay.showTagline)
                 Picker("Accent", selection: $draft.overlay.accentColor) {
                     Text("Red").tag("red"); Text("Blue").tag("blue"); Text("Amber").tag("amber"); Text("White").tag("white")
                 }
             }
         }
-        .nativeSettingsForm(title: "Photo Overlay") { settings.save(draft) }
+        .nativeSettingsForm(
+            title: "Photo Overlay",
+            focused: $focused
+        ) {
+            settings.save(draft)
+        }
     }
 }
 

@@ -61,8 +61,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.07.00"), "Version 1.07.00")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.07.00"), "Build 1.07.00")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.07.01"), "Version 1.07.01")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.07.01"), "Build 1.07.01")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
@@ -75,11 +75,16 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(high.normalized.nearbyRadiusMiles, 25)
     }
 
-    func testNativeGPSRadiusWheelUsesQuarterMileSteps() {
+    func testNativeGPSRadiusWheelUsesQuarterMilesThroughOneThenWholeMiles() {
         XCTAssertEqual(FireVaultGPSPreferences.radiusOptions.first, 0.25)
         XCTAssertEqual(FireVaultGPSPreferences.radiusOptions.last, 25)
-        XCTAssertEqual(FireVaultGPSPreferences.radiusOptions.count, 100)
-        XCTAssertTrue(FireVaultGPSPreferences.radiusOptions.contains(3.5))
+        XCTAssertEqual(FireVaultGPSPreferences.radiusOptions.count, 28)
+        XCTAssertEqual(
+            Array(FireVaultGPSPreferences.radiusOptions.prefix(4)),
+            [0.25, 0.5, 0.75, 1]
+        )
+        XCTAssertTrue(FireVaultGPSPreferences.radiusOptions.contains(2))
+        XCTAssertFalse(FireVaultGPSPreferences.radiusOptions.contains(3.5))
     }
 
     func testPhotoOverlayPreferencesNormalizeUnsupportedValues() {
@@ -99,6 +104,68 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(normalized.opacity, 35)
     }
 
+    func testPhotoOverlayPreferencesPreserveRequiredAccountFields() {
+        var preferences = FireVaultOverlayPreferences()
+        preferences.fieldTemplate = "{technician}"
+
+        let normalized = preferences.normalized
+
+        XCTAssertTrue(normalized.fieldTemplate.contains("{site}"))
+        XCTAssertTrue(normalized.fieldTemplate.contains("{address}"))
+        XCTAssertTrue(normalized.fieldTemplate.contains("{accountID}"))
+    }
+
+    func testPhotoOverlayPreferencesDecodeSettingsSavedBeforeTemplates() throws {
+        let legacyJSON = """
+        {
+          "alignment": "top",
+          "fontSize": "large",
+          "backgroundStyle": "card",
+          "opacity": 70,
+          "showLogo": false,
+          "showTagline": true,
+          "accentColor": "blue"
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(
+            FireVaultOverlayPreferences.self,
+            from: Data(legacyJSON.utf8)
+        )
+
+        XCTAssertEqual(decoded.alignment, "top")
+        XCTAssertEqual(decoded.tagline, "FIREVAULT FIELD DOCUMENTATION")
+        XCTAssertTrue(decoded.fieldTemplate.contains("{site}"))
+    }
+
+    func testPhotoOverlayTemplateResolvesAccountFieldsAndOmitsMissingIDLine() {
+        let timestamp = Date(timeIntervalSince1970: 0)
+        let template = "{site}\n{address}\nAccount ID: {accountID}\n{technician}"
+
+        let withID = FireVaultOverlayTemplateFormatter.lines(
+            template: template,
+            siteName: "Central Library",
+            address: "100 Main Street",
+            accountID: "FV-42",
+            technicianName: "Taylor",
+            timestamp: timestamp
+        )
+        XCTAssertEqual(
+            withID,
+            ["Central Library", "100 Main Street", "Account ID: FV-42", "Taylor"]
+        )
+
+        let withoutID = FireVaultOverlayTemplateFormatter.lines(
+            template: template,
+            siteName: "Central Library",
+            address: "100 Main Street",
+            accountID: "",
+            technicianName: "Taylor",
+            timestamp: timestamp
+        )
+        XCTAssertEqual(withoutID, ["Central Library", "100 Main Street", "Taylor"])
+    }
+
     func testNativeGPSSettingsPersistAndReload() throws {
         let suite = "FireVaultTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -106,12 +173,12 @@ final class FireVaultTests: XCTestCase {
 
         let store = FireVaultNativeSettingsStore(defaults: defaults)
         var preferences = FireVaultGPSPreferences()
-        preferences.nearbyRadiusMiles = 3.5
+        preferences.nearbyRadiusMiles = 4
         preferences.highAccuracy = false
         store.saveGPS(preferences)
 
         let reloaded = FireVaultNativeSettingsStore(defaults: defaults)
-        XCTAssertEqual(reloaded.gps.nearbyRadiusMiles, 3.5)
+        XCTAssertEqual(reloaded.gps.nearbyRadiusMiles, 4)
         XCTAssertFalse(reloaded.gps.highAccuracy)
     }
 

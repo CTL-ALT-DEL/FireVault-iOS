@@ -24,6 +24,13 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
     var showLogo = true
     var showTagline = true
     var accentColor = "red"
+    var tagline = "FIREVAULT FIELD DOCUMENTATION"
+    var fieldTemplate = """
+    {site}
+    {address}
+    Account ID: {accountID}
+    {technician} • {date} {time}
+    """
 
     var normalized: Self {
         var copy = self
@@ -32,13 +39,62 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
         if !["small", "medium", "large"].contains(copy.fontSize) { copy.fontSize = "medium" }
         if !["bar", "card", "minimal"].contains(copy.backgroundStyle) { copy.backgroundStyle = "bar" }
         if !["red", "blue", "amber", "white"].contains(copy.accentColor) { copy.accentColor = "red" }
+        copy.tagline = String(copy.tagline.prefix(80))
+        copy.fieldTemplate = Self.requiredFieldTemplate(copy.fieldTemplate)
         return copy
+    }
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case alignment
+        case fontSize
+        case backgroundStyle
+        case opacity
+        case showLogo
+        case showTagline
+        case accentColor
+        case tagline
+        case fieldTemplate
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        alignment = try values.decodeIfPresent(String.self, forKey: .alignment) ?? "bottom"
+        fontSize = try values.decodeIfPresent(String.self, forKey: .fontSize) ?? "medium"
+        backgroundStyle = try values.decodeIfPresent(String.self, forKey: .backgroundStyle) ?? "bar"
+        opacity = try values.decodeIfPresent(Int.self, forKey: .opacity) ?? 85
+        showLogo = try values.decodeIfPresent(Bool.self, forKey: .showLogo) ?? true
+        showTagline = try values.decodeIfPresent(Bool.self, forKey: .showTagline) ?? true
+        accentColor = try values.decodeIfPresent(String.self, forKey: .accentColor) ?? "red"
+        tagline = try values.decodeIfPresent(String.self, forKey: .tagline)
+            ?? "FIREVAULT FIELD DOCUMENTATION"
+        fieldTemplate = try values.decodeIfPresent(String.self, forKey: .fieldTemplate)
+            ?? """
+            {site}
+            {address}
+            Account ID: {accountID}
+            {technician} • {date} {time}
+            """
+    }
+
+    private static func requiredFieldTemplate(_ value: String) -> String {
+        var result = String(value.prefix(500))
+        let requiredTokens = ["{site}", "{address}", "{accountID}"]
+
+        for token in requiredTokens where !result.contains(token) {
+            if !result.isEmpty, !result.hasSuffix("\n") {
+                result.append("\n")
+            }
+            result.append(token)
+        }
+        return result
     }
 }
 
 struct FireVaultGPSPreferences: Codable, Equatable {
     static let allowedRadius = 0.25...25.0
-    static let radiusOptions: [Double] = (1...100).map { Double($0) / 4 }
+    static let radiusOptions: [Double] = [0.25, 0.5, 0.75, 1] + (2...25).map(Double.init)
 
     var nearbyRadiusMiles: Double = 1
     var highAccuracy = true
@@ -48,10 +104,13 @@ struct FireVaultGPSPreferences: Codable, Equatable {
 
     var normalized: Self {
         var copy = self
-        copy.nearbyRadiusMiles = min(
+        let clamped = min(
             Self.allowedRadius.upperBound,
             max(Self.allowedRadius.lowerBound, nearbyRadiusMiles)
         )
+        copy.nearbyRadiusMiles = Self.radiusOptions.min {
+            abs($0 - clamped) < abs($1 - clamped)
+        } ?? 1
         return copy
     }
 
@@ -61,6 +120,10 @@ struct FireVaultGPSPreferences: Codable, Equatable {
 
     static func radiusLabel(_ value: Double) -> String {
         "\(value.formatted(.number.precision(.fractionLength(0...2)))) mi"
+    }
+
+    static func radiusWheelLabel(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0...2)))
     }
 }
 

@@ -19,10 +19,34 @@ struct FireVaultCSVImportResult: Equatable {
     let messages: [String]
 }
 
+enum FireVaultMediaError: LocalizedError {
+    case accountUnavailable
+    case emptyScan
+    case encodingFailed
+    case storageUnavailable
+    case writeFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .accountUnavailable:
+            "The selected account is no longer available."
+        case .emptyScan:
+            "The scanner did not return any pages."
+        case .encodingFailed:
+            "The captured photo could not be encoded."
+        case .storageUnavailable:
+            "FireVault media storage is unavailable on this iPhone."
+        case .writeFailed(let detail):
+            "The captured media could not be saved. \(detail)"
+        }
+    }
+}
+
 @MainActor
 final class FireVaultStore: ObservableObject {
     @Published var accounts: [FireVaultWorkspaceAccount]
     @Published var selectedAccountID: String?
+    @Published private(set) var captureAccountID: String?
     @Published var selectedTab: FireVaultShellTab = .nearby
     @Published var locationStatus: String
     @Published private(set) var demoMode: Bool
@@ -55,6 +79,11 @@ final class FireVaultStore: ObservableObject {
     var selectedAccount: FireVaultWorkspaceAccount? {
         guard let selectedAccountID else { return nil }
         return accounts.first { $0.id == selectedAccountID }
+    }
+
+    var captureAccount: FireVaultWorkspaceAccount? {
+        guard let captureAccountID else { return nil }
+        return accounts.first { $0.id == captureAccountID }
     }
 
     var mappedAccountCount: Int {
@@ -112,7 +141,13 @@ final class FireVaultStore: ObservableObject {
 
     func openAccount(_ id: String) {
         guard accounts.contains(where: { $0.id == id }) else { return }
+        captureAccountID = id
         selectedAccountID = id
+    }
+
+    func selectCaptureAccount(_ id: String) {
+        guard accounts.contains(where: { $0.id == id }) else { return }
+        captureAccountID = id
     }
 
     func closeAccount(to tab: FireVaultShellTab? = nil) {
@@ -346,12 +381,121 @@ final class FireVaultStore: ObservableObject {
         persist()
     }
 
+    @discardableResult
+    func attachCapturedPhoto(_ image: UIImage, to accountID: String) throws -> FireVaultWorkspaceDocument {
+        guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
+            throw FireVaultMediaError.accountUnavailable
+        }
+        guard let data = image.jpegData(compressionQuality: 0.92) else {
+            throw FireVaultMediaError.encodingFailed
+        }
+
+        let fileName = "\(UUID().uuidString).jpg"
+        try data.write(to: try mediaURL(accountID: accountID, fileName: fileName), options: .atomic)
+
+        let document = FireVaultWorkspaceDocument(
+            id: UUID().uuidString,
+            title: "Field photo",
+            subtitle: "Photo with FireVault overlay",
+            kind: "photo",
+            date: Date().formatted(date: .abbreviated, time: .shortened),
+            mediaFileName: fileName
+        )
+        accounts[index].documents.insert(document, at: 0)
+        accounts[index].recent.insert(
+            .init(
+                id: UUID().uuidString,
+                title: document.title,
+                subtitle: document.subtitle,
+                kind: "photo",
+                date: "Now"
+            ),
+            at: 0
+        )
+        persist()
+        return document
+    }
+
+    @discardableResult
+    func attachScannedDocument(_ pages: [UIImage], to accountID: String) throws -> FireVaultWorkspaceDocument {
+        guard !pages.isEmpty else { throw FireVaultMediaError.emptyScan }
+        guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
+            throw FireVaultMediaError.accountUnavailable
+        }
+
+        let fileName = "\(UUID().uuidString).pdf"
+        let firstPage = pages[0]
+        let renderer = UIGraphicsPDFRenderer(
+            bounds: CGRect(origin: .zero, size: firstPage.size)
+        )
+        let data = renderer.pdfData { context in
+            for page in pages {
+                let bounds = CGRect(origin: .zero, size: page.size)
+                context.beginPage(withBounds: bounds, pageInfo: [:])
+                page.draw(in: bounds)
+            }
+        }
+        try data.write(to: try mediaURL(accountID: accountID, fileName: fileName), options: .atomic)
+
+        let pageLabel = "\(pages.count) page\(pages.count == 1 ? "" : "s")"
+        let document = FireVaultWorkspaceDocument(
+            id: UUID().uuidString,
+            title: "Document scan",
+            subtitle: pageLabel,
+            kind: "scan",
+            date: Date().formatted(date: .abbreviated, time: .shortened),
+            mediaFileName: fileName
+        )
+        accounts[index].documents.insert(document, at: 0)
+        accounts[index].recent.insert(
+            .init(
+                id: UUID().uuidString,
+                title: document.title,
+                subtitle: pageLabel,
+                kind: "scan",
+                date: "Now"
+            ),
+            at: 0
+        )
+        persist()
+        return document
+    }
+
     func addEquipment(to accountID: String) {
         guard let index = accounts.firstIndex(where: { $0.id == accountID }) else { return }
         accounts[index].equipment.append(
             .init(id: UUID().uuidString, title: "New native equipment", subtitle: "Demo equipment record", status: "Draft")
         )
         persist()
+    }
+
+    private func mediaURL(accountID: String, fileName: String) throws -> URL {
+        guard let applicationSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
+            throw FireVaultMediaError.storageUnavailable
+        }
+
+        let safeAccountID = accountID.replacingOccurrences(
+            of: "[^A-Za-z0-9_-]",
+            with: "_",
+            options: .regularExpression
+        )
+        let directory = applicationSupport
+            .appendingPathComponent("FireVault", isDirectory: true)
+            .appendingPathComponent("Media", isDirectory: true)
+            .appendingPathComponent(safeAccountID, isDirectory: true)
+
+        do {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            return directory.appendingPathComponent(fileName)
+        } catch {
+            throw FireVaultMediaError.writeFailed(error.localizedDescription)
+        }
     }
 
     func addLocation(to accountID: String) {
@@ -388,12 +532,14 @@ final class FireVaultStore: ObservableObject {
         guard demoMode else { return }
         accounts = Self.demoAccounts
         selectedAccountID = nil
+        captureAccountID = nil
         defaults.removeObject(forKey: Key.demoAccounts)
     }
 
     func exitDemoMode() {
         guard demoMode else { return }
         selectedAccountID = nil
+        captureAccountID = nil
         demoMode = false
         defaults.set(false, forKey: Key.demoMode)
         accounts = Self.savedAccounts(defaults: defaults, key: Key.productionAccounts) ?? []
@@ -403,6 +549,7 @@ final class FireVaultStore: ObservableObject {
     func enterDemoMode() {
         guard !demoMode else { return }
         selectedAccountID = nil
+        captureAccountID = nil
         demoMode = true
         defaults.set(true, forKey: Key.demoMode)
         accounts = Self.savedAccounts(defaults: defaults, key: Key.demoAccounts) ?? Self.demoAccounts

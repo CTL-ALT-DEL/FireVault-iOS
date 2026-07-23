@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.07.00.
+//  Native everyday navigation for Build 1.07.01.
 //
 
 import SwiftUI
@@ -795,6 +795,7 @@ private struct NativeNearbyView: View {
     ) {
         guard let coordinate = row.account.coordinate else { return }
         selectedID = row.id
+        store.selectCaptureAccount(row.account.id)
         if scrollToCard {
             withAnimation(.snappy(duration: 0.28)) {
                 scrollAccountID = row.id
@@ -930,11 +931,15 @@ private struct NativePhotoView: View {
     @State private var selectedImage: UIImage?
     @State private var scannedPages: [UIImage] = []
     @State private var captureRoute: CaptureRoute?
-    @State private var captureDate = Date()
     @State private var mediaKind: MediaKind = .photo
     @State private var alertTitle = ""
     @State private var alertMessage = ""
     @State private var showsAlert = false
+    @State private var showsAccountPicker = false
+    @State private var showsPhotoPicker = false
+    @State private var pendingCaptureIntent: CaptureIntent?
+    @State private var mediaAccountID: String?
+    @State private var saveStatus = ""
 
     private enum CaptureRoute: String, Identifiable {
         case camera
@@ -947,6 +952,21 @@ private struct NativePhotoView: View {
         case scan
     }
 
+    private enum CaptureIntent {
+        case camera
+        case scanner
+        case photoLibrary
+    }
+
+    private var destinationAccount: FireVaultWorkspaceAccount? {
+        store.captureAccount
+    }
+
+    private var mediaAccount: FireVaultWorkspaceAccount? {
+        guard let mediaAccountID else { return nil }
+        return store.accounts.first { $0.id == mediaAccountID }
+    }
+
     private var technicianName: String {
         let savedName = settings.preferences.technician.name
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -957,6 +977,8 @@ private struct NativePhotoView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
+                    destinationAccountCard
+
                     if let selectedImage {
                         imagePreview(selectedImage)
 
@@ -974,6 +996,13 @@ private struct NativePhotoView: View {
                         )
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
+
+                        if !saveStatus.isEmpty {
+                            Label(saveStatus, systemImage: "checkmark.circle.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(NativeShellPalette.green)
+                                .accessibilityIdentifier("native-media-save-status")
+                        }
                     } else {
                         ContentUnavailableView(
                             "Capture Field Media",
@@ -996,10 +1025,29 @@ private struct NativePhotoView: View {
                 Task {
                     guard let data = try? await item?.loadTransferable(type: Data.self),
                           let image = UIImage(data: data) else { return }
-                    selectedImage = image
-                    scannedPages = []
-                    captureDate = .now
-                    mediaKind = .photo
+                    acceptPhoto(image)
+                    selectedItem = nil
+                }
+            }
+            .photosPicker(
+                isPresented: $showsPhotoPicker,
+                selection: $selectedItem,
+                matching: .images
+            )
+            .sheet(isPresented: $showsAccountPicker) {
+                NativeCaptureAccountPicker(
+                    accounts: store.accounts,
+                    selectedID: store.captureAccountID
+                ) { accountID in
+                    store.selectCaptureAccount(accountID)
+                    showsAccountPicker = false
+                    if let pendingCaptureIntent {
+                        self.pendingCaptureIntent = nil
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(220))
+                            launchCapture(pendingCaptureIntent)
+                        }
+                    }
                 }
             }
             .fullScreenCover(item: $captureRoute) { route in
@@ -1030,20 +1078,9 @@ private struct NativePhotoView: View {
     private func imagePreview(_ image: UIImage) -> some View {
         let aspectRatio = max(0.35, image.size.width / max(image.size.height, 1))
 
-        return ZStack {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-
-            if mediaKind == .photo {
-                FireVaultPhotoOverlayView(
-                    preferences: settings.preferences.overlay,
-                    technicianName: technicianName,
-                    accountName: "FIELD PHOTO",
-                    timestamp: captureDate
-                )
-            }
-        }
+        return Image(uiImage: image)
+            .resizable()
+            .scaledToFit()
         .aspectRatio(aspectRatio, contentMode: .fit)
         .frame(maxHeight: 470)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -1053,9 +1090,70 @@ private struct NativePhotoView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            mediaKind == .scan ? "Scanned document preview" : "Field photo with overlay preview"
+            [
+                mediaKind == .scan
+                    ? "Scanned document preview"
+                    : "Field photo with baked FireVault overlay",
+                mediaAccount.map { "Saved to \($0.name)" }
+            ]
+            .compactMap { $0 }
+            .joined(separator: ", ")
         )
         .accessibilityIdentifier("native-photo-preview")
+    }
+
+    private var destinationAccountCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "building.2.fill")
+                .font(.title3)
+                .foregroundStyle(NativeShellPalette.blue)
+                .frame(width: 42, height: 42)
+                .background(NativeShellPalette.blue.opacity(0.14), in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("DESTINATION ACCOUNT")
+                    .font(.caption2.bold())
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+
+                if let destinationAccount {
+                    Text(destinationAccount.name)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(destinationAccount.address)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    if !destinationAccount.accountId.isEmpty {
+                        Text("Account ID: \(destinationAccount.accountId)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Choose an account before capturing")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                }
+            }
+
+            Spacer(minLength: 6)
+
+            Button(destinationAccount == nil ? "Choose" : "Change") {
+                pendingCaptureIntent = nil
+                showsAccountPicker = true
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("native-capture-destination")
     }
 
     private var scannedPageStrip: some View {
@@ -1092,7 +1190,9 @@ private struct NativePhotoView: View {
     private var captureControls: some View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
-                Button(action: openCamera) {
+                Button {
+                    beginCapture(.camera)
+                } label: {
                     Label("Take Photo", systemImage: "camera.fill")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
@@ -1101,7 +1201,9 @@ private struct NativePhotoView: View {
                 .tint(NativeShellPalette.red)
                 .accessibilityIdentifier("native-take-photo")
 
-                Button(action: openScanner) {
+                Button {
+                    beginCapture(.scanner)
+                } label: {
                     Label("Scan", systemImage: "doc.viewfinder")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
@@ -1111,13 +1213,35 @@ private struct NativePhotoView: View {
                 .accessibilityIdentifier("native-scan-document")
             }
 
-            PhotosPicker(selection: $selectedItem, matching: .images) {
+            Button {
+                beginCapture(.photoLibrary)
+            } label: {
                 Label("Choose from Photo Library", systemImage: "photo.on.rectangle")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .accessibilityIdentifier("native-choose-photo")
+        }
+    }
+
+    private func beginCapture(_ intent: CaptureIntent) {
+        guard destinationAccount != nil else {
+            pendingCaptureIntent = intent
+            showsAccountPicker = true
+            return
+        }
+        launchCapture(intent)
+    }
+
+    private func launchCapture(_ intent: CaptureIntent) {
+        switch intent {
+        case .camera:
+            openCamera()
+        case .scanner:
+            openScanner()
+        case .photoLibrary:
+            showsPhotoPicker = true
         }
     }
 
@@ -1142,11 +1266,31 @@ private struct NativePhotoView: View {
     }
 
     private func acceptPhoto(_ image: UIImage) {
-        selectedImage = image
-        scannedPages = []
-        captureDate = .now
-        mediaKind = .photo
-        captureRoute = nil
+        guard let account = destinationAccount else {
+            showCaptureFailure("Choose the account that should receive this photo.")
+            return
+        }
+
+        let timestamp = Date()
+        let renderedImage = FireVaultPhotoOverlayRenderer.render(
+            image: image,
+            preferences: settings.preferences.overlay,
+            technicianName: technicianName,
+            account: account,
+            timestamp: timestamp
+        )
+
+        do {
+            try store.attachCapturedPhoto(renderedImage, to: account.id)
+            selectedImage = renderedImage
+            scannedPages = []
+            mediaKind = .photo
+            mediaAccountID = account.id
+            saveStatus = "Photo saved to \(account.name)"
+            captureRoute = nil
+        } catch {
+            showCaptureFailure(error.localizedDescription)
+        }
     }
 
     private func acceptScan(_ pages: [UIImage]) {
@@ -1154,11 +1298,22 @@ private struct NativePhotoView: View {
             showCaptureFailure("The scanner did not return any pages.")
             return
         }
-        selectedImage = firstPage
-        scannedPages = pages
-        captureDate = .now
-        mediaKind = .scan
-        captureRoute = nil
+        guard let account = destinationAccount else {
+            showCaptureFailure("Choose the account that should receive this scan.")
+            return
+        }
+
+        do {
+            try store.attachScannedDocument(pages, to: account.id)
+            selectedImage = firstPage
+            scannedPages = pages
+            mediaKind = .scan
+            mediaAccountID = account.id
+            saveStatus = "Scan saved to \(account.name)"
+            captureRoute = nil
+        } catch {
+            showCaptureFailure(error.localizedDescription)
+        }
     }
 
     private func showCaptureFailure(_ message: String) {
@@ -1166,6 +1321,109 @@ private struct NativePhotoView: View {
         alertTitle = "Capture Unavailable"
         alertMessage = message
         showsAlert = true
+    }
+}
+
+private struct NativeCaptureAccountPicker: View {
+    let accounts: [FireVaultWorkspaceAccount]
+    let selectedID: String?
+    let onSelect: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var search = ""
+
+    private var filteredAccounts: [FireVaultWorkspaceAccount] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let filtered = query.isEmpty ? accounts : accounts.filter {
+            [$0.name, $0.address, $0.accountId, $0.category]
+                .joined(separator: " ")
+                .lowercased()
+                .contains(query)
+        }
+        return filtered.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if filteredAccounts.isEmpty {
+                    if accounts.isEmpty {
+                        ContentUnavailableView(
+                            "No Accounts Available",
+                            systemImage: "building.2",
+                            description: Text(
+                                "Add an account or import the account CSV before capturing media."
+                            )
+                        )
+                    } else {
+                        ContentUnavailableView.search(text: search)
+                    }
+                } else {
+                    Section("Photo or scan destination") {
+                        ForEach(filteredAccounts) { account in
+                            Button {
+                                onSelect(account.id)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: selectedID == account.id
+                                          ? "checkmark.circle.fill"
+                                          : "building.2")
+                                        .font(.title3)
+                                        .foregroundStyle(
+                                            selectedID == account.id
+                                                ? NativeShellPalette.green
+                                                : NativeShellPalette.blue
+                                        )
+                                        .frame(width: 34)
+
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(account.name)
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
+                                        Text(account.address)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                        if !account.accountId.isEmpty {
+                                            Text("Account ID: \(account.accountId)")
+                                                .font(.caption2.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(
+                                [
+                                    account.name,
+                                    account.address,
+                                    account.accountId.isEmpty
+                                        ? nil
+                                        : "Account ID \(account.accountId)"
+                                ]
+                                .compactMap { $0 }
+                                .joined(separator: ", ")
+                            )
+                            .accessibilityIdentifier("capture-account-\(account.id)")
+                        }
+                    }
+                }
+            }
+            .searchable(text: $search, prompt: "Name, address, or account ID")
+            .navigationTitle("Choose Account")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 
@@ -1473,18 +1731,34 @@ private struct FVRadiusWheelPicker: View {
     }
 
     var body: some View {
-        Picker("Nearby radius", selection: $selection.animation(.snappy(duration: 0.22))) {
-            ForEach(options, id: \.self) { radius in
-                Text(FireVaultGPSPreferences.radiusLabel(radius))
+        VStack(spacing: presentation == .map ? -7 : 0) {
+            if presentation == .map {
+                Text("Miles")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.white.opacity(0.82))
+                    .padding(.top, 6)
+                    .accessibilityHidden(true)
+            }
+
+            Picker("Nearby radius", selection: $selection.animation(.snappy(duration: 0.22))) {
+                ForEach(options, id: \.self) { radius in
+                    Text(
+                        presentation == .map
+                            ? FireVaultGPSPreferences.radiusWheelLabel(radius)
+                            : FireVaultGPSPreferences.radiusLabel(radius)
+                    )
                     .font(presentation == .map ? .caption.bold() : .body.weight(.semibold))
                     .monospacedDigit()
                     .tag(radius)
+                }
             }
+            .pickerStyle(.wheel)
+            .frame(height: presentation == .map ? 88 : 150)
+            .clipped()
         }
-        .pickerStyle(.wheel)
         .frame(
-            width: presentation == .map ? 92 : nil,
-            height: presentation == .map ? 118 : 150
+            width: presentation == .map ? 62 : nil,
+            height: presentation == .map ? 104 : 150
         )
         .frame(maxWidth: presentation == .settings ? .infinity : nil)
         .clipped()

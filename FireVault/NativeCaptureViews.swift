@@ -9,10 +9,46 @@ import SwiftUI
 import UIKit
 import VisionKit
 
+enum FireVaultOverlayTemplateFormatter {
+    static func lines(
+        template: String,
+        siteName: String,
+        address: String,
+        accountID: String,
+        technicianName: String,
+        timestamp: Date
+    ) -> [String] {
+        let replacements = [
+            "{site}": siteName,
+            "{address}": address,
+            "{accountID}": accountID,
+            "{technician}": technicianName,
+            "{date}": timestamp.formatted(.dateTime.month(.abbreviated).day().year()),
+            "{time}": timestamp.formatted(date: .omitted, time: .shortened)
+        ]
+
+        return template
+            .components(separatedBy: .newlines)
+            .compactMap { sourceLine in
+                if accountID.isEmpty, sourceLine.contains("{accountID}") {
+                    return nil
+                }
+
+                let resolved = replacements.reduce(sourceLine) { partial, replacement in
+                    partial.replacingOccurrences(of: replacement.key, with: replacement.value)
+                }
+                let trimmed = resolved.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
+    }
+}
+
 struct FireVaultPhotoOverlayView: View {
     let preferences: FireVaultOverlayPreferences
     let technicianName: String
-    let accountName: String
+    let siteName: String
+    let address: String
+    let accountID: String
     let timestamp: Date
 
     private var accent: Color {
@@ -57,7 +93,27 @@ struct FireVaultPhotoOverlayView: View {
         .padding(preferences.backgroundStyle == "bar" ? 0 : 10)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "FireVault photo overlay, \(accountName), \(technicianName), \(formattedTimestamp)"
+            [
+                "FireVault photo overlay",
+                siteName,
+                address,
+                accountID.isEmpty ? nil : "Account ID \(accountID)",
+                technicianName,
+                formattedTimestamp
+            ]
+            .compactMap { $0 }
+            .joined(separator: ", ")
+        )
+    }
+
+    private var resolvedLines: [String] {
+        FireVaultOverlayTemplateFormatter.lines(
+            template: preferences.fieldTemplate,
+            siteName: siteName,
+            address: address,
+            accountID: accountID,
+            technicianName: technicianName,
+            timestamp: timestamp
         )
     }
 
@@ -73,24 +129,20 @@ struct FireVaultPhotoOverlayView: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                if preferences.showTagline {
-                    (
-                        Text("FIRE").foregroundColor(accent)
-                        + Text("VAULT FIELD DOCUMENTATION").foregroundColor(.white)
-                    )
+                if preferences.showTagline, !preferences.tagline.isEmpty {
+                    Text(preferences.tagline)
                     .font(detailFont.bold())
+                    .foregroundStyle(accent)
                     .tracking(0.7)
+                    .lineLimit(1)
                 }
 
-                Text(accountName)
-                    .font(titleFont)
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-
-                Text("\(technicianName) • \(formattedTimestamp)")
-                    .font(detailFont)
-                    .foregroundStyle(.white.opacity(0.82))
-                    .lineLimit(1)
+                ForEach(Array(resolvedLines.enumerated()), id: \.offset) { index, line in
+                    Text(line)
+                        .font(index == 0 ? titleFont : detailFont)
+                        .foregroundStyle(index == 0 ? .white : .white.opacity(0.82))
+                        .lineLimit(1)
+                }
             }
 
             Spacer(minLength: 4)
@@ -140,7 +192,9 @@ struct FireVaultPhotoOverlayView: View {
 struct FireVaultOverlayPreview: View {
     let preferences: FireVaultOverlayPreferences
     let technicianName: String
-    let accountName: String
+    let siteName: String
+    let address: String
+    let accountID: String
 
     var body: some View {
         ZStack {
@@ -160,7 +214,9 @@ struct FireVaultOverlayPreview: View {
             FireVaultPhotoOverlayView(
                 preferences: preferences,
                 technicianName: technicianName,
-                accountName: accountName,
+                siteName: siteName,
+                address: address,
+                accountID: accountID,
                 timestamp: .now
             )
         }
@@ -170,6 +226,49 @@ struct FireVaultOverlayPreview: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(.white.opacity(0.12), lineWidth: 1)
         }
+    }
+}
+
+@MainActor
+enum FireVaultPhotoOverlayRenderer {
+    static func render(
+        image: UIImage,
+        preferences: FireVaultOverlayPreferences,
+        technicianName: String,
+        account: FireVaultWorkspaceAccount,
+        timestamp: Date
+    ) -> UIImage {
+        let pixelWidth = max(image.size.width, 1)
+        let outputScale = max(pixelWidth / 430, 1)
+        let logicalSize = CGSize(
+            width: image.size.width / outputScale,
+            height: image.size.height / outputScale
+        )
+
+        let content = ZStack {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: logicalSize.width, height: logicalSize.height)
+                .clipped()
+
+            FireVaultPhotoOverlayView(
+                preferences: preferences,
+                technicianName: technicianName,
+                siteName: account.name,
+                address: account.address,
+                accountID: account.accountId,
+                timestamp: timestamp
+            )
+            .frame(width: logicalSize.width, height: logicalSize.height)
+        }
+        .frame(width: logicalSize.width, height: logicalSize.height)
+
+        let renderer = ImageRenderer(content: content)
+        renderer.proposedSize = ProposedViewSize(logicalSize)
+        renderer.scale = outputScale
+        renderer.isOpaque = true
+        return renderer.uiImage ?? image
     }
 }
 
