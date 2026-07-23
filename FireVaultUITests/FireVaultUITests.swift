@@ -116,6 +116,10 @@ final class FireVaultUITests: XCTestCase {
         XCTAssertTrue(nearbyTab.waitForExistence(timeout: 8))
         nearbyTab.tap()
 
+        XCTAssertTrue(
+            app.descendants(matching: .any)["nearby-horizontal-radius-picker"]
+                .waitForExistence(timeout: 5)
+        )
         let mapOptions = app.buttons["nearby-map-options"]
         XCTAssertTrue(mapOptions.waitForExistence(timeout: 5))
         XCTAssertTrue(mapOptions.label.contains("Map options"))

@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.07.03.
+//  Native everyday navigation for Build 1.07.04.
 //
 
 import SwiftUI
@@ -362,27 +362,19 @@ private struct NativeNearbyView: View {
     }
 
     private var statusHeader: some View {
-        HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(payload.demoMode ? "DEMO VAULT" : "FIELD VAULT")
                     .font(.caption2.bold()).tracking(1.2)
                     .foregroundStyle(payload.demoMode ? NativeShellPalette.amber : NativeShellPalette.green)
                 Text(payload.locationStatus).font(.subheadline).foregroundStyle(.secondary)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(payload.todayWeekday)
-                    .font(.system(size: 27, weight: .bold, design: .rounded))
-                    .foregroundStyle(.primary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-
-                Text(payload.todayDate)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .minimumScaleFactor(0.75)
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Today, \(payload.todayWeekday), \(payload.todayDate)")
+
+            Spacer()
+
+            FVHorizontalRadiusPicker(selection: nearbyRadiusBinding)
         }
     }
 
@@ -545,13 +537,6 @@ private struct NativeNearbyView: View {
                         }
                         .padding(10)
                     }
-                }
-                .overlay(alignment: .bottomLeading) {
-                    FVRadiusWheelPicker(
-                        selection: nearbyRadiusBinding,
-                        presentation: .map
-                    )
-                    .padding(6)
                 }
                 .accessibilityIdentifier("nearby-fixed-map")
             }
@@ -1824,8 +1809,7 @@ private struct NativeGPSSettingsView: View {
                     }
 
                     FVRadiusWheelPicker(
-                        selection: $draft.nearbyRadiusMiles,
-                        presentation: .settings
+                        selection: $draft.nearbyRadiusMiles
                     )
                 }
             } header: {
@@ -1868,13 +1852,7 @@ private struct NativeGPSSettingsView: View {
 }
 
 private struct FVRadiusWheelPicker: View {
-    enum Presentation {
-        case settings
-        case map
-    }
-
     @Binding var selection: Double
-    let presentation: Presentation
 
     private var options: [Double] {
         guard !FireVaultGPSPreferences.radiusOptions.contains(selection) else {
@@ -1884,58 +1862,137 @@ private struct FVRadiusWheelPicker: View {
     }
 
     var body: some View {
-        VStack(spacing: presentation == .map ? -5 : 0) {
-            if presentation == .map {
-                Text("Miles")
-                    .font(.caption2.bold())
-                    .foregroundStyle(.white.opacity(0.82))
-                    .padding(.top, 6)
-                    .accessibilityHidden(true)
-            }
-
-            Picker("Nearby radius", selection: $selection.animation(.snappy(duration: 0.22))) {
-                ForEach(options, id: \.self) { radius in
-                    Text(
-                        presentation == .map
-                            ? FireVaultGPSPreferences.radiusWheelLabel(radius)
-                            : FireVaultGPSPreferences.radiusLabel(radius)
-                    )
-                    .font(presentation == .map ? .caption.bold() : .body.weight(.semibold))
+        Picker("Nearby radius", selection: $selection.animation(.snappy(duration: 0.22))) {
+            ForEach(options, id: \.self) { radius in
+                Text(FireVaultGPSPreferences.radiusLabel(radius))
+                    .font(.body.weight(.semibold))
                     .monospacedDigit()
                     .tag(radius)
-                }
             }
-            .pickerStyle(.wheel)
-            .frame(height: presentation == .map ? 132 : 150)
-            .clipped()
         }
-        .frame(
-            width: presentation == .map ? 48 : nil,
-            height: 150
-        )
-        .frame(maxWidth: presentation == .settings ? .infinity : nil)
+        .pickerStyle(.wheel)
+        .frame(maxWidth: .infinity)
+        .frame(height: 150)
         .clipped()
-        .background(.black.opacity(presentation == .map ? 0.84 : 0.18))
+        .background(.black.opacity(0.18))
         .clipShape(
             RoundedRectangle(
-                cornerRadius: presentation == .map ? 13 : 18,
+                cornerRadius: 18,
                 style: .continuous
             )
         )
         .overlay {
             RoundedRectangle(
-                cornerRadius: presentation == .map ? 13 : 18,
+                cornerRadius: 18,
                 style: .continuous
             )
-            .stroke(.white.opacity(presentation == .map ? 0.18 : 0.10), lineWidth: 1)
+            .stroke(.white.opacity(0.10), lineWidth: 1)
         }
         .sensoryFeedback(.selection, trigger: selection)
         .accessibilityLabel("Nearby radius")
         .accessibilityValue(FireVaultGPSPreferences.radiusLabel(selection))
         .accessibilityHint("Swipe up or down to change the map radius")
-        .accessibilityIdentifier(
-            presentation == .map ? "nearby-map-radius-wheel" : "settings-radius-wheel"
-        )
+        .accessibilityIdentifier("settings-radius-wheel")
+    }
+}
+
+private struct FVHorizontalRadiusPicker: View {
+    @Binding var selection: Double
+    @State private var centeredRadius: Double?
+
+    private var options: [Double] {
+        guard !FireVaultGPSPreferences.radiusOptions.contains(selection) else {
+            return FireVaultGPSPreferences.radiusOptions
+        }
+        return (FireVaultGPSPreferences.radiusOptions + [selection]).sorted()
+    }
+
+    var body: some View {
+        VStack(spacing: 1) {
+            Text("MILES")
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .tracking(1.1)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 7) {
+                    ForEach(options, id: \.self) { radius in
+                        Button {
+                            select(radius)
+                        } label: {
+                            Text(FireVaultGPSPreferences.radiusWheelLabel(radius))
+                                .font(.system(size: 15, weight: radius == selection ? .bold : .semibold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(radius == selection ? .white : .secondary)
+                                .frame(minWidth: 32, minHeight: 28)
+                                .background {
+                                    if radius == selection {
+                                        Capsule()
+                                            .fill(NativeShellPalette.red)
+                                    }
+                                }
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .id(radius)
+                        .accessibilityLabel("\(FireVaultGPSPreferences.radiusLabel(radius)) radius")
+                        .accessibilityAddTraits(radius == selection ? .isSelected : [])
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .contentMargins(.horizontal, 66, for: .scrollContent)
+            .scrollIndicators(.hidden)
+            .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+            .scrollPosition(id: $centeredRadius, anchor: .center)
+            .frame(width: 165, height: 32)
+            .mask {
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black, location: 0.15),
+                        .init(color: .black, location: 0.85),
+                        .init(color: .clear, location: 1)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.white.opacity(0.10), lineWidth: 1)
+        }
+        .sensoryFeedback(.selection, trigger: selection)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Nearby radius")
+        .accessibilityValue(FireVaultGPSPreferences.radiusLabel(selection))
+        .accessibilityHint("Swipe left or right to change the map radius")
+        .accessibilityIdentifier("nearby-horizontal-radius-picker")
+        .task {
+            centeredRadius = selection
+        }
+        .onChange(of: centeredRadius) { _, radius in
+            guard let radius, radius != selection else { return }
+            selection = radius
+        }
+        .onChange(of: selection) { _, radius in
+            guard centeredRadius != radius else { return }
+            withAnimation(.snappy(duration: 0.22)) {
+                centeredRadius = radius
+            }
+        }
+    }
+
+    private func select(_ radius: Double) {
+        withAnimation(.snappy(duration: 0.22)) {
+            centeredRadius = radius
+            selection = radius
+        }
     }
 }
 

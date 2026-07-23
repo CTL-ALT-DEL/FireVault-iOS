@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  FireVault
 //
-//  Pure SwiftUI application root for Build 1.07.03.
+//  Pure SwiftUI application root for Build 1.07.04.
 //
 
 import SwiftUI
@@ -66,6 +66,16 @@ struct ContentView: View {
 }
 
 private struct FireVaultBrandHeader: View {
+    private var weekday: String {
+        Date().formatted(.dateTime.weekday(.wide))
+    }
+
+    private var displayDate: String {
+        let today = Date()
+        let components = Calendar.current.dateComponents([.day, .year], from: today)
+        return "\(today.formatted(.dateTime.month(.wide))) \(components.day ?? 0) \(components.year ?? 0)"
+    }
+
     var body: some View {
         HStack(spacing: 9) {
             Image("FireVaultLogo")
@@ -75,27 +85,42 @@ private struct FireVaultBrandHeader: View {
                 .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .accessibilityHidden(true)
 
-            (
+            HStack(spacing: 0) {
                 Text("FIRE")
                     .foregroundColor(NativeShellPalette.red)
-                + Text("VAULT")
+                    .tracking(1.35)
+                Text("VAULT")
                     .foregroundColor(.white)
-            )
+                    .tracking(1.35)
+            }
                 .font(.system(size: 15, weight: .bold, design: .rounded))
-                .tracking(1.35)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("FireVault")
 
             Spacer()
+
+            VStack(alignment: .trailing, spacing: 0) {
+                Text(weekday)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+
+                Text(displayDate)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Today, \(weekday), \(displayDate)")
         }
         .padding(.horizontal, 16)
-        .frame(height: 42)
+        .frame(height: 48)
         .background(NativeShellPalette.background)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(.white.opacity(0.07))
                 .frame(height: 1)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("FireVault")
         .accessibilityIdentifier("firevault-brand-header")
     }
 }
@@ -165,14 +190,17 @@ private struct FireVaultSplashView: View {
                 .opacity(logoIsVisible ? 1 : 0)
 
                 VStack(spacing: 8) {
-                    (
+                    HStack(spacing: 0) {
                         Text("FIRE")
                             .foregroundColor(NativeShellPalette.red)
-                        + Text("VAULT")
+                            .tracking(0.4)
+                        Text("VAULT")
                             .foregroundColor(.white)
-                    )
+                            .tracking(0.4)
+                    }
                         .font(.system(size: 40, weight: .bold, design: .rounded))
-                        .tracking(0.4)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("FireVault")
 
                     Text("FIELD WORKSPACE")
                         .font(.caption.bold())
