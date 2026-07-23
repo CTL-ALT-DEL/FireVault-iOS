@@ -11,6 +11,38 @@ import VisionKit
 
 enum FireVaultOverlayTemplateFormatter {
     static func lines(
+        preferences: FireVaultOverlayPreferences,
+        siteName: String,
+        address: String,
+        accountID: String,
+        category: String,
+        technicianName: String,
+        timestamp: Date
+    ) -> [String] {
+        let values: [FireVaultOverlayField: String] = [
+            .site: siteName,
+            .address: address,
+            .accountID: accountID.isEmpty ? "" : "Account ID: \(accountID)",
+            .category: category.isEmpty ? "" : "Category: \(category)",
+            .technician: technicianName,
+            .timestamp: timestamp.formatted(
+                .dateTime.month(.abbreviated).day().year().hour().minute()
+            )
+        ]
+        let hidden = Set(preferences.hiddenFields)
+
+        return preferences.fieldOrder.compactMap { fieldID in
+            guard let field = FireVaultOverlayField(rawValue: fieldID),
+                  field.isRequired || !hidden.contains(fieldID),
+                  let value = values[field],
+                  !value.isEmpty else {
+                return nil
+            }
+            return value
+        }
+    }
+
+    static func lines(
         template: String,
         siteName: String,
         address: String,
@@ -49,6 +81,7 @@ struct FireVaultPhotoOverlayView: View {
     let siteName: String
     let address: String
     let accountID: String
+    let category: String
     let timestamp: Date
 
     private var accent: Color {
@@ -108,10 +141,11 @@ struct FireVaultPhotoOverlayView: View {
 
     private var resolvedLines: [String] {
         FireVaultOverlayTemplateFormatter.lines(
-            template: preferences.fieldTemplate,
+            preferences: preferences,
             siteName: siteName,
             address: address,
             accountID: accountID,
+            category: category,
             technicianName: technicianName,
             timestamp: timestamp
         )
@@ -195,21 +229,13 @@ struct FireVaultOverlayPreview: View {
     let siteName: String
     let address: String
     let accountID: String
+    let category: String
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.16, green: 0.18, blue: 0.20),
-                    Color(red: 0.05, green: 0.06, blue: 0.07)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            Image(systemName: "building.2.fill")
-                .font(.system(size: 92, weight: .light))
-                .foregroundStyle(.white.opacity(0.12))
+            Image("NotifierPanelSample")
+                .resizable()
+                .scaledToFill()
 
             FireVaultPhotoOverlayView(
                 preferences: preferences,
@@ -217,6 +243,7 @@ struct FireVaultOverlayPreview: View {
                 siteName: siteName,
                 address: address,
                 accountID: accountID,
+                category: category,
                 timestamp: .now
             )
         }
@@ -258,6 +285,7 @@ enum FireVaultPhotoOverlayRenderer {
                 siteName: account.name,
                 address: account.address,
                 accountID: account.accountId,
+                category: account.category,
                 timestamp: timestamp
             )
             .frame(width: logicalSize.width, height: logicalSize.height)

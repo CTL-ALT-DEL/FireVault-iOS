@@ -61,8 +61,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.07.01"), "Version 1.07.01")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.07.01"), "Build 1.07.01")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.07.02"), "Version 1.07.02")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.07.02"), "Build 1.07.02")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
@@ -136,6 +136,39 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(decoded.alignment, "top")
         XCTAssertEqual(decoded.tagline, "FIREVAULT FIELD DOCUMENTATION")
         XCTAssertTrue(decoded.fieldTemplate.contains("{site}"))
+    }
+
+    func testPhotoOverlayFieldControlsKeepRequiredFieldsVisibleAndOrdered() {
+        var preferences = FireVaultOverlayPreferences()
+        preferences.fieldOrder = ["timestamp", "site", "timestamp", "address"]
+        preferences.hiddenFields = ["site", "category", "technician"]
+
+        let normalized = preferences.normalized
+
+        XCTAssertEqual(normalized.fieldOrder.first, "timestamp")
+        XCTAssertEqual(normalized.fieldOrder.filter { $0 == "timestamp" }.count, 1)
+        XCTAssertFalse(normalized.hiddenFields.contains("site"))
+        XCTAssertTrue(normalized.hiddenFields.contains("category"))
+        XCTAssertTrue(normalized.hiddenFields.contains("technician"))
+        XCTAssertEqual(Set(normalized.fieldOrder), Set(FireVaultOverlayField.allCases.map(\.rawValue)))
+    }
+
+    func testPhotoOverlayStructuredFieldsRespectOrderAndVisibility() {
+        var preferences = FireVaultOverlayPreferences()
+        preferences.fieldOrder = ["address", "site", "accountID", "category", "technician", "timestamp"]
+        preferences.hiddenFields = ["category", "technician", "timestamp"]
+
+        let lines = FireVaultOverlayTemplateFormatter.lines(
+            preferences: preferences.normalized,
+            siteName: "Central Library",
+            address: "100 Main Street",
+            accountID: "FV-42",
+            category: "Commercial",
+            technicianName: "Taylor",
+            timestamp: Date(timeIntervalSince1970: 0)
+        )
+
+        XCTAssertEqual(lines, ["100 Main Street", "Central Library", "Account ID: FV-42"])
     }
 
     func testPhotoOverlayTemplateResolvesAccountFieldsAndOmitsMissingIDLine() {

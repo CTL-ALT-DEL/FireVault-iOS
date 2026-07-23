@@ -78,6 +78,36 @@ final class FireVaultUITests: XCTestCase {
     }
 
     @MainActor
+    func testPhotoOverlayEditorShowsSampleAndStructuredFields() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.buttons["main-navigation-settings"].waitForExistence(timeout: 8))
+        app.buttons["main-navigation-settings"].tap()
+
+        let overlayRow = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Photo Overlay")
+        ).firstMatch
+        XCTAssertTrue(overlayRow.waitForExistence(timeout: 3))
+        overlayRow.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["overlay-sample-preview"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["overlay-accent-picker"].exists
+        )
+
+        app.swipeUp()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["overlay-field-site"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertFalse(app.webViews.firstMatch.exists)
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {

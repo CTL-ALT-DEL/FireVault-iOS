@@ -8,6 +8,43 @@
 import Foundation
 import Combine
 
+enum FireVaultOverlayField: String, CaseIterable, Identifiable {
+    case site
+    case address
+    case accountID
+    case category
+    case technician
+    case timestamp
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .site: "Site name"
+        case .address: "Address"
+        case .accountID: "Account ID"
+        case .category: "Category"
+        case .technician: "Technician"
+        case .timestamp: "Date and time"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .site: "building.2"
+        case .address: "mappin.and.ellipse"
+        case .accountID: "number"
+        case .category: "tag"
+        case .technician: "person.crop.circle"
+        case .timestamp: "calendar.badge.clock"
+        }
+    }
+
+    var isRequired: Bool {
+        self == .site || self == .address || self == .accountID
+    }
+}
+
 struct FireVaultTechnicianPreferences: Codable, Equatable {
     var name = ""
     var company = ""
@@ -25,6 +62,8 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
     var showTagline = true
     var accentColor = "red"
     var tagline = "FIREVAULT FIELD DOCUMENTATION"
+    var fieldOrder = FireVaultOverlayField.allCases.map(\.rawValue)
+    var hiddenFields = [FireVaultOverlayField.category.rawValue]
     var fieldTemplate = """
     {site}
     {address}
@@ -40,6 +79,22 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
         if !["bar", "card", "minimal"].contains(copy.backgroundStyle) { copy.backgroundStyle = "bar" }
         if !["red", "blue", "amber", "white"].contains(copy.accentColor) { copy.accentColor = "red" }
         copy.tagline = String(copy.tagline.prefix(80))
+        let allowedFields = Set(FireVaultOverlayField.allCases.map(\.rawValue))
+        var seenFields = Set<String>()
+        copy.fieldOrder = copy.fieldOrder.filter {
+            allowedFields.contains($0) && seenFields.insert($0).inserted
+        }
+        for field in FireVaultOverlayField.allCases where !seenFields.contains(field.rawValue) {
+            copy.fieldOrder.append(field.rawValue)
+        }
+        let requiredFields = Set(
+            FireVaultOverlayField.allCases.filter(\.isRequired).map(\.rawValue)
+        )
+        copy.hiddenFields = Array(
+            Set(copy.hiddenFields)
+                .intersection(allowedFields)
+                .subtracting(requiredFields)
+        )
         copy.fieldTemplate = Self.requiredFieldTemplate(copy.fieldTemplate)
         return copy
     }
@@ -55,6 +110,8 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
         case showTagline
         case accentColor
         case tagline
+        case fieldOrder
+        case hiddenFields
         case fieldTemplate
     }
 
@@ -69,6 +126,10 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
         accentColor = try values.decodeIfPresent(String.self, forKey: .accentColor) ?? "red"
         tagline = try values.decodeIfPresent(String.self, forKey: .tagline)
             ?? "FIREVAULT FIELD DOCUMENTATION"
+        fieldOrder = try values.decodeIfPresent([String].self, forKey: .fieldOrder)
+            ?? FireVaultOverlayField.allCases.map(\.rawValue)
+        hiddenFields = try values.decodeIfPresent([String].self, forKey: .hiddenFields)
+            ?? [FireVaultOverlayField.category.rawValue]
         fieldTemplate = try values.decodeIfPresent(String.self, forKey: .fieldTemplate)
             ?? """
             {site}

@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.07.01.
+//  Native everyday navigation for Build 1.07.02.
 //
 
 import SwiftUI
@@ -558,7 +558,7 @@ private struct NativeNearbyView: View {
                         selection: nearbyRadiusBinding,
                         presentation: .map
                     )
-                    .padding(10)
+                    .padding(6)
                 }
                 .accessibilityIdentifier("nearby-fixed-map")
             }
@@ -749,6 +749,9 @@ private struct NativeNearbyView: View {
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
+        .opacity(selectedID == nil || selectedID == row.id ? 1 : 0.58)
+        .saturation(selectedID == nil || selectedID == row.id ? 1 : 0.72)
+        .animation(.easeOut(duration: 0.24), value: selectedID)
         .onLongPressGesture(minimumDuration: 0.55, maximumDistance: 24) {
             delayedMapFocusTask?.cancel()
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -1731,7 +1734,7 @@ private struct FVRadiusWheelPicker: View {
     }
 
     var body: some View {
-        VStack(spacing: presentation == .map ? -7 : 0) {
+        VStack(spacing: presentation == .map ? -5 : 0) {
             if presentation == .map {
                 Text("Miles")
                     .font(.caption2.bold())
@@ -1753,25 +1756,25 @@ private struct FVRadiusWheelPicker: View {
                 }
             }
             .pickerStyle(.wheel)
-            .frame(height: presentation == .map ? 88 : 150)
+            .frame(height: presentation == .map ? 132 : 150)
             .clipped()
         }
         .frame(
-            width: presentation == .map ? 62 : nil,
-            height: presentation == .map ? 104 : 150
+            width: presentation == .map ? 48 : nil,
+            height: 150
         )
         .frame(maxWidth: presentation == .settings ? .infinity : nil)
         .clipped()
         .background(.black.opacity(presentation == .map ? 0.84 : 0.18))
         .clipShape(
             RoundedRectangle(
-                cornerRadius: presentation == .map ? 16 : 18,
+                cornerRadius: presentation == .map ? 13 : 18,
                 style: .continuous
             )
         )
         .overlay {
             RoundedRectangle(
-                cornerRadius: presentation == .map ? 16 : 18,
+                cornerRadius: presentation == .map ? 13 : 18,
                 style: .continuous
             )
             .stroke(.white.opacity(presentation == .map ? 0.18 : 0.10), lineWidth: 1)

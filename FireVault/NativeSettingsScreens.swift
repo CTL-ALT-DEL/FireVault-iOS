@@ -8,6 +8,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import Foundation
+import UIKit
 
 enum NativeSettingsCatalog {
     static let groups: [FireVaultNativeSettingsGroup] = [
@@ -101,30 +102,38 @@ struct NativeOverlaySettingsView: View {
                         : draft.technician.name,
                     siteName: "Demo Account",
                     address: "100 FireVault Way, Boise, ID 83702",
-                    accountID: "FV-1001"
+                    accountID: "FV-1001",
+                    category: "Commercial"
                 )
                 .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
+                .accessibilityIdentifier("overlay-sample-preview")
             }
             Section {
                 TextField("Tagline", text: $draft.overlay.tagline)
                     .focused($focused)
-
-                TextField(
-                    "Overlay field format",
-                    text: $draft.overlay.fieldTemplate,
-                    axis: .vertical
-                )
-                .lineLimit(4...8)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .focused($focused)
-                .accessibilityLabel("Overlay field format")
             } header: {
-                Text("Overlay Text")
+                Text("Tagline")
+            } footer: {
+                Text("Edit the heading shown above the account information.")
+            }
+            Section("Branding") {
+                Toggle("Show FireVault logo", isOn: $draft.overlay.showLogo)
+                Toggle("Show tagline", isOn: $draft.overlay.showTagline)
+                Picker("Accent", selection: $draft.overlay.accentColor) {
+                    Text("Red").tag("red"); Text("Blue").tag("blue"); Text("Amber").tag("amber"); Text("White").tag("white")
+                }
+                .accessibilityIdentifier("overlay-accent-picker")
+            }
+            Section {
+                ForEach(orderedFields) { field in
+                    fieldControl(field)
+                }
+            } header: {
+                Text("Fields and Order")
             } footer: {
                 Text(
-                    "Available fields: {site}, {address}, {accountID}, {technician}, {date}, and {time}. "
-                    + "Site, address, and account ID remain required; the account ID line is hidden when an account has no ID."
+                    "Use the arrows to reposition fields. Site, address, and account ID are required; "
+                    + "Account ID automatically disappears when the selected account has no ID."
                 )
             }
             Section("Layout") {
@@ -145,20 +154,101 @@ struct NativeOverlaySettingsView: View {
                     ), in: 35...100, step: 5)
                 }
             }
-            Section("Branding") {
-                Toggle("Show FireVault logo", isOn: $draft.overlay.showLogo)
-                Toggle("Show tagline", isOn: $draft.overlay.showTagline)
-                Picker("Accent", selection: $draft.overlay.accentColor) {
-                    Text("Red").tag("red"); Text("Blue").tag("blue"); Text("Amber").tag("amber"); Text("White").tag("white")
-                }
-            }
         }
+        .contentMargins(.bottom, 100, for: .scrollContent)
         .nativeSettingsForm(
             title: "Photo Overlay",
             focused: $focused
         ) {
             settings.save(draft)
         }
+    }
+
+    private var orderedFields: [FireVaultOverlayField] {
+        draft.overlay.fieldOrder.compactMap(FireVaultOverlayField.init(rawValue:))
+    }
+
+    @ViewBuilder
+    private func fieldControl(_ field: FireVaultOverlayField) -> some View {
+        let index = draft.overlay.fieldOrder.firstIndex(of: field.rawValue) ?? 0
+        let lastIndex = max(0, draft.overlay.fieldOrder.count - 1)
+
+        HStack(spacing: 10) {
+            Image(systemName: field.symbol)
+                .foregroundStyle(NativeShellPalette.blue)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(field.title)
+                    .font(.body)
+                Text(field.isRequired ? "Required" : "Optional")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 4)
+
+            if field.isRequired {
+                Image(systemName: "lock.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("\(field.title) is required")
+            } else {
+                Toggle("", isOn: fieldVisibilityBinding(field))
+                    .labelsHidden()
+                    .accessibilityLabel("Show \(field.title)")
+            }
+
+            HStack(spacing: 2) {
+                Button {
+                    moveField(at: index, by: -1)
+                } label: {
+                    Image(systemName: "chevron.up")
+                        .frame(width: 28, height: 32)
+                }
+                .buttonStyle(.borderless)
+                .disabled(index == 0)
+                .accessibilityLabel("Move \(field.title) up")
+
+                Button {
+                    moveField(at: index, by: 1)
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .frame(width: 28, height: 32)
+                }
+                .buttonStyle(.borderless)
+                .disabled(index == lastIndex)
+                .accessibilityLabel("Move \(field.title) down")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("overlay-field-\(field.rawValue)")
+    }
+
+    private func fieldVisibilityBinding(_ field: FireVaultOverlayField) -> Binding<Bool> {
+        Binding(
+            get: { !draft.overlay.hiddenFields.contains(field.rawValue) },
+            set: { isVisible in
+                if isVisible {
+                    draft.overlay.hiddenFields.removeAll { $0 == field.rawValue }
+                } else if !draft.overlay.hiddenFields.contains(field.rawValue) {
+                    draft.overlay.hiddenFields.append(field.rawValue)
+                }
+            }
+        )
+    }
+
+    private func moveField(at index: Int, by offset: Int) {
+        let destination = index + offset
+        guard draft.overlay.fieldOrder.indices.contains(index),
+              draft.overlay.fieldOrder.indices.contains(destination) else {
+            return
+        }
+
+        withAnimation(.snappy(duration: 0.22)) {
+            draft.overlay.fieldOrder.swapAt(index, destination)
+        }
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 }
 
