@@ -2,42 +2,14 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.04.01.
+//  Native everyday navigation for Build 1.05.00.
 //
 
 import SwiftUI
 import Combine
 import MapKit
-import WebKit
+import PhotosUI
 import UIKit
-
-@MainActor
-final class FireVaultAppShellBridge: ObservableObject {
-    @Published private(set) var payload: FireVaultAppPayload?
-    weak var webView: WKWebView?
-
-    func present(_ rawPayload: [String: Any]) {
-        guard JSONSerialization.isValidJSONObject(rawPayload),
-              let data = try? JSONSerialization.data(withJSONObject: rawPayload),
-              let decoded = try? JSONDecoder().decode(FireVaultAppPayload.self, from: data) else { return }
-        payload = decoded
-    }
-
-    func hide() { payload = nil }
-
-    func perform(_ action: String, payload extra: [String: Any] = [:], hideShell: Bool = false) {
-        guard let webView else { return }
-        var message = extra
-        message["action"] = action
-        guard JSONSerialization.isValidJSONObject(message),
-              let data = try? JSONSerialization.data(withJSONObject: message),
-              var json = String(data: data, encoding: .utf8) else { return }
-        json = json.replacingOccurrences(of: "\u{2028}", with: "\\u2028")
-            .replacingOccurrences(of: "\u{2029}", with: "\\u2029")
-        if hideShell { hide() }
-        webView.evaluateJavaScript("window.fireVaultNativeAppAction?.(\(json));")
-    }
-}
 
 struct FireVaultAppPayload: Codable, Equatable {
     let build: String
@@ -121,7 +93,7 @@ struct FireVaultVersionInfo: Equatable {
     var displayText: String { "Version \(version) (\(build))" }
 }
 
-private enum FireVaultShellTab: String, CaseIterable, Identifiable {
+enum FireVaultShellTab: String, CaseIterable, Identifiable {
     case nearby, accounts, photo, settings
     var id: String { rawValue }
     var title: String {
@@ -144,19 +116,19 @@ private enum FireVaultShellTab: String, CaseIterable, Identifiable {
 
 struct NativeAppShellView: View {
     let payload: FireVaultAppPayload
-    @ObservedObject var bridge: FireVaultAppShellBridge
+    @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
-    @State private var selection: FireVaultShellTab = .nearby
     @State private var keyboardVisible = false
 
     var body: some View {
         ZStack {
             NativeShellPalette.background.ignoresSafeArea()
             Group {
-                switch selection {
-                case .nearby: NativeNearbyView(payload: payload, bridge: bridge, settings: settings)
-                case .accounts, .photo: NativeAccountsView(payload: payload, bridge: bridge)
-                case .settings: NativeSettingsView(payload: payload, bridge: bridge, settings: settings)
+                switch store.selectedTab {
+                case .nearby: NativeNearbyView(payload: payload, store: store, settings: settings)
+                case .accounts: NativeAccountsView(payload: payload, store: store)
+                case .photo: NativePhotoView(store: store)
+                case .settings: NativeSettingsView(payload: payload, store: store, settings: settings)
                 }
             }
         }
@@ -168,7 +140,6 @@ struct NativeAppShellView: View {
         }
         .tint(NativeShellPalette.blue)
         .preferredColorScheme(.dark)
-        .onAppear { selection = FireVaultShellTab(rawValue: payload.initialTab) ?? .nearby }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             withAnimation(.easeOut(duration: 0.18)) { keyboardVisible = true }
         }
@@ -180,13 +151,9 @@ struct NativeAppShellView: View {
     private var nativeNavigation: some View {
         HStack(spacing: 0) {
             ForEach(FireVaultShellTab.allCases) { tab in
-                let isSelected = selection == tab
+                let isSelected = store.selectedTab == tab
                 Button {
-                    if tab == .photo {
-                        bridge.perform("photo", hideShell: true)
-                    } else {
-                        withAnimation(.snappy(duration: 0.25)) { selection = tab }
-                    }
+                    withAnimation(.snappy(duration: 0.25)) { store.selectedTab = tab }
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: tab.symbol)
@@ -227,7 +194,7 @@ struct NativeAppShellView: View {
 
 private struct NativeNearbyView: View {
     let payload: FireVaultAppPayload
-    @ObservedObject var bridge: FireVaultAppShellBridge
+    @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var selectedID: String?
 
@@ -273,7 +240,7 @@ private struct NativeNearbyView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { bridge.perform("refreshNearby") } label: { Image(systemName: "location.circle.fill") }
+                    Button { store.refreshNearby() } label: { Image(systemName: "location.circle.fill") }
                         .buttonStyle(.glassProminent)
                         .accessibilityLabel("Refresh nearby accounts")
                 }
@@ -346,11 +313,13 @@ private struct NativeNearbyView: View {
                 }
                 HStack(spacing: 10) {
                     Button("Open", systemImage: "arrow.up.right") {
-                        bridge.perform("openAccount", payload: ["id": row.account.id, "source": "nearby"], hideShell: true)
+                        store.openAccount(row.account.id)
                     }
                     .buttonStyle(.borderedProminent)
                     Button("Route", systemImage: "arrow.triangle.turn.up.right.diamond") {
-                        bridge.perform("routeAccount", payload: ["id": row.account.id])
+                        if let account = store.accounts.first(where: { $0.id == row.account.id }) {
+                            store.openRoute(for: account)
+                        }
                     }
                     .buttonStyle(.bordered)
                 }
@@ -412,7 +381,7 @@ private enum NativeAccountSort: String, CaseIterable, Identifiable {
 
 private struct NativeAccountsView: View {
     let payload: FireVaultAppPayload
-    @ObservedObject var bridge: FireVaultAppShellBridge
+    @ObservedObject var store: FireVaultStore
     @State private var search = ""
     @State private var sort: NativeAccountSort = .alphabetic
 
@@ -441,7 +410,7 @@ private struct NativeAccountsView: View {
                     Section {
                         ForEach(accounts) { account in
                             Button {
-                                bridge.perform("openAccount", payload: ["id": account.id, "source": "accounts"], hideShell: true)
+                                store.openAccount(account.id)
                             } label: { NativeAccountRow(account: account) }
                             .buttonStyle(.plain)
                             .listRowBackground(NativeShellPalette.surface)
@@ -462,8 +431,55 @@ private struct NativeAccountsView: View {
                         }
                     } label: { Label(sort.rawValue, systemImage: "arrow.up.arrow.down") }
                     .buttonStyle(.glass)
-                    Button { bridge.perform("addAccount", hideShell: true) } label: { Image(systemName: "plus") }
+                    Button { store.addDemoAccount() } label: { Image(systemName: "plus") }
                         .buttonStyle(.glassProminent).accessibilityLabel("Add Account")
+                }
+            }
+        }
+    }
+}
+
+private struct NativePhotoView: View {
+    @ObservedObject var store: FireVaultStore
+    @State private var selectedItem: PhotosPickerItem?
+    @State private var selectedImage: UIImage?
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 22) {
+                if let selectedImage {
+                    Image(uiImage: selectedImage)
+                        .resizable()
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .stroke(.white.opacity(0.12), lineWidth: 1)
+                        }
+                } else {
+                    ContentUnavailableView(
+                        "Select a Field Photo",
+                        systemImage: "camera.fill",
+                        description: Text("The native photo workspace uses the iOS photo picker. Camera capture and account attachment will be added to this native workflow next.")
+                    )
+                }
+
+                PhotosPicker(selection: $selectedItem, matching: .images) {
+                    Label("Choose Photo", systemImage: "photo.on.rectangle")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(NativeShellPalette.background)
+            .navigationTitle("Photo")
+            .onChange(of: selectedItem) { _, item in
+                Task {
+                    guard let data = try? await item?.loadTransferable(type: Data.self),
+                          let image = UIImage(data: data) else { return }
+                    selectedImage = image
                 }
             }
         }
@@ -496,16 +512,17 @@ private struct NativeAccountRow: View {
 
 private struct NativeSettingsView: View {
     let payload: FireVaultAppPayload
-    @ObservedObject var bridge: FireVaultAppShellBridge
+    @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var search = ""
     private let versionInfo = FireVaultVersionInfo()
 
     private var groups: [FireVaultNativeSettingsGroup] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return payload.settingsGroups }
+        let nativeGroups = NativeSettingsCatalog.groups
+        guard !query.isEmpty else { return nativeGroups }
 
-        return payload.settingsGroups.compactMap { group in
+        return nativeGroups.compactMap { group in
             let matchingItems = group.items.filter {
                 [$0.title, $0.subtitle, $0.status, group.title, group.subtitle]
                     .joined(separator: " ")
@@ -554,8 +571,8 @@ private struct NativeSettingsView: View {
 
     private var profileSection: some View {
         Section {
-            Button {
-                bridge.perform("openSetting", payload: ["id": "technician-profile", "group": "profile"], hideShell: true)
+            NavigationLink {
+                NativeTechnicianSettingsView(settings: settings)
             } label: {
                 HStack(spacing: 14) {
                     Image(systemName: "person.crop.circle.fill")
@@ -564,7 +581,7 @@ private struct NativeSettingsView: View {
                         .accessibilityHidden(true)
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(payload.technicianName.isEmpty ? "Technician Profile" : payload.technicianName)
+                        Text(settings.preferences.technician.name.isEmpty ? "Technician Profile" : settings.preferences.technician.name)
                             .font(.headline)
                             .foregroundStyle(.primary)
                         Text(payload.demoMode ? "Demo Mode" : "Field technician profile")
@@ -580,8 +597,7 @@ private struct NativeSettingsView: View {
                 .padding(.vertical, 5)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(payload.technicianName.isEmpty ? "Technician Profile" : payload.technicianName)
+            .accessibilityLabel(settings.preferences.technician.name.isEmpty ? "Technician Profile" : settings.preferences.technician.name)
             .accessibilityValue(payload.demoMode ? "Demo Mode" : "Field technician profile")
             .accessibilityElement(children: .combine)
             .accessibilityHint("Opens technician profile settings")
@@ -612,44 +628,58 @@ private struct NativeSettingsView: View {
     ) -> some View {
         let row = FVSettingsRow(
             item: item,
-            status: item.id == "gps" ? settings.gps.radiusStatus : status,
+            status: nativeStatus(for: item, fallback: status),
             tint: NativeShellPalette.tint(group.tint)
         )
 
+        NavigationLink {
+            nativeDestination(item.id)
+        } label: { row }
+            .accessibilityLabel(item.accessibilityLabel)
+            .accessibilityValue(nativeStatus(for: item, fallback: status))
+            .accessibilityHint("Opens native \(item.title)")
+    }
+
+    private func nativeStatus(for item: FireVaultNativeSettingItem, fallback: String) -> String {
         switch item.id {
-        case "gps":
-            NavigationLink {
-                NativeGPSSettingsView(settings: settings)
-            } label: { row }
-                .accessibilityLabel(item.accessibilityLabel)
-                .accessibilityValue(settings.gps.radiusStatus)
-                .accessibilityHint("Opens native GPS and Maps settings")
-        case "about":
-            NavigationLink {
-                NativeAboutFireVaultView(versionInfo: versionInfo)
-            } label: { row }
-                .accessibilityLabel(item.accessibilityLabel)
-                .accessibilityValue(status)
-                .accessibilityHint("Opens native FireVault information")
-        case "updates":
-            NavigationLink {
-                NativeUpdatesView(versionInfo: versionInfo)
-            } label: { row }
-                .accessibilityLabel(item.accessibilityLabel)
-                .accessibilityValue(status)
-                .accessibilityHint("Opens native build information")
-        default:
-            Button {
-                bridge.perform(
-                    "openSetting",
-                    payload: ["id": item.id, "group": group.id],
-                    hideShell: true
-                )
-            } label: { row }
-                .buttonStyle(.plain)
-                .accessibilityLabel(item.accessibilityLabel)
-                .accessibilityValue(status)
-                .accessibilityHint("Opens \(item.title)")
+        case "gps": settings.gps.radiusStatus
+        case "tech": settings.preferences.technician.name.isEmpty ? "Not configured" : settings.preferences.technician.name
+        case "email": settings.preferences.email.defaultTo.isEmpty ? "Not configured" : "Configured"
+        case "reports": settings.preferences.reports.format.capitalized
+        case "overlay": "Native"
+        case "plusCodes": settings.preferences.plusCodes.enabled ? "On" : "Off"
+        case "webdav": settings.preferences.webDAV.enabled ? "Configured" : "Off"
+        case "privacy": settings.preferences.privacy.enabled ? "On" : "Off"
+        case "customerImport": "Native CSV"
+        case "about": "Version \(versionInfo.version)"
+        case "updates": "Build \(versionInfo.version)"
+        default: fallback
+        }
+    }
+
+    @ViewBuilder
+    private func nativeDestination(_ id: String) -> some View {
+        switch id {
+        case "tech": NativeTechnicianSettingsView(settings: settings)
+        case "overlay": NativeOverlaySettingsView(settings: settings)
+        case "gps": NativeGPSSettingsView(settings: settings)
+        case "plusCodes": NativePlusCodeSettingsView(settings: settings)
+        case "reports": NativeReportSettingsView(settings: settings)
+        case "email": NativeEmailSettingsView(settings: settings)
+        case "cloudFiles": NativeStorageSettingsView(settings: settings)
+        case "microsoftStorage": NativeMicrosoftStorageSettingsView(settings: settings)
+        case "sync": NativeSyncSettingsView(settings: settings)
+        case "customerImport": NativeCSVImportView(store: store)
+        case "categories": NativeCategoriesSettingsView(settings: settings)
+        case "backup": NativeMigrationStatusView(title: "Backup & Restore", symbol: "externaldrive.badge.timemachine", message: "Native full-vault backup will be enabled after accounts, media, notes, and equipment share the native repository.")
+        case "webdav": NativeWebDAVSettingsView(settings: settings)
+        case "privacy": NativePrivacySettingsView(settings: settings)
+        case "security": NativeMigrationStatusView(title: "Security", symbol: "shield.checkered", message: "FireVault now uses the iOS application sandbox. Native Face ID and protected-export controls are the next security milestone.")
+        case "manual": NativeManualView()
+        case "updates": NativeUpdatesView(versionInfo: versionInfo)
+        case "demo": NativeDemoSettingsView(store: store)
+        case "about": NativeAboutFireVaultView(versionInfo: versionInfo)
+        default: NativeMigrationStatusView(title: "Native Settings", symbol: "gearshape", message: "This setting has moved out of the web application and is being rebuilt for iOS.")
         }
     }
 
@@ -666,12 +696,6 @@ private struct NativeSettingsView: View {
         } footer: {
             Text("A field workspace for notes, files, scans, photos, equipment, and account maps.")
         }
-    }
-}
-
-private extension FireVaultGPSPreferences {
-    var radiusStatus: String {
-        "\(nearbyRadiusMiles.formatted(.number.precision(.fractionLength(0...2)))) mi"
     }
 }
 
@@ -760,6 +784,9 @@ private struct NativeGPSSettingsView: View {
         }
         .onChange(of: radiusText) { _, _ in saved = false }
         .onChange(of: draft) { _, _ in saved = false }
+        .onDisappear {
+            if radiusIsValid { save() }
+        }
     }
 
     private func save() {
@@ -890,7 +917,7 @@ private extension View {
     }
 }
 
-private enum NativeShellPalette {
+enum NativeShellPalette {
     static let background = Color(red: 0.028, green: 0.043, blue: 0.061)
     static let surface = Color(red: 0.070, green: 0.095, blue: 0.125)
     static let blue = Color(red: 0.24, green: 0.67, blue: 1.0)

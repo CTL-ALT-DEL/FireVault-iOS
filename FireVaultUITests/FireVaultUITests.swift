@@ -23,14 +23,37 @@ final class FireVaultUITests: XCTestCase {
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testNativeSettingsTextFieldsAreReachable() throws {
         let app = XCUIApplication()
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
+        app.buttons["main-navigation-settings"].tap()
+
+        let technicianRow = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Technician Profile")
+        ).firstMatch
+        XCTAssertTrue(technicianRow.waitForExistence(timeout: 3))
+        technicianRow.tap()
+
+        let technicianName = app.textFields["Technician name"]
+        XCTAssertTrue(technicianName.waitForExistence(timeout: 3))
+        technicianName.tap()
+        technicianName.typeText("Native Test")
+        app.buttons["Done"].tap()
+        app.buttons["Save"].tap()
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let gpsRow = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "GPS & Maps")
+        ).firstMatch
+        XCTAssertTrue(gpsRow.waitForExistence(timeout: 3))
+        gpsRow.tap()
+
+        let radius = app.textFields["Nearby radius in miles"]
+        XCTAssertTrue(radius.waitForExistence(timeout: 3))
+        radius.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.webViews.firstMatch.exists, "Native Settings must never display a web view")
     }
 
     @MainActor

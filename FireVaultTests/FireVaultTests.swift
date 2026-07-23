@@ -43,28 +43,7 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(info.displayText.hasPrefix("Version "))
     }
 
-    func testWebIntegrationTargetsSharedKeyboardAndNavigationLayers() {
-        let source = FireVaultWebIntegration.source(version: "1.04.01")
-
-        XCTAssertTrue(source.contains("fvNativeKeyboard10334 main#app"))
-        XCTAssertTrue(source.contains("fvNativeIOS10334 #appNav"))
-        XCTAssertTrue(source.contains(".nearbyBottomNav069"))
-        XCTAssertTrue(source.contains("body.fvNativeIOS10334::after"))
-        XCTAssertTrue(source.contains("event.stopImmediatePropagation()"))
-        XCTAssertTrue(source.contains("nearestScrollContainer"))
-        XCTAssertFalse(source.contains("scrollIntoView"))
-    }
-
-    func testWebIntegrationSynchronizesVisibleVersionAndPhotoOverlayHeader() {
-        let source = FireVaultWebIntegration.source(version: "1.04.01")
-
-        XCTAssertTrue(source.contains(".splashBuild492"))
-        XCTAssertTrue(source.contains(".aboutGrid540"))
-        XCTAssertTrue(source.contains("photoOverlayDetailHeader1032"))
-        XCTAssertTrue(source.contains("1.04.01"))
-    }
-
-    func testNativeSettingsVersionStatusesOverrideOlderWebPayload() {
+    func testNativeSettingsVersionStatusesUseInstalledVersion() {
         let about = FireVaultNativeSettingItem(
             id: "about",
             title: "About FireVault",
@@ -80,8 +59,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.04.01"), "Version 1.04.01")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.04.01"), "Build 1.04.01")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.05.00"), "Version 1.05.00")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.05.00"), "Build 1.05.00")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
@@ -110,24 +89,60 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(reloaded.gps.highAccuracy)
     }
 
-    func testLegacyGPSImportRunsOnceWithoutOverwritingNativeChoice() throws {
+    func testNativeSettingsPersistTextFieldsAndReload() throws {
         let suite = "FireVaultTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let store = FireVaultNativeSettingsStore(defaults: defaults)
-        XCTAssertTrue(store.importLegacyGPSIfNeeded([
-            "nearbyRadiusMiles": 4.25,
-            "highAccuracy": false,
-            "enabled": true,
-            "includeInReports": false,
-            "addressAssist": true
-        ]))
-        XCTAssertEqual(store.gps.nearbyRadiusMiles, 4.25)
-        XCTAssertFalse(store.gps.highAccuracy)
-        XCTAssertFalse(store.gps.includeCoordinatesInReports)
+        var preferences = store.preferences
+        preferences.technician.name = "Taylor Technician"
+        preferences.email.defaultTo = "service@example.com"
+        preferences.storage.photoFolder = "FireVault/Native Photos"
+        preferences.sync.organization = "Demo Company"
+        preferences.webDAV.serverURL = "https://storage.example.com"
+        store.save(preferences)
 
-        XCTAssertFalse(store.importLegacyGPSIfNeeded(["nearbyRadiusMiles": 12]))
-        XCTAssertEqual(store.gps.nearbyRadiusMiles, 4.25)
+        let reloaded = FireVaultNativeSettingsStore(defaults: defaults)
+        XCTAssertEqual(reloaded.preferences.technician.name, "Taylor Technician")
+        XCTAssertEqual(reloaded.preferences.email.defaultTo, "service@example.com")
+        XCTAssertEqual(reloaded.preferences.storage.photoFolder, "FireVault/Native Photos")
+        XCTAssertEqual(reloaded.preferences.sync.organization, "Demo Company")
+        XCTAssertEqual(reloaded.preferences.webDAV.serverURL, "https://storage.example.com")
+    }
+
+    func testNativeCSVParserSupportsQuotedCommasAndEscapedQuotes() {
+        let csv = "Account Name,Address,Note\n\"Acme, Inc.\",\"12 Main St, Boise\",\"Panel says \"\"East\"\"\""
+
+        let rows = FireVaultStore.parseCSV(csv)
+
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows[1][0], "Acme, Inc.")
+        XCTAssertEqual(rows[1][1], "12 Main St, Boise")
+        XCTAssertEqual(rows[1][2], "Panel says \"East\"")
+    }
+
+    func testNativeCSVImportAddsAccountsAndSkipsDuplicateAccountID() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let csv = "Account Name,Address,Account ID,Category,Phone\nNative Customer,100 Test Way,NATIVE-1,Commercial,2085550199\nDuplicate,200 Test Way,NATIVE-1,Commercial,2085550188"
+
+        let result = try store.importAccountsCSV(Data(csv.utf8))
+
+        XCTAssertEqual(result.added, 1)
+        XCTAssertEqual(result.skipped, 1)
+        XCTAssertTrue(store.accounts.contains { $0.accountId == "NATIVE-1" })
+    }
+
+    func testEverySettingsCatalogRowHasANativeDestinationIdentifier() {
+        let expected = Set([
+            "overlay", "gps", "plusCodes", "reports", "email", "cloudFiles",
+            "microsoftStorage", "sync", "customerImport", "categories", "backup",
+            "webdav", "privacy", "security", "manual", "updates", "demo", "about"
+        ])
+
+        XCTAssertEqual(Set(NativeSettingsCatalog.groups.flatMap(\.items).map(\.id)), expected)
     }
 }

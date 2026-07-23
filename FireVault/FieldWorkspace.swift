@@ -2,63 +2,29 @@
 //  FieldWorkspace.swift
 //  FireVault
 //
-//  Native, field-first Account workspace for Build 1.04.01.
+//  Native, field-first Account workspace for Build 1.05.00.
 //
 
 import SwiftUI
 import Combine
 import MapKit
-import WebKit
-
-@MainActor
-final class FireVaultWorkspaceBridge: ObservableObject {
-    @Published private(set) var account: FireVaultWorkspaceAccount?
-    weak var webView: WKWebView?
-
-    func present(_ payload: [String: Any]) {
-        guard JSONSerialization.isValidJSONObject(payload),
-              let data = try? JSONSerialization.data(withJSONObject: payload),
-              let decoded = try? JSONDecoder().decode(FireVaultWorkspaceAccount.self, from: data) else {
-            return
-        }
-        account = decoded
-    }
-
-    func hide() {
-        account = nil
-    }
-
-    func perform(_ action: String, payload: [String: Any] = [:], dismiss: Bool = true) {
-        guard let webView else { return }
-        var message = payload
-        message["action"] = action
-        if let accountID = account?.id { message["accountId"] = accountID }
-        guard JSONSerialization.isValidJSONObject(message),
-              let data = try? JSONSerialization.data(withJSONObject: message),
-              var json = String(data: data, encoding: .utf8) else { return }
-        json = json.replacingOccurrences(of: "\u{2028}", with: "\\u2028")
-            .replacingOccurrences(of: "\u{2029}", with: "\\u2029")
-        if dismiss { hide() }
-        webView.evaluateJavaScript("window.fireVaultNativeWorkspaceAction?.(\(json));")
-    }
-}
 
 struct FireVaultWorkspaceAccount: Codable, Identifiable, Equatable {
-    let id: String
-    let name: String
-    let address: String
-    let category: String
-    let accountId: String
-    let phone: String
-    let favorite: Bool
-    let latitude: Double?
-    let longitude: Double?
-    let tags: [String]
-    let notes: [FireVaultWorkspaceNote]
-    let documents: [FireVaultWorkspaceDocument]
-    let equipment: [FireVaultWorkspaceEquipment]
-    let locations: [FireVaultWorkspaceLocation]
-    let recent: [FireVaultWorkspaceRecent]
+    var id: String
+    var name: String
+    var address: String
+    var category: String
+    var accountId: String
+    var phone: String
+    var favorite: Bool
+    var latitude: Double?
+    var longitude: Double?
+    var tags: [String]
+    var notes: [FireVaultWorkspaceNote]
+    var documents: [FireVaultWorkspaceDocument]
+    var equipment: [FireVaultWorkspaceEquipment]
+    var locations: [FireVaultWorkspaceLocation]
+    var recent: [FireVaultWorkspaceRecent]
 
     var coordinate: CLLocationCoordinate2D? {
         guard let latitude, let longitude,
@@ -68,35 +34,35 @@ struct FireVaultWorkspaceAccount: Codable, Identifiable, Equatable {
 }
 
 struct FireVaultWorkspaceNote: Codable, Identifiable, Equatable {
-    let id: String
-    let title: String
-    let text: String
-    let date: String
+    var id: String
+    var title: String
+    var text: String
+    var date: String
 }
 
 struct FireVaultWorkspaceDocument: Codable, Identifiable, Equatable {
-    let id: String
-    let title: String
-    let subtitle: String
-    let kind: String
-    let date: String
+    var id: String
+    var title: String
+    var subtitle: String
+    var kind: String
+    var date: String
 }
 
 struct FireVaultWorkspaceEquipment: Codable, Identifiable, Equatable {
-    let id: String
-    let title: String
-    let subtitle: String
-    let status: String
+    var id: String
+    var title: String
+    var subtitle: String
+    var status: String
 }
 
 struct FireVaultWorkspaceLocation: Codable, Identifiable, Equatable {
-    let id: String
-    let label: String
-    let subtitle: String
-    let type: String
-    let plusCode: String
-    let latitude: Double?
-    let longitude: Double?
+    var id: String
+    var label: String
+    var subtitle: String
+    var type: String
+    var plusCode: String
+    var latitude: Double?
+    var longitude: Double?
 
     var coordinate: CLLocationCoordinate2D? {
         guard let latitude, let longitude,
@@ -106,16 +72,16 @@ struct FireVaultWorkspaceLocation: Codable, Identifiable, Equatable {
 }
 
 struct FireVaultWorkspaceRecent: Codable, Identifiable, Equatable {
-    let id: String
-    let title: String
-    let subtitle: String
-    let kind: String
-    let date: String
+    var id: String
+    var title: String
+    var subtitle: String
+    var kind: String
+    var date: String
 }
 
 struct FieldWorkspaceView: View {
     let account: FireVaultWorkspaceAccount
-    @ObservedObject var bridge: FireVaultWorkspaceBridge
+    @ObservedObject var store: FireVaultStore
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
     private var previewCoordinate: CLLocationCoordinate2D? {
@@ -145,7 +111,7 @@ struct FieldWorkspaceView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        bridge.perform("back")
+                        store.closeAccount()
                     } label: {
                         Label("Back", systemImage: "chevron.left")
                     }
@@ -153,7 +119,7 @@ struct FieldWorkspaceView: View {
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
-                        bridge.perform("favorite", dismiss: false)
+                        store.toggleFavorite(account.id)
                     } label: {
                         Image(systemName: account.favorite ? "star.fill" : "star")
                             .foregroundStyle(account.favorite ? FieldWorkspacePalette.amber : .primary)
@@ -162,9 +128,8 @@ struct FieldWorkspaceView: View {
                     .accessibilityLabel(account.favorite ? "Remove Favorite" : "Add Favorite")
 
                     Menu {
-                        Button("Edit Account", systemImage: "pencil") { bridge.perform("edit") }
                         if !account.phone.isEmpty {
-                            Button("Call", systemImage: "phone") { bridge.perform("call", dismiss: false) }
+                            Button("Call", systemImage: "phone") { store.call(account.phone) }
                         }
                     } label: {
                         Image(systemName: "ellipsis")
@@ -226,7 +191,7 @@ struct FieldWorkspaceView: View {
 
     private var mapPreview: some View {
         NavigationLink {
-            MapArrivalView(account: account, bridge: bridge)
+            MapArrivalView(account: account, store: store)
         } label: {
             WorkspaceCard {
                 ZStack(alignment: .bottomLeading) {
@@ -290,7 +255,7 @@ struct FieldWorkspaceView: View {
             WorkspaceSectionTitle(title: "FIELD WORKSPACE", subtitle: "Everything for this location")
             LazyVGrid(columns: columns, spacing: 12) {
                 NavigationLink {
-                    NotesWorkspaceView(account: account, bridge: bridge)
+                    NotesWorkspaceView(account: account, store: store)
                 } label: {
                     WorkspaceDestinationTile(
                         title: "Notes",
@@ -301,7 +266,7 @@ struct FieldWorkspaceView: View {
                 }
 
                 NavigationLink {
-                    FilesScansView(account: account, bridge: bridge)
+                    FilesScansView(account: account, store: store)
                 } label: {
                     WorkspaceDestinationTile(
                         title: "Files & Scans",
@@ -312,7 +277,7 @@ struct FieldWorkspaceView: View {
                 }
 
                 NavigationLink {
-                    EquipmentWorkspaceView(account: account, bridge: bridge)
+                    EquipmentWorkspaceView(account: account, store: store)
                 } label: {
                     WorkspaceDestinationTile(
                         title: "Equipment",
@@ -323,7 +288,7 @@ struct FieldWorkspaceView: View {
                 }
 
                 NavigationLink {
-                    MapArrivalView(account: account, bridge: bridge)
+                    MapArrivalView(account: account, store: store)
                 } label: {
                     WorkspaceDestinationTile(
                         title: "Locations",
@@ -360,16 +325,16 @@ struct FieldWorkspaceView: View {
     private var fieldActionDock: some View {
         HStack(spacing: 6) {
             WorkspaceDockButton(title: "Scan", symbol: "doc.viewfinder", tint: FieldWorkspacePalette.blue) {
-                bridge.perform("scan")
+                store.addDocument(to: account.id, scan: true)
             }
             WorkspaceDockButton(title: "Note", symbol: "square.and.pencil", tint: FieldWorkspacePalette.amber) {
-                bridge.perform("note")
+                store.addNote(to: account.id)
             }
             WorkspaceDockButton(title: "Camera", symbol: "camera.fill", tint: FieldWorkspacePalette.red) {
-                bridge.perform("photo")
+                store.closeAccount(to: .photo)
             }
             WorkspaceDockButton(title: "Route", symbol: "arrow.triangle.turn.up.right.diamond.fill", tint: FieldWorkspacePalette.green) {
-                bridge.perform("route", dismiss: false)
+                store.openRoute(for: account)
             }
         }
         .padding(7)
@@ -385,10 +350,10 @@ struct FieldWorkspaceView: View {
 
     private var appNavigation: some View {
         HStack(spacing: 0) {
-            WorkspaceNavButton(title: "Nearby", symbol: "location.circle") { bridge.perform("nearby") }
-            WorkspaceNavButton(title: "Search", symbol: "magnifyingglass") { bridge.perform("search") }
-            WorkspaceNavButton(title: "Photo", symbol: "photo") { bridge.perform("photo") }
-            WorkspaceNavButton(title: "Settings", symbol: "slider.horizontal.3") { bridge.perform("settings") }
+            WorkspaceNavButton(title: "Nearby", symbol: "location.circle") { store.closeAccount(to: .nearby) }
+            WorkspaceNavButton(title: "Accounts", symbol: "magnifyingglass") { store.closeAccount(to: .accounts) }
+            WorkspaceNavButton(title: "Photo", symbol: "photo") { store.closeAccount(to: .photo) }
+            WorkspaceNavButton(title: "Settings", symbol: "slider.horizontal.3") { store.closeAccount(to: .settings) }
         }
         .padding(.horizontal, 8)
         .padding(.top, 5)
@@ -408,7 +373,7 @@ struct FieldWorkspaceView: View {
 
 private struct MapArrivalView: View {
     let account: FireVaultWorkspaceAccount
-    @ObservedObject var bridge: FireVaultWorkspaceBridge
+    @ObservedObject var store: FireVaultStore
 
     var body: some View {
         List {
@@ -430,8 +395,13 @@ private struct MapArrivalView: View {
                 } else {
                     ForEach(account.locations) { location in
                         Button {
-                            if location.coordinate != nil {
-                                bridge.perform("routeLocation", payload: ["id": location.id], dismiss: false)
+                            if let coordinate = location.coordinate {
+                                let item = MKMapItem(
+                                    location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude),
+                                    address: nil
+                                )
+                                item.name = location.label
+                                item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
                             }
                         } label: {
                             HStack(spacing: 12) {
@@ -466,9 +436,9 @@ private struct MapArrivalView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 10) {
-                Button("Add Location", systemImage: "plus") { bridge.perform("addLocation") }
+                Button("Add Location", systemImage: "plus") { store.addLocation(to: account.id) }
                     .buttonStyle(.glass)
-                Button("Route", systemImage: "arrow.triangle.turn.up.right.diamond.fill") { bridge.perform("route", dismiss: false) }
+                Button("Route", systemImage: "arrow.triangle.turn.up.right.diamond.fill") { store.openRoute(for: account) }
                     .buttonStyle(.glassProminent)
             }
             .padding(12)
@@ -532,7 +502,7 @@ private struct WorkspaceMap: View {
 
 private struct NotesWorkspaceView: View {
     let account: FireVaultWorkspaceAccount
-    @ObservedObject var bridge: FireVaultWorkspaceBridge
+    @ObservedObject var store: FireVaultStore
 
     var body: some View {
         List {
@@ -564,7 +534,7 @@ private struct NotesWorkspaceView: View {
         .navigationTitle("Field Notes")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            Button("Add Note", systemImage: "square.and.pencil") { bridge.perform("note") }
+            Button("Add Note", systemImage: "square.and.pencil") { store.addNote(to: account.id) }
                 .buttonStyle(.glassProminent)
                 .padding(12)
                 .glassEffect()
@@ -574,7 +544,7 @@ private struct NotesWorkspaceView: View {
 
 private struct FilesScansView: View {
     let account: FireVaultWorkspaceAccount
-    @ObservedObject var bridge: FireVaultWorkspaceBridge
+    @ObservedObject var store: FireVaultStore
 
     var body: some View {
         List {
@@ -586,8 +556,12 @@ private struct FilesScansView: View {
                 )
             } else {
                 ForEach(account.documents) { document in
-                    Button {
-                        bridge.perform("openFile", payload: ["id": document.id])
+                    NavigationLink {
+                        NativeRecordDetailView(
+                            title: document.title,
+                            subtitle: document.subtitle,
+                            symbol: documentSymbol(document.kind)
+                        )
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: documentSymbol(document.kind))
@@ -617,9 +591,9 @@ private struct FilesScansView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 10) {
-                Button("Add File", systemImage: "plus") { bridge.perform("addFile") }
+                Button("Add File", systemImage: "plus") { store.addDocument(to: account.id, scan: false) }
                     .buttonStyle(.glass)
-                Button("Scan Document", systemImage: "doc.viewfinder") { bridge.perform("scan") }
+                Button("Scan Document", systemImage: "doc.viewfinder") { store.addDocument(to: account.id, scan: true) }
                     .buttonStyle(.glassProminent)
             }
             .padding(12)
@@ -638,7 +612,7 @@ private struct FilesScansView: View {
 
 private struct EquipmentWorkspaceView: View {
     let account: FireVaultWorkspaceAccount
-    @ObservedObject var bridge: FireVaultWorkspaceBridge
+    @ObservedObject var store: FireVaultStore
 
     var body: some View {
         List {
@@ -650,8 +624,12 @@ private struct EquipmentWorkspaceView: View {
                 )
             } else {
                 ForEach(account.equipment) { equipment in
-                    Button {
-                        bridge.perform("openEquipment", payload: ["id": equipment.id])
+                    NavigationLink {
+                        NativeRecordDetailView(
+                            title: equipment.title,
+                            subtitle: equipment.subtitle,
+                            symbol: "wrench.and.screwdriver.fill"
+                        )
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "wrench.and.screwdriver.fill")
@@ -678,11 +656,23 @@ private struct EquipmentWorkspaceView: View {
         .navigationTitle("Equipment")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            Button("Add Equipment", systemImage: "plus") { bridge.perform("addEquipment") }
+            Button("Add Equipment", systemImage: "plus") { store.addEquipment(to: account.id) }
                 .buttonStyle(.glassProminent)
                 .padding(12)
                 .glassEffect()
         }
+    }
+}
+
+private struct NativeRecordDetailView: View {
+    let title: String
+    let subtitle: String
+    let symbol: String
+
+    var body: some View {
+        ContentUnavailableView(title, systemImage: symbol, description: Text(subtitle))
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -870,7 +860,7 @@ private struct FieldWorkspaceView_Previews: PreviewProvider {
                 locations: [.init(id: "l1", label: "Main Entrance", subtitle: "South doors", type: "Entrance", plusCode: "JRM3+4C", latitude: 43.6177, longitude: -116.1968)],
                 recent: [.init(id: "r1", title: "Fire alarm riser diagram", subtitle: "3-page scan added", kind: "document", date: "Today")]
             ),
-            bridge: FireVaultWorkspaceBridge()
+            store: FireVaultStore()
         )
     }
 }

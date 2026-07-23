@@ -2,11 +2,39 @@
 //  NativeSettingsStore.swift
 //  FireVault
 //
-//  Native settings persistence introduced in Build 1.04.00.
+//  Native Settings authority introduced in Build 1.05.00.
 //
 
 import Foundation
 import Combine
+
+struct FireVaultTechnicianPreferences: Codable, Equatable {
+    var name = ""
+    var company = ""
+    var phone = ""
+    var email = ""
+    var license = ""
+}
+
+struct FireVaultOverlayPreferences: Codable, Equatable {
+    var alignment = "bottom"
+    var fontSize = "medium"
+    var backgroundStyle = "bar"
+    var opacity = 85
+    var showLogo = true
+    var showTagline = true
+    var accentColor = "red"
+
+    var normalized: Self {
+        var copy = self
+        copy.opacity = min(100, max(35, opacity))
+        if !["top", "middle", "bottom"].contains(copy.alignment) { copy.alignment = "bottom" }
+        if !["small", "medium", "large"].contains(copy.fontSize) { copy.fontSize = "medium" }
+        if !["bar", "card", "minimal"].contains(copy.backgroundStyle) { copy.backgroundStyle = "bar" }
+        if !["red", "blue", "amber", "white"].contains(copy.accentColor) { copy.accentColor = "red" }
+        return copy
+    }
+}
 
 struct FireVaultGPSPreferences: Codable, Equatable {
     static let allowedRadius = 0.25...25.0
@@ -25,16 +53,101 @@ struct FireVaultGPSPreferences: Codable, Equatable {
         )
         return copy
     }
+
+    var radiusStatus: String {
+        "\(nearbyRadiusMiles.formatted(.number.precision(.fractionLength(0...2)))) mi"
+    }
+}
+
+struct FireVaultPlusCodePreferences: Codable, Equatable {
+    var enabled = true
+    var autoGenerate = true
+    var accountLength = 10
+    var locationLength = 11
+    var verifyAfterDays = 180
+    var searchable = true
+    var includeInReports = true
+}
+
+struct FireVaultReportPreferences: Codable, Equatable {
+    var title = "FireVault Service Report"
+    var format = "detailed"
+    var includeTechnician = true
+    var includeTasks = true
+    var includeDeficiencies = true
+}
+
+struct FireVaultEmailPreferences: Codable, Equatable {
+    var defaultTo = ""
+    var cc = ""
+    var defaultSubject = "FireVault Service Report"
+    var signature = ""
+}
+
+struct FireVaultStoragePreferences: Codable, Equatable {
+    var photoProvider = "local"
+    var documentProvider = "local"
+    var photoFolder = "FireVault/Photos"
+    var documentFolder = "FireVault/Documents"
+    var microsoftProfileLabel = ""
+    var microsoftEmail = ""
+    var sharePointSiteURL = ""
+    var libraryName = "Documents"
+}
+
+struct FireVaultSyncPreferences: Codable, Equatable {
+    var organization = ""
+    var workspace = "FireVault Shared Vault"
+    var conflictPolicy = "review"
+}
+
+struct FireVaultWebDAVPreferences: Codable, Equatable {
+    var enabled = false
+    var serverURL = ""
+    var username = ""
+    var folder = "/FireVault"
+}
+
+struct FireVaultPrivacyPreferences: Codable, Equatable {
+    var enabled = false
+    var autoLockMinutes = 5
+    var lockOnBackground = true
+    var hideInAppSwitcher = true
+}
+
+struct FireVaultNativePreferences: Codable, Equatable {
+    var technician = FireVaultTechnicianPreferences()
+    var overlay = FireVaultOverlayPreferences()
+    var gps = FireVaultGPSPreferences()
+    var plusCodes = FireVaultPlusCodePreferences()
+    var reports = FireVaultReportPreferences()
+    var email = FireVaultEmailPreferences()
+    var storage = FireVaultStoragePreferences()
+    var sync = FireVaultSyncPreferences()
+    var webDAV = FireVaultWebDAVPreferences()
+    var privacy = FireVaultPrivacyPreferences()
+    var categories: [String] = ["Commercial", "Healthcare", "Education", "Government", "Residential"]
+
+    var normalized: Self {
+        var copy = self
+        copy.gps = gps.normalized
+        copy.overlay = overlay.normalized
+        copy.categories = categories
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return copy
+    }
 }
 
 @MainActor
 final class FireVaultNativeSettingsStore: ObservableObject {
     private enum Key {
-        static let gps = "firevault.native.settings.gps.v1"
-        static let importedLegacyGPS = "firevault.native.settings.gps.legacy-imported.v1"
+        static let preferences = "firevault.native.settings.all.v2"
     }
 
-    @Published private(set) var gps: FireVaultGPSPreferences
+    @Published private(set) var preferences: FireVaultNativePreferences
+
+    var gps: FireVaultGPSPreferences { preferences.gps }
 
     private let defaults: UserDefaults
     private let encoder = JSONEncoder()
@@ -42,48 +155,28 @@ final class FireVaultNativeSettingsStore: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: Key.gps),
-           let saved = try? decoder.decode(FireVaultGPSPreferences.self, from: data) {
-            gps = saved.normalized
+        if let data = defaults.data(forKey: Key.preferences),
+           let saved = try? decoder.decode(FireVaultNativePreferences.self, from: data) {
+            preferences = saved.normalized
         } else {
-            gps = FireVaultGPSPreferences()
+            preferences = FireVaultNativePreferences()
         }
     }
 
-    func saveGPS(_ preferences: FireVaultGPSPreferences) {
-        gps = preferences.normalized
-        persistGPS()
+    func save(_ updated: FireVaultNativePreferences) {
+        preferences = updated.normalized
+        persist()
     }
 
-    @discardableResult
-    func importLegacyGPSIfNeeded(_ raw: Any?) -> Bool {
-        guard !defaults.bool(forKey: Key.importedLegacyGPS),
-              defaults.data(forKey: Key.gps) == nil,
-              let dictionary = raw as? [String: Any] else { return false }
-
-        var imported = FireVaultGPSPreferences()
-        if let radius = Self.number(dictionary["nearbyRadiusMiles"]) {
-            imported.nearbyRadiusMiles = radius
-        }
-        if let value = dictionary["highAccuracy"] as? Bool { imported.highAccuracy = value }
-        if let value = dictionary["enabled"] as? Bool { imported.gpsToolsEnabled = value }
-        if let value = dictionary["includeInReports"] as? Bool { imported.includeCoordinatesInReports = value }
-        if let value = dictionary["addressAssist"] as? Bool { imported.addressAssistanceEnabled = value }
-
-        gps = imported.normalized
-        persistGPS()
-        defaults.set(true, forKey: Key.importedLegacyGPS)
-        return true
+    func saveGPS(_ updated: FireVaultGPSPreferences) {
+        var next = preferences
+        next.gps = updated
+        save(next)
     }
 
-    private func persistGPS() {
-        guard let data = try? encoder.encode(gps) else { return }
-        defaults.set(data, forKey: Key.gps)
+    private func persist() {
+        guard let data = try? encoder.encode(preferences) else { return }
+        defaults.set(data, forKey: Key.preferences)
     }
 
-    private static func number(_ value: Any?) -> Double? {
-        if let number = value as? NSNumber { return number.doubleValue }
-        if let string = value as? String { return Double(string) }
-        return nil
-    }
 }
