@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.05.05.
+//  Native everyday navigation for Build 1.05.06.
 //
 
 import SwiftUI
@@ -118,6 +118,7 @@ struct NativeAppShellView: View {
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var locationService: FireVaultLocationService
     @State private var keyboardVisible = false
 
     var body: some View {
@@ -125,7 +126,13 @@ struct NativeAppShellView: View {
             NativeShellPalette.background.ignoresSafeArea()
             Group {
                 switch store.selectedTab {
-                case .nearby: NativeNearbyView(payload: payload, store: store, settings: settings)
+                case .nearby:
+                    NativeNearbyView(
+                        payload: payload,
+                        store: store,
+                        settings: settings,
+                        locationService: locationService
+                    )
                 case .accounts: NativeAccountsView(payload: payload, store: store)
                 case .photo: NativePhotoView(store: store)
                 case .settings: NativeSettingsView(payload: payload, store: store, settings: settings)
@@ -196,7 +203,9 @@ private struct NativeNearbyView: View {
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var locationService: FireVaultLocationService
     @State private var selectedID: String?
+    @State private var showGeocodingConsent = false
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -227,6 +236,14 @@ private struct NativeNearbyView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     statusHeader
+                    if !payload.demoMode, store.unmappedAccountCount > 0 {
+                        coordinateSetup
+                    }
+                    if !payload.demoMode,
+                       locationService.coordinate == nil,
+                       locationService.authorizationStatus == .denied {
+                        locationAccessSetup
+                    }
                     map
                     if let selected { selectedCard(selected) }
                     accountList
@@ -240,10 +257,35 @@ private struct NativeNearbyView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { store.refreshNearby() } label: { Image(systemName: "location.circle.fill") }
+                    Button {
+                        if payload.demoMode {
+                            store.refreshNearby()
+                        } else {
+                            locationService.requestCurrentLocation(highAccuracy: settings.gps.highAccuracy)
+                        }
+                    } label: {
+                        if locationService.isLocating, !payload.demoMode {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "location.circle.fill")
+                        }
+                    }
                         .buttonStyle(.glassProminent)
                         .accessibilityLabel("Refresh nearby accounts")
                 }
+            }
+            .task {
+                if !payload.demoMode, locationService.coordinate == nil {
+                    locationService.requestCurrentLocation(highAccuracy: settings.gps.highAccuracy)
+                }
+            }
+            .alert("Map Imported Addresses?", isPresented: $showGeocodingConsent) {
+                Button("Cancel", role: .cancel) {}
+                Button("Map Accounts") {
+                    store.startGeocodingMissingAccounts()
+                }
+            } message: {
+                Text("FireVault will send only street, city, state, and ZIP fields to the U.S. Census Geocoder. Account names, IDs, notes, photos, and files remain on this iPhone. Returned coordinates are saved locally.")
             }
         }
     }
@@ -261,20 +303,78 @@ private struct NativeNearbyView: View {
         }
     }
 
+    private var locationAccessSetup: some View {
+        NativeShellCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Location Access Needed", systemImage: "location.slash.fill")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text("Nearby uses this iPhone’s current location to calculate which mapped accounts are inside your selected radius.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Button("Open Location Settings", systemImage: "gearshape") {
+                    locationService.openAppSettings()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private var coordinateSetup: some View {
+        NativeShellCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Map Imported Accounts", systemImage: "mappin.and.ellipse")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+
+                HStack {
+                    LabeledContent("Mapped", value: "\(store.mappedAccountCount)")
+                    Divider().frame(height: 22)
+                    LabeledContent("Need coordinates", value: "\(store.unmappedAccountCount)")
+                }
+                .font(.subheadline)
+
+                if let progress = store.geocodingProgress {
+                    if progress.isRunning {
+                        ProgressView(value: progress.fractionComplete)
+                            .accessibilityLabel("Mapping imported addresses")
+                            .accessibilityValue("\(progress.completed) of \(progress.total)")
+                    }
+                    Text(progress.message)
+                        .font(.footnote)
+                        .foregroundStyle(progress.phase == .failed ? .orange : .secondary)
+                } else {
+                    Text("Nearby needs coordinates because the imported CSV contains postal addresses but no latitude or longitude.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                if store.geocodingProgress?.isRunning == true {
+                    Button("Stop Mapping", role: .cancel) {
+                        store.cancelGeocoding()
+                    }
+                    .buttonStyle(.bordered)
+                } else if store.geocodableAccountCount > 0 {
+                    Button(
+                        store.geocodingProgress?.phase == .failed ? "Retry Address Mapping" : "Map \(store.geocodableAccountCount) Addresses",
+                        systemImage: "location.magnifyingglass"
+                    ) {
+                        showGeocodingConsent = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+        }
+    }
+
     private var map: some View {
         Group {
             if nearbyRows.isEmpty {
                 NativeShellCard {
                     ContentUnavailableView(
-                        payload.nearby.isEmpty ? "No Mapped Accounts" : "No Accounts in Range",
+                        emptyMapTitle,
                         systemImage: "map",
-                        description: Text(
-                            payload.nearby.isEmpty
-                                ? (payload.demoMode
-                                    ? "Refresh location to display GPS-ready accounts on Apple Maps."
-                                    : "Import accounts with latitude and longitude, or add locations to native accounts.")
-                                : "Increase the Nearby Radius in Settings to include more accounts."
-                        )
+                        description: Text(emptyMapDescription)
                     )
                 }
             } else {
@@ -300,6 +400,27 @@ private struct NativeNearbyView: View {
                 .overlay { RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.white.opacity(0.10), lineWidth: 1) }
             }
         }
+    }
+
+    private var emptyMapTitle: String {
+        if !payload.demoMode, store.mappedAccountCount == 0 { return "Account Coordinates Needed" }
+        if !payload.demoMode, locationService.coordinate == nil { return "Current Location Needed" }
+        return payload.nearby.isEmpty ? "No Mapped Accounts" : "No Accounts in Range"
+    }
+
+    private var emptyMapDescription: String {
+        if !payload.demoMode, store.mappedAccountCount == 0 {
+            return "Use Map Imported Accounts above to calculate coordinates from the imported postal addresses."
+        }
+        if !payload.demoMode, locationService.coordinate == nil {
+            return "Allow location access or tap the location button to compare mapped accounts with this iPhone."
+        }
+        if payload.nearby.isEmpty {
+            return payload.demoMode
+                ? "Refresh location to display GPS-ready accounts on Apple Maps."
+                : "No accounts currently have usable map coordinates."
+        }
+        return "Increase the Nearby Radius in Settings to include more accounts."
     }
 
     private func selectedCard(_ row: FireVaultNativeNearbyAccount) -> some View {
@@ -339,15 +460,9 @@ private struct NativeNearbyView: View {
             }
             if nearbyRows.isEmpty {
                 ContentUnavailableView(
-                    payload.nearby.isEmpty ? "No Mapped Accounts" : "No Accounts in Range",
+                    emptyMapTitle,
                     systemImage: "location.slash",
-                    description: Text(
-                        payload.nearby.isEmpty
-                            ? (payload.demoMode
-                                ? "Tap the location button to compare this iPhone with GPS-ready accounts."
-                                : "Import accounts through Settings, then add GPS coordinates for Nearby.")
-                            : "Change the native Nearby Radius in Settings."
-                    )
+                    description: Text(emptyMapDescription)
                 )
                     .frame(maxWidth: .infinity).padding(.vertical, 30)
             } else {

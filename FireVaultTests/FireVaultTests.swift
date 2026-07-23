@@ -6,6 +6,7 @@
 //
 
 import XCTest
+import CoreLocation
 @testable import FireVault
 
 @MainActor
@@ -59,8 +60,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.05.05"), "Version 1.05.05")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.05.05"), "Build 1.05.05")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.05.06"), "Version 1.05.06")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.05.06"), "Build 1.05.06")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
@@ -245,6 +246,73 @@ final class FireVaultTests: XCTestCase {
 
         store.exitDemoMode()
         XCTAssertEqual(store.accounts.map(\.accountId), ["PROD-1"])
+    }
+
+    func testImportedCombinedAddressProducesCensusComponents() throws {
+        let address = try XCTUnwrap(
+            FireVaultPostalAddress(combinedAddress: "100 Main St, Boise, ID, 83702")
+        )
+
+        XCTAssertEqual(address.street, "100 Main St")
+        XCTAssertEqual(address.city, "Boise")
+        XCTAssertEqual(address.state, "ID")
+        XCTAssertEqual(address.zip, "83702")
+    }
+
+    func testCensusBatchPayloadUsesOpaqueTokenAndOmitsAccountIdentity() throws {
+        let request = FireVaultGeocodingRequest(
+            token: "fv-7",
+            accountID: "private-native-id",
+            address: try XCTUnwrap(
+                FireVaultPostalAddress(combinedAddress: "100 Main St, Boise, ID, 83702")
+            )
+        )
+
+        let payload = FireVaultCensusGeocoder.batchCSV(for: [request])
+
+        XCTAssertTrue(payload.contains("\"fv-7\",\"100 Main St\",\"Boise\",\"ID\",\"83702\""))
+        XCTAssertFalse(payload.contains("private-native-id"))
+    }
+
+    func testCensusResponseParserReadsLongitudeThenLatitude() throws {
+        let response = """
+        "fv-0","100 Main St, Boise, ID, 83702","Match","Exact","100 MAIN ST, BOISE, ID, 83702","-116.2023,43.6150","123","L"
+        "fv-1","Missing Address, Boise, ID, 83702","No_Match"
+        """
+
+        let matches = try FireVaultCensusGeocoder.parseResponse(Data(response.utf8))
+
+        XCTAssertEqual(matches, [
+            .init(token: "fv-0", latitude: 43.6150, longitude: -116.2023)
+        ])
+    }
+
+    func testGeocodedImportedAccountAppearsInNearbyUsingDeviceLocation() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        store.exitDemoMode()
+        _ = try store.importAccountsCSV(
+            Data("Account Name,Address,City,State,ZipCode,Account Id\nMapped Customer,100 Main St,Boise,ID,83702,MAP-1".utf8)
+        )
+        let account = try XCTUnwrap(store.accounts.first)
+        let address = try XCTUnwrap(FireVaultPostalAddress(combinedAddress: account.address))
+        let request = FireVaultGeocodingRequest(token: "fv-0", accountID: account.id, address: address)
+
+        store.applyGeocodingMatches(
+            [.init(token: "fv-0", latitude: 43.6150, longitude: -116.2023)],
+            requests: [request]
+        )
+        let payload = store.appPayload(
+            userCoordinate: .init(latitude: 43.6150, longitude: -116.2023),
+            liveLocationStatus: "Updated"
+        )
+
+        XCTAssertEqual(store.mappedAccountCount, 1)
+        XCTAssertEqual(store.unmappedAccountCount, 0)
+        XCTAssertEqual(payload.nearby.map(\.account.accountId), ["MAP-1"])
+        XCTAssertEqual(try XCTUnwrap(payload.nearby.first?.distanceMeters), 0, accuracy: 0.01)
     }
 
     func testEverySettingsCatalogRowHasANativeDestinationIdentifier() {

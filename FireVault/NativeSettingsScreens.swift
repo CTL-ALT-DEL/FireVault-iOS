@@ -2,7 +2,7 @@
 //  NativeSettingsScreens.swift
 //  FireVault
 //
-//  Pure SwiftUI Settings destinations for Build 1.05.05.
+//  Pure SwiftUI Settings destinations for Build 1.05.06.
 //
 
 import SwiftUI
@@ -416,6 +416,8 @@ struct NativeCSVImportView: View {
                     .accessibilityElement(children: .combine)
                 }
                 Text("Recognized columns include Account Name, Address, City, State, ZIP, Account ID, Category, Phone, Latitude, and Longitude.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Text("If the file contains postal addresses but no coordinates, finish setup from Nearby → Map Imported Accounts.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             if let result {

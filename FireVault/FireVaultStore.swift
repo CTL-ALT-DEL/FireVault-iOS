@@ -2,7 +2,7 @@
 //  FireVaultStore.swift
 //  FireVault
 //
-//  Native application and demo-data authority for Build 1.05.05.
+//  Native application and demo-data authority for Build 1.05.06.
 //
 
 import Foundation
@@ -26,9 +26,11 @@ final class FireVaultStore: ObservableObject {
     @Published var selectedTab: FireVaultShellTab = .nearby
     @Published var locationStatus: String
     @Published private(set) var demoMode: Bool
+    @Published private(set) var geocodingProgress: FireVaultGeocodingProgress?
 
     private let defaults: UserDefaults
     private let demoCoordinate = CLLocationCoordinate2D(latitude: 43.6150, longitude: -116.2023)
+    private var geocodingTask: Task<Void, Never>?
 
     private enum Key {
         static let demoMode = "firevault.native.demo-mode.v1"
@@ -54,11 +56,31 @@ final class FireVaultStore: ObservableObject {
         return accounts.first { $0.id == selectedAccountID }
     }
 
-    var appPayload: FireVaultAppPayload {
+    var mappedAccountCount: Int {
+        accounts.lazy.filter { $0.coordinate != nil }.count
+    }
+
+    var unmappedAccountCount: Int {
+        accounts.count - mappedAccountCount
+    }
+
+    var geocodableAccountCount: Int {
+        accounts.lazy.filter {
+            $0.coordinate == nil && FireVaultPostalAddress(combinedAddress: $0.address) != nil
+        }.count
+    }
+
+    func appPayload(
+        userCoordinate: CLLocationCoordinate2D?,
+        liveLocationStatus: String
+    ) -> FireVaultAppPayload {
         let nativeAccounts = accounts.map(Self.nativeAccount)
-        let userLocation = CLLocation(latitude: demoCoordinate.latitude, longitude: demoCoordinate.longitude)
+        let distanceCoordinate = demoMode ? demoCoordinate : userCoordinate
+        let userLocation = distanceCoordinate.map {
+            CLLocation(latitude: $0.latitude, longitude: $0.longitude)
+        }
         let nearby = accounts.compactMap { account -> FireVaultNativeNearbyAccount? in
-            guard let coordinate = account.coordinate else { return nil }
+            guard let coordinate = account.coordinate, let userLocation else { return nil }
             let meters = userLocation.distance(from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude))
             return .init(
                 id: account.id,
@@ -75,7 +97,7 @@ final class FireVaultStore: ObservableObject {
             demoMode: demoMode,
             today: Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()),
             technicianName: demoMode ? "Demo Technician" : "Field Technician",
-            locationStatus: locationStatus,
+            locationStatus: demoMode ? locationStatus : liveLocationStatus,
             accounts: nativeAccounts,
             nearby: nearby,
             settingsGroups: []
@@ -94,6 +116,109 @@ final class FireVaultStore: ObservableObject {
 
     func refreshNearby() {
         locationStatus = "Updated \(Date().formatted(date: .omitted, time: .shortened))"
+    }
+
+    func startGeocodingMissingAccounts() {
+        guard geocodingTask == nil else { return }
+
+        let requests = accounts.enumerated().compactMap { index, account -> FireVaultGeocodingRequest? in
+            guard account.coordinate == nil,
+                  let address = FireVaultPostalAddress(combinedAddress: account.address) else {
+                return nil
+            }
+            return .init(token: "fv-\(index)", accountID: account.id, address: address)
+        }
+        guard !requests.isEmpty else {
+            geocodingProgress = .init(
+                phase: .complete,
+                completed: 0,
+                total: 0,
+                matched: 0,
+                message: "All accounts with usable addresses are already mapped."
+            )
+            return
+        }
+
+        geocodingProgress = .init(
+            phase: .preparing,
+            completed: 0,
+            total: requests.count,
+            matched: 0,
+            message: "Preparing \(requests.count) imported addresses…"
+        )
+
+        geocodingTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try Task.checkCancellation()
+                self.geocodingProgress = .init(
+                    phase: .submitting,
+                    completed: 0,
+                    total: requests.count,
+                    matched: 0,
+                    message: "Calculating account coordinates…"
+                )
+                let matches = try await FireVaultCensusGeocoder().geocode(requests)
+                try Task.checkCancellation()
+
+                self.geocodingProgress = .init(
+                    phase: .saving,
+                    completed: requests.count,
+                    total: requests.count,
+                    matched: matches.count,
+                    message: "Saving \(matches.count) mapped accounts…"
+                )
+                self.applyGeocodingMatches(matches, requests: requests)
+                let unmatched = requests.count - matches.count
+                let suffix = unmatched > 0 ? " \(unmatched) address\(unmatched == 1 ? "" : "es") could not be matched." : ""
+                self.geocodingProgress = .init(
+                    phase: .complete,
+                    completed: requests.count,
+                    total: requests.count,
+                    matched: matches.count,
+                    message: "Mapped \(matches.count) account\(matches.count == 1 ? "" : "s").\(suffix)"
+                )
+            } catch is CancellationError {
+                self.geocodingProgress = .init(
+                    phase: .cancelled,
+                    completed: 0,
+                    total: requests.count,
+                    matched: 0,
+                    message: "Address mapping stopped. You can retry at any time."
+                )
+            } catch {
+                self.geocodingProgress = .init(
+                    phase: .failed,
+                    completed: 0,
+                    total: requests.count,
+                    matched: 0,
+                    message: error.localizedDescription
+                )
+            }
+            self.geocodingTask = nil
+        }
+    }
+
+    func cancelGeocoding() {
+        geocodingTask?.cancel()
+    }
+
+    func applyGeocodingMatches(
+        _ matches: [FireVaultGeocodingMatch],
+        requests: [FireVaultGeocodingRequest]
+    ) {
+        let accountIDByToken = Dictionary(uniqueKeysWithValues: requests.map { ($0.token, $0.accountID) })
+        let matchByAccountID = Dictionary(uniqueKeysWithValues: matches.compactMap { match -> (String, FireVaultGeocodingMatch)? in
+            guard let accountID = accountIDByToken[match.token] else { return nil }
+            return (accountID, match)
+        })
+
+        for index in accounts.indices {
+            guard let match = matchByAccountID[accounts[index].id] else { continue }
+            accounts[index].latitude = match.latitude
+            accounts[index].longitude = match.longitude
+        }
+        persist()
     }
 
     func toggleFavorite(_ id: String) {
@@ -325,13 +450,20 @@ final class FireVaultStore: ObservableObject {
                     $0.address.caseInsensitiveCompare(address) == .orderedSame
             }
             if let existingIndex {
+                let addressChanged = !address.isEmpty &&
+                    accounts[existingIndex].address.caseInsensitiveCompare(address) != .orderedSame
                 accounts[existingIndex].name = name
                 accounts[existingIndex].address = address.isEmpty ? accounts[existingIndex].address : address
                 accounts[existingIndex].category = category.isEmpty ? accounts[existingIndex].category : category
                 accounts[existingIndex].accountId = accountID.isEmpty ? accounts[existingIndex].accountId : accountID
                 accounts[existingIndex].phone = phone.isEmpty ? accounts[existingIndex].phone : phone
-                if let latitude { accounts[existingIndex].latitude = latitude }
-                if let longitude { accounts[existingIndex].longitude = longitude }
+                if let latitude, let longitude {
+                    accounts[existingIndex].latitude = latitude
+                    accounts[existingIndex].longitude = longitude
+                } else if addressChanged {
+                    accounts[existingIndex].latitude = nil
+                    accounts[existingIndex].longitude = nil
+                }
                 if !accounts[existingIndex].tags.contains("CSV Import") {
                     accounts[existingIndex].tags.append("CSV Import")
                 }

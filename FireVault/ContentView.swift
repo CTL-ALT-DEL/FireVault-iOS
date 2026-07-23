@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  FireVault
 //
-//  Pure SwiftUI application root for Build 1.05.05.
+//  Pure SwiftUI application root for Build 1.05.06.
 //
 
 import SwiftUI
@@ -10,6 +10,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var store = FireVaultStore()
     @StateObject private var settings = FireVaultNativeSettingsStore()
+    @StateObject private var locationService = FireVaultLocationService()
 
     var body: some View {
         ZStack {
@@ -20,9 +21,13 @@ struct ContentView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.985)))
             } else {
                 NativeAppShellView(
-                    payload: store.appPayload,
+                    payload: store.appPayload(
+                        userCoordinate: locationService.coordinate,
+                        liveLocationStatus: locationService.statusText
+                    ),
                     store: store,
-                    settings: settings
+                    settings: settings,
+                    locationService: locationService
                 )
                 .transition(.opacity)
             }
