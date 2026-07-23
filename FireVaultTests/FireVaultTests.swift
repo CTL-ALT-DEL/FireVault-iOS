@@ -61,8 +61,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.06.07"), "Version 1.06.07")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.06.07"), "Build 1.06.07")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.06.08"), "Version 1.06.08")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.06.08"), "Build 1.06.08")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
@@ -73,6 +73,13 @@ final class FireVaultTests: XCTestCase {
         var high = FireVaultGPSPreferences()
         high.nearbyRadiusMiles = 80
         XCTAssertEqual(high.normalized.nearbyRadiusMiles, 25)
+    }
+
+    func testNativeGPSRadiusWheelUsesQuarterMileSteps() {
+        XCTAssertEqual(FireVaultGPSPreferences.radiusOptions.first, 0.25)
+        XCTAssertEqual(FireVaultGPSPreferences.radiusOptions.last, 25)
+        XCTAssertEqual(FireVaultGPSPreferences.radiusOptions.count, 100)
+        XCTAssertTrue(FireVaultGPSPreferences.radiusOptions.contains(3.5))
     }
 
     func testNativeGPSSettingsPersistAndReload() throws {

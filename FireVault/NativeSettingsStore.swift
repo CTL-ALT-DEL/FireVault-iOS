@@ -38,6 +38,7 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
 
 struct FireVaultGPSPreferences: Codable, Equatable {
     static let allowedRadius = 0.25...25.0
+    static let radiusOptions: [Double] = (1...100).map { Double($0) / 4 }
 
     var nearbyRadiusMiles: Double = 1
     var highAccuracy = true
@@ -56,6 +57,10 @@ struct FireVaultGPSPreferences: Codable, Equatable {
 
     var radiusStatus: String {
         "\(nearbyRadiusMiles.formatted(.number.precision(.fractionLength(0...2)))) mi"
+    }
+
+    static func radiusLabel(_ value: Double) -> String {
+        "\(value.formatted(.number.precision(.fractionLength(0...2)))) mi"
     }
 }
 

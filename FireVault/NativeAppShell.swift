@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.06.07.
+//  Native everyday navigation for Build 1.06.08.
 //
 
 import SwiftUI
@@ -552,7 +552,42 @@ private struct NativeNearbyView: View {
                         .padding(10)
                     }
                 }
+                .overlay(alignment: .bottomLeading) {
+                    FVRadiusWheelPicker(
+                        selection: nearbyRadiusBinding,
+                        presentation: .map
+                    )
+                    .padding(10)
+                }
                 .accessibilityIdentifier("nearby-fixed-map")
+            }
+        }
+    }
+
+    private var nearbyRadiusBinding: Binding<Double> {
+        Binding(
+            get: { settings.gps.nearbyRadiusMiles },
+            set: updateNearbyRadius
+        )
+    }
+
+    private func updateNearbyRadius(_ radius: Double) {
+        guard radius != settings.gps.nearbyRadiusMiles else { return }
+
+        var updated = settings.gps
+        updated.nearbyRadiusMiles = radius
+        settings.saveGPS(updated)
+
+        delayedMapFocusTask?.cancel()
+        accountScrollWasActive = false
+        selectedID = nil
+        scrollAccountID = nearbyRows.first?.id
+
+        withAnimation(.easeInOut(duration: 0.35)) {
+            if payload.demoMode {
+                cameraPosition = .region(overviewRegion)
+            } else if locationService.coordinate != nil {
+                centerMapOnUser()
             }
         }
     }
@@ -1151,28 +1186,12 @@ private struct NativeSettingsView: View {
 private struct NativeGPSSettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var draft: FireVaultGPSPreferences
-    @State private var radiusText: String
     @State private var saved = false
-    @FocusState private var radiusFocused: Bool
 
     init(settings: FireVaultNativeSettingsStore) {
         self.settings = settings
         let current = settings.gps
         _draft = State(initialValue: current)
-        _radiusText = State(
-            initialValue: current.nearbyRadiusMiles.formatted(
-                .number.precision(.fractionLength(0...2))
-            )
-        )
-    }
-
-    private var enteredRadius: Double? {
-        Double(radiusText.replacingOccurrences(of: ",", with: "."))
-    }
-
-    private var radiusIsValid: Bool {
-        guard let enteredRadius else { return false }
-        return FireVaultGPSPreferences.allowedRadius.contains(enteredRadius)
     }
 
     var body: some View {
@@ -1182,21 +1201,21 @@ private struct NativeGPSSettingsView: View {
 
                 Toggle("High-accuracy GPS", isOn: $draft.highAccuracy)
 
-                LabeledContent {
-                    TextField("Miles", text: $radiusText)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .focused($radiusFocused)
-                        .frame(maxWidth: 100)
-                        .accessibilityLabel("Nearby radius in miles")
-                } label: {
-                    Text("Nearby radius")
-                }
+                VStack(spacing: 8) {
+                    HStack {
+                        Text("Nearby radius")
+                            .font(.headline)
+                        Spacer()
+                        Text(FireVaultGPSPreferences.radiusLabel(draft.nearbyRadiusMiles))
+                            .font(.headline.monospacedDigit())
+                            .foregroundStyle(NativeShellPalette.blue)
+                            .contentTransition(.numericText())
+                    }
 
-                if !radiusIsValid {
-                    Label("Enter a distance from 0.25 to 25 miles.", systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
+                    FVRadiusWheelPicker(
+                        selection: $draft.nearbyRadiusMiles,
+                        presentation: .settings
+                    )
                 }
             } header: {
                 Text("Map Preferences")
@@ -1218,32 +1237,78 @@ private struct NativeGPSSettingsView: View {
                 }
             }
         }
-        .scrollDismissesKeyboard(.interactively)
         .navigationTitle("GPS & Maps")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Save", action: save)
-                    .disabled(!radiusIsValid)
-            }
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") { radiusFocused = false }
             }
         }
-        .onChange(of: radiusText) { _, _ in saved = false }
         .onChange(of: draft) { _, _ in saved = false }
         .onDisappear {
-            if radiusIsValid { save() }
+            save()
         }
     }
 
     private func save() {
-        guard let enteredRadius, radiusIsValid else { return }
-        draft.nearbyRadiusMiles = enteredRadius
         settings.saveGPS(draft)
-        radiusFocused = false
         saved = true
+    }
+}
+
+private struct FVRadiusWheelPicker: View {
+    enum Presentation {
+        case settings
+        case map
+    }
+
+    @Binding var selection: Double
+    let presentation: Presentation
+
+    private var options: [Double] {
+        guard !FireVaultGPSPreferences.radiusOptions.contains(selection) else {
+            return FireVaultGPSPreferences.radiusOptions
+        }
+        return (FireVaultGPSPreferences.radiusOptions + [selection]).sorted()
+    }
+
+    var body: some View {
+        Picker("Nearby radius", selection: $selection.animation(.snappy(duration: 0.22))) {
+            ForEach(options, id: \.self) { radius in
+                Text(FireVaultGPSPreferences.radiusLabel(radius))
+                    .font(presentation == .map ? .caption.bold() : .body.weight(.semibold))
+                    .monospacedDigit()
+                    .tag(radius)
+            }
+        }
+        .pickerStyle(.wheel)
+        .frame(
+            width: presentation == .map ? 92 : nil,
+            height: presentation == .map ? 118 : 150
+        )
+        .frame(maxWidth: presentation == .settings ? .infinity : nil)
+        .clipped()
+        .background(.black.opacity(presentation == .map ? 0.84 : 0.18))
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: presentation == .map ? 16 : 18,
+                style: .continuous
+            )
+        )
+        .overlay {
+            RoundedRectangle(
+                cornerRadius: presentation == .map ? 16 : 18,
+                style: .continuous
+            )
+            .stroke(.white.opacity(presentation == .map ? 0.18 : 0.10), lineWidth: 1)
+        }
+        .sensoryFeedback(.selection, trigger: selection)
+        .accessibilityLabel("Nearby radius")
+        .accessibilityValue(FireVaultGPSPreferences.radiusLabel(selection))
+        .accessibilityHint("Swipe up or down to change the map radius")
+        .accessibilityIdentifier(
+            presentation == .map ? "nearby-map-radius-wheel" : "settings-radius-wheel"
+        )
     }
 }
 
