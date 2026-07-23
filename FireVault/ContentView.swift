@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  FireVault
 //
-//  Pure SwiftUI application root for Build 1.06.04.
+//  Pure SwiftUI application root for Build 1.06.05.
 //
 
 import SwiftUI
@@ -75,10 +75,14 @@ private struct FireVaultBrandHeader: View {
                 .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .accessibilityHidden(true)
 
-            Text("FIREVAULT")
+            (
+                Text("FIRE")
+                    .foregroundColor(NativeShellPalette.red)
+                + Text("VAULT")
+                    .foregroundColor(.white)
+            )
                 .font(.system(size: 15, weight: .bold, design: .rounded))
                 .tracking(1.35)
-                .foregroundStyle(.white)
 
             Spacer()
         }
@@ -161,9 +165,13 @@ private struct FireVaultSplashView: View {
                 .opacity(logoIsVisible ? 1 : 0)
 
                 VStack(spacing: 8) {
-                    Text("FIREVAULT")
+                    (
+                        Text("FIRE")
+                            .foregroundColor(NativeShellPalette.red)
+                        + Text("VAULT")
+                            .foregroundColor(.white)
+                    )
                         .font(.system(size: 40, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
                         .tracking(0.4)
 
                     Text("FIELD WORKSPACE")

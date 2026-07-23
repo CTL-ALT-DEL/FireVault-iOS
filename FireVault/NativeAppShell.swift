@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.06.04.
+//  Native everyday navigation for Build 1.06.05.
 //
 
 import SwiftUI
@@ -342,20 +342,12 @@ private struct NativeNearbyView: View {
                 Text(payload.locationStatus).font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
-            if !payload.demoMode,
-               store.unmappedAccountCount > 0,
-               !shouldShowCoordinateSetup {
-                Button {
-                    showMappingDetails = true
-                } label: {
-                    Label("\(store.unmappedAccountCount)", systemImage: "mappin.slash")
-                        .font(.caption.weight(.semibold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(NativeShellPalette.amber)
-                .accessibilityLabel("Review \(store.unmappedAccountCount) unmapped addresses")
-            }
-            Text(payload.today).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+            Text(payload.today)
+                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+                .accessibilityLabel("Today, \(payload.today)")
         }
     }
 
