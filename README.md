@@ -1,8 +1,8 @@
-# FireVault iPhone App — Build 1.03.31 · Native Settings Polish
+# FireVault iPhone App — Build 1.03.32 · Settings Integration Fixes
 
 This Xcode project installs FireVault’s native SwiftUI app shell, the Account Field Workspace, Apple Maps, Liquid Glass controls, the FireVault flame icon, and Apple’s built-in document camera. Nearby, Accounts, Photo access, and the simplified five-area Settings hub now use the native shell. Established editors continue using the deployed FireVault vault engine so existing data and save workflows remain compatible.
 
-This build uses native build number 32 and marketing version 1.03.31. It preserves the existing web bridge and stored-data behavior while refining the native grouped Settings experience, accessibility metadata, version display, and repository hygiene.
+This build uses native build number 33 and marketing version 1.03.32. It preserves the existing web bridge and stored-data behavior while repairing native/web keyboard layout, duplicate navigation, Photo Overlay header spacing, and visible version consistency.
 
 ## Install in the correct order
 

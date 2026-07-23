@@ -12,6 +12,93 @@ import MapKit
 import CoreLocation
 import VisionKit
 
+enum FireVaultWebIntegration {
+    static func source(version: String) -> String {
+        """
+        (() => {
+          const nativeVersion = "\(version)";
+          const styleID = "firevault-native-integration-10332";
+
+          if (!document.getElementById(styleID)) {
+            const style = document.createElement("style");
+            style.id = styleID;
+            style.textContent = `
+              body.fvNativeShellActive10332 #appNav,
+              body.fvNativeShellActive10332 .nearbyBottomNav069 {
+                display: none !important;
+                visibility: hidden !important;
+                pointer-events: none !important;
+              }
+
+              body.fvNativeIOS10332.fvKeyboardOpen0802 main#app {
+                padding-bottom: 8px !important;
+              }
+              body.fvNativeIOS10332.fvKeyboardOpen0802 .screen,
+              body.fvNativeIOS10332.fvKeyboardOpen0802 .form,
+              body.fvNativeIOS10332.fvKeyboardOpen0802 .list,
+              body.fvNativeIOS10332.fvKeyboardOpen0802 .settingsDetailBody488 {
+                scroll-padding-bottom: 32px !important;
+              }
+              body.fvNativeIOS10332.fvKeyboardOpen0802 input:focus,
+              body.fvNativeIOS10332.fvKeyboardOpen0802 textarea:focus,
+              body.fvNativeIOS10332.fvKeyboardOpen0802 select:focus {
+                scroll-margin-top: 82px !important;
+                scroll-margin-bottom: 32px !important;
+              }
+
+              body.fvNativeIOS10332 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032 {
+                grid-template-columns: 58px minmax(0, 1fr) auto 58px !important;
+                gap: 10px !important;
+              }
+              body.fvNativeIOS10332 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032
+                > #settingsBackBtn,
+              body.fvNativeIOS10332 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032
+                > #settingsDoneBtn {
+                width: 58px !important;
+                min-width: 58px !important;
+              }
+              body.fvNativeIOS10332 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032
+                .settingsDetailTitle0880 {
+                min-width: 0 !important;
+                padding-inline: 2px !important;
+              }
+              @media (max-width: 430px) {
+                body.fvNativeIOS10332 .settingsOverlayDetail1012 .photoOverlayDetailHeader1032 {
+                  grid-template-columns: 58px minmax(0, 1fr) 58px !important;
+                }
+              }
+            `;
+            document.head.appendChild(style);
+          }
+
+          const syncVisibleVersion = () => {
+            document.querySelectorAll(
+              ".splashBuild492, .updateBuild072 > div:first-child > strong, .aboutGrid540 > div:first-child > span"
+            ).forEach(element => {
+              if (element.textContent?.trim() !== nativeVersion) element.textContent = nativeVersion;
+            });
+          };
+
+          document.body?.classList.add("fvNativeIOS10332");
+          syncVisibleVersion();
+
+          if (!window.__fireVaultNativeVersionObserver10332) {
+            const observer = new MutationObserver(syncVisibleVersion);
+            observer.observe(document.documentElement, { childList: true, subtree: true });
+            window.__fireVaultNativeVersionObserver10332 = observer;
+          }
+
+          window.fireVaultNativeIntegration10332 = {
+            setShellActive(active) {
+              document.body?.classList.toggle("fvNativeShellActive10332", Boolean(active));
+            },
+            syncVisibleVersion
+          };
+        })();
+        """
+    }
+}
+
 struct ContentView: View {
     @State private var loadState: FireVaultLoadState = .loading
     @State private var reloadToken = UUID()
@@ -159,6 +246,13 @@ private struct FireVaultWebView: UIViewRepresentable {
         configuration.userContentController.add(context.coordinator, name: "fireVaultScanner")
         configuration.userContentController.add(context.coordinator, name: "fireVaultAppShell")
         configuration.userContentController.add(context.coordinator, name: "fireVaultWorkspace")
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: FireVaultWebIntegration.source(version: FireVaultVersionInfo().version),
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+        )
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -167,8 +261,9 @@ private struct FireVaultWebView: UIViewRepresentable {
         webView.backgroundColor = UIColor(FireVaultTheme.background)
         webView.scrollView.backgroundColor = UIColor(FireVaultTheme.background)
         webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.scrollView.keyboardDismissMode = .interactive
         webView.allowsBackForwardNavigationGestures = true
-        webView.customUserAgent = "FireVault-iOS/1.03.31"
+        webView.customUserAgent = "FireVault-iOS/1.03.32"
 
         context.coordinator.webView = webView
         appShellBridge.webView = webView
@@ -202,6 +297,7 @@ private struct FireVaultWebView: UIViewRepresentable {
         private var activeReverseRequests: [String: MKReverseGeocodingRequest] = [:]
         private var activeSnapshots: [String: MKMapSnapshotter] = [:]
         private var pendingScannerRequestID: String?
+        private var nativeShellActive = false
         weak var webView: WKWebView?
         var lastReloadToken: UUID?
 
@@ -221,6 +317,10 @@ private struct FireVaultWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            webView.evaluateJavaScript(
+                "window.fireVaultNativeIntegration10332?.syncVisibleVersion();"
+            )
+            setNativeShellActive(nativeShellActive)
             loadState = .ready
         }
 
@@ -302,8 +402,10 @@ private struct FireVaultWebView: UIViewRepresentable {
 
             if message.name == "fireVaultAppShell" {
                 if action == "present", let payload = body["payload"] as? [String: Any] {
+                    setNativeShellActive(true)
                     appShellBridge.present(payload)
                 } else if action == "dismiss" {
+                    setNativeShellActive(false)
                     appShellBridge.hide()
                 }
                 return
@@ -329,6 +431,13 @@ private struct FireVaultWebView: UIViewRepresentable {
             case "snapshot": createSnapshot(body, requestID: requestID)
             default: sendFailure(requestID, message: "Unsupported Apple Maps request.")
             }
+        }
+
+        private func setNativeShellActive(_ active: Bool) {
+            nativeShellActive = active
+            webView?.evaluateJavaScript(
+                "window.fireVaultNativeIntegration10332?.setShellActive(\(active));"
+            )
         }
 
         private func presentDocumentScanner(requestID: String) {

@@ -41,4 +41,21 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(info.build.isEmpty)
         XCTAssertTrue(info.displayText.hasPrefix("Version "))
     }
+
+    func testWebIntegrationTargetsSharedKeyboardAndNavigationLayers() {
+        let source = FireVaultWebIntegration.source(version: "1.03.32")
+
+        XCTAssertTrue(source.contains("fvKeyboardOpen0802 main#app"))
+        XCTAssertTrue(source.contains("fvNativeShellActive10332 #appNav"))
+        XCTAssertTrue(source.contains(".nearbyBottomNav069"))
+    }
+
+    func testWebIntegrationSynchronizesVisibleVersionAndPhotoOverlayHeader() {
+        let source = FireVaultWebIntegration.source(version: "1.03.32")
+
+        XCTAssertTrue(source.contains(".splashBuild492"))
+        XCTAssertTrue(source.contains(".aboutGrid540"))
+        XCTAssertTrue(source.contains("photoOverlayDetailHeader1032"))
+        XCTAssertTrue(source.contains("1.03.32"))
+    }
 }
