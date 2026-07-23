@@ -93,13 +93,14 @@ struct NativeOverlaySettingsView: View {
     var body: some View {
         Form {
             Section("Preview") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("FIREVAULT FIELD NOTES").font(.caption.bold()).foregroundStyle(.red)
-                    Text("Demo Account • Demo Technician").font(.headline)
-                    Text("Native photo overlay preview").font(.subheadline).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 16)
+                FireVaultOverlayPreview(
+                    preferences: draft.overlay,
+                    technicianName: draft.technician.name.isEmpty
+                        ? "Demo Technician"
+                        : draft.technician.name,
+                    accountName: "Demo Account"
+                )
+                .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
             }
             Section("Layout") {
                 Picker("Position", selection: $draft.overlay.alignment) {

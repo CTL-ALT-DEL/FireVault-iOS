@@ -61,8 +61,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.06.08"), "Version 1.06.08")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.06.08"), "Build 1.06.08")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.07.00"), "Version 1.07.00")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.07.00"), "Build 1.07.00")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
@@ -80,6 +80,23 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(FireVaultGPSPreferences.radiusOptions.last, 25)
         XCTAssertEqual(FireVaultGPSPreferences.radiusOptions.count, 100)
         XCTAssertTrue(FireVaultGPSPreferences.radiusOptions.contains(3.5))
+    }
+
+    func testPhotoOverlayPreferencesNormalizeUnsupportedValues() {
+        var preferences = FireVaultOverlayPreferences()
+        preferences.alignment = "floating"
+        preferences.fontSize = "enormous"
+        preferences.backgroundStyle = "glass"
+        preferences.accentColor = "purple"
+        preferences.opacity = 5
+
+        let normalized = preferences.normalized
+
+        XCTAssertEqual(normalized.alignment, "bottom")
+        XCTAssertEqual(normalized.fontSize, "medium")
+        XCTAssertEqual(normalized.backgroundStyle, "bar")
+        XCTAssertEqual(normalized.accentColor, "red")
+        XCTAssertEqual(normalized.opacity, 35)
     }
 
     func testNativeGPSSettingsPersistAndReload() throws {

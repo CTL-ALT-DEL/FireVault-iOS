@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.06.08.
+//  Native everyday navigation for Build 1.07.00.
 //
 
 import SwiftUI
@@ -10,6 +10,7 @@ import Combine
 import MapKit
 import PhotosUI
 import UIKit
+import VisionKit
 
 struct FireVaultAppPayload: Codable, Equatable {
     let build: String
@@ -135,7 +136,7 @@ struct NativeAppShellView: View {
                         locationService: locationService
                     )
                 case .accounts: NativeAccountsView(payload: payload, store: store)
-                case .photo: NativePhotoView(store: store)
+                case .photo: NativePhotoView(store: store, settings: settings)
                 case .settings: NativeSettingsView(payload: payload, store: store, settings: settings)
                 }
             }
@@ -924,37 +925,70 @@ private struct NativeAccountsView: View {
 
 private struct NativePhotoView: View {
     @ObservedObject var store: FireVaultStore
+    @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var selectedItem: PhotosPickerItem?
     @State private var selectedImage: UIImage?
+    @State private var scannedPages: [UIImage] = []
+    @State private var captureRoute: CaptureRoute?
+    @State private var captureDate = Date()
+    @State private var mediaKind: MediaKind = .photo
+    @State private var alertTitle = ""
+    @State private var alertMessage = ""
+    @State private var showsAlert = false
+
+    private enum CaptureRoute: String, Identifiable {
+        case camera
+        case scanner
+        var id: String { rawValue }
+    }
+
+    private enum MediaKind {
+        case photo
+        case scan
+    }
+
+    private var technicianName: String {
+        let savedName = settings.preferences.technician.name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return savedName.isEmpty ? "Field Technician" : savedName
+    }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 22) {
-                if let selectedImage {
-                    Image(uiImage: selectedImage)
-                        .resizable()
-                        .scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .stroke(.white.opacity(0.12), lineWidth: 1)
-                        }
-                } else {
-                    ContentUnavailableView(
-                        "Select a Field Photo",
-                        systemImage: "camera.fill",
-                        description: Text("The native photo workspace uses the iOS photo picker. Camera capture and account attachment will be added to this native workflow next.")
-                    )
-                }
+            ScrollView {
+                VStack(spacing: 18) {
+                    if let selectedImage {
+                        imagePreview(selectedImage)
 
-                PhotosPicker(selection: $selectedItem, matching: .images) {
-                    Label("Choose Photo", systemImage: "photo.on.rectangle")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
+                        if scannedPages.count > 1 {
+                            scannedPageStrip
+                        }
+
+                        Label(
+                            mediaKind == .scan
+                                ? "\(scannedPages.count) scanned page\(scannedPages.count == 1 ? "" : "s")"
+                                : "Photo overlay applied",
+                            systemImage: mediaKind == .scan
+                                ? "doc.viewfinder.fill"
+                                : "camera.filters"
+                        )
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    } else {
+                        ContentUnavailableView(
+                            "Capture Field Media",
+                            systemImage: "camera.fill",
+                            description: Text(
+                                "Take a photo, scan a multi-page document, or choose an existing image."
+                            )
+                        )
+                        .frame(minHeight: 300)
+                    }
+
+                    captureControls
                 }
-                .buttonStyle(.borderedProminent)
+                .padding(20)
             }
-            .padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(NativeShellPalette.background)
             .navigationTitle("Photo")
@@ -963,9 +997,175 @@ private struct NativePhotoView: View {
                     guard let data = try? await item?.loadTransferable(type: Data.self),
                           let image = UIImage(data: data) else { return }
                     selectedImage = image
+                    scannedPages = []
+                    captureDate = .now
+                    mediaKind = .photo
+                }
+            }
+            .fullScreenCover(item: $captureRoute) { route in
+                switch route {
+                case .camera:
+                    NativeCameraCaptureView(
+                        onCapture: acceptPhoto,
+                        onCancel: { captureRoute = nil }
+                    )
+                    .ignoresSafeArea()
+                case .scanner:
+                    NativeDocumentScannerView(
+                        onScan: acceptScan,
+                        onCancel: { captureRoute = nil },
+                        onFailure: showCaptureFailure
+                    )
+                    .ignoresSafeArea()
+                }
+            }
+            .alert(alertTitle, isPresented: $showsAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(alertMessage)
+            }
+        }
+    }
+
+    private func imagePreview(_ image: UIImage) -> some View {
+        let aspectRatio = max(0.35, image.size.width / max(image.size.height, 1))
+
+        return ZStack {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+
+            if mediaKind == .photo {
+                FireVaultPhotoOverlayView(
+                    preferences: settings.preferences.overlay,
+                    technicianName: technicianName,
+                    accountName: "FIELD PHOTO",
+                    timestamp: captureDate
+                )
+            }
+        }
+        .aspectRatio(aspectRatio, contentMode: .fit)
+        .frame(maxHeight: 470)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.white.opacity(0.12), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(
+            mediaKind == .scan ? "Scanned document preview" : "Field photo with overlay preview"
+        )
+        .accessibilityIdentifier("native-photo-preview")
+    }
+
+    private var scannedPageStrip: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 10) {
+                ForEach(Array(scannedPages.enumerated()), id: \.offset) { index, page in
+                    Button {
+                        selectedImage = page
+                    } label: {
+                        Image(uiImage: page)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 72, height: 92)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(
+                                        selectedImage === page
+                                            ? NativeShellPalette.blue
+                                            : .white.opacity(0.12),
+                                        lineWidth: selectedImage === page ? 3 : 1
+                                    )
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Scanned page \(index + 1)")
                 }
             }
         }
+        .scrollIndicators(.hidden)
+        .accessibilityIdentifier("native-scanned-pages")
+    }
+
+    private var captureControls: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Button(action: openCamera) {
+                    Label("Take Photo", systemImage: "camera.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(NativeShellPalette.red)
+                .accessibilityIdentifier("native-take-photo")
+
+                Button(action: openScanner) {
+                    Label("Scan", systemImage: "doc.viewfinder")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(NativeShellPalette.blue)
+                .accessibilityIdentifier("native-scan-document")
+            }
+
+            PhotosPicker(selection: $selectedItem, matching: .images) {
+                Label("Choose from Photo Library", systemImage: "photo.on.rectangle")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("native-choose-photo")
+        }
+    }
+
+    private func openCamera() {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            showCaptureFailure(
+                "A camera is not available on this device. Use Photo Library instead."
+            )
+            return
+        }
+        captureRoute = .camera
+    }
+
+    private func openScanner() {
+        guard VNDocumentCameraViewController.isSupported else {
+            showCaptureFailure(
+                "Document scanning is not available on this device."
+            )
+            return
+        }
+        captureRoute = .scanner
+    }
+
+    private func acceptPhoto(_ image: UIImage) {
+        selectedImage = image
+        scannedPages = []
+        captureDate = .now
+        mediaKind = .photo
+        captureRoute = nil
+    }
+
+    private func acceptScan(_ pages: [UIImage]) {
+        guard let firstPage = pages.first else {
+            showCaptureFailure("The scanner did not return any pages.")
+            return
+        }
+        selectedImage = firstPage
+        scannedPages = pages
+        captureDate = .now
+        mediaKind = .scan
+        captureRoute = nil
+    }
+
+    private func showCaptureFailure(_ message: String) {
+        captureRoute = nil
+        alertTitle = "Capture Unavailable"
+        alertMessage = message
+        showsAlert = true
     }
 }
 

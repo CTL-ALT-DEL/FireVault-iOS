@@ -23,7 +23,7 @@ final class FireVaultUITests: XCTestCase {
     }
 
     @MainActor
-    func testNativeSettingsTextFieldsAreReachable() throws {
+    func testNativeSettingsControlsAreReachable() throws {
         let app = XCUIApplication()
         app.launch()
 
@@ -52,11 +52,25 @@ final class FireVaultUITests: XCTestCase {
         XCTAssertTrue(gpsRow.waitForExistence(timeout: 3))
         gpsRow.tap()
 
-        let radius = app.textFields["Nearby radius in miles"]
-        XCTAssertTrue(radius.waitForExistence(timeout: 3))
-        radius.tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        let radiusWheel = app.descendants(matching: .any)["settings-radius-wheel"]
+        XCTAssertTrue(radiusWheel.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
         XCTAssertFalse(app.webViews.firstMatch.exists, "Native Settings must never display a web view")
+    }
+
+    @MainActor
+    func testNativePhotoCaptureChoicesAreReachable() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let photoTab = app.buttons["main-navigation-photo"]
+        XCTAssertTrue(photoTab.waitForExistence(timeout: 8))
+        photoTab.tap()
+
+        XCTAssertTrue(app.buttons["native-take-photo"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["native-scan-document"].exists)
+        XCTAssertTrue(app.buttons["native-choose-photo"].exists)
+        XCTAssertFalse(app.webViews.firstMatch.exists, "Native Photo must never display a web view")
     }
 
     @MainActor
