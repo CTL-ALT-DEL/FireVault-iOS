@@ -2,7 +2,7 @@
 //  NativeSettingsScreens.swift
 //  FireVault
 //
-//  Pure SwiftUI Settings destinations for Build 1.05.03.
+//  Pure SwiftUI Settings destinations for Build 1.05.04.
 //
 
 import SwiftUI
@@ -389,6 +389,7 @@ struct NativeCSVImportView: View {
     @State private var result: FireVaultCSVImportResult?
     @State private var errorMessage = ""
     @State private var showFeedback = false
+    @State private var confirmExitDemo = false
     @State private var feedbackTitle = ""
     @State private var feedbackMessage = ""
 
@@ -398,10 +399,15 @@ struct NativeCSVImportView: View {
                 Button("Choose CSV File", systemImage: "doc.badge.plus") {
                     result = nil
                     errorMessage = ""
-                    showImporter = true
+                    if store.demoMode {
+                        confirmExitDemo = true
+                    } else {
+                        showImporter = true
+                    }
                 }
                     .buttonStyle(.borderedProminent)
                     .disabled(isImporting)
+                LabeledContent("Target vault", value: store.demoMode ? "Production (exit Demo first)" : "Production")
                 if isImporting {
                     HStack(spacing: 10) {
                         ProgressView()
@@ -427,6 +433,22 @@ struct NativeCSVImportView: View {
         }
         .navigationTitle("Customer CSV Import")
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Exit Demo Mode and import?",
+            isPresented: $confirmExitDemo,
+            titleVisibility: .visible
+        ) {
+            Button("Exit Demo Mode and Choose CSV") {
+                store.exitDemoMode()
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(350))
+                    showImporter = true
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Customer CSV files are imported into the separate production vault, matching the previous FireVault workflow. Fictional demo accounts will not be included.")
+        }
         .fileImporter(
             isPresented: $showImporter,
             allowedContentTypes: [.commaSeparatedText, .plainText, .data],
@@ -455,6 +477,10 @@ struct NativeCSVImportView: View {
     }
 
     private func importCSV(from url: URL) {
+        guard !store.demoMode else {
+            presentError("Exit Demo Mode before importing customer accounts into the production vault.")
+            return
+        }
         do {
             let data = try readCoordinatedData(from: url)
             let imported = try store.importAccountsCSV(data)
