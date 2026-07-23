@@ -2,7 +2,7 @@
 //  FireVaultStore.swift
 //  FireVault
 //
-//  Native application and demo-data authority for Build 1.05.02.
+//  Native application and demo-data authority for Build 1.05.03.
 //
 
 import Foundation
@@ -13,6 +13,7 @@ import UIKit
 
 struct FireVaultCSVImportResult: Equatable {
     let added: Int
+    let updated: Int
     let skipped: Int
     let totalRows: Int
     let messages: [String]
@@ -241,7 +242,7 @@ final class FireVaultStore: ObservableObject {
 
         let rows = Self.parseCSV(source, delimiter: explicitDelimiter)
         guard let rawHeaders = rows.first, rawHeaders.count > 0 else {
-            return .init(added: 0, skipped: 0, totalRows: 0, messages: ["The CSV file is empty."])
+            return .init(added: 0, updated: 0, skipped: 0, totalRows: 0, messages: ["The CSV file is empty."])
         }
 
         let headers = rawHeaders.map(Self.normalizedHeader)
@@ -253,15 +254,17 @@ final class FireVaultStore: ObservableObject {
         ]
         let records = rows.dropFirst().filter { row in row.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
         var added = 0
+        var updated = 0
         var skipped = 0
         var messages: [String] = []
+        var seenAccountIDs: Set<String> = []
 
         let normalizedNameAliases = nameAliases.map(Self.normalizedHeader)
         let nameColumn = headers.firstIndex(where: normalizedNameAliases.contains)
             ?? headers.firstIndex(where: Self.isLikelyNameHeader)
             ?? 0
         if !headers.indices.contains(nameColumn) {
-            return .init(added: 0, skipped: records.count, totalRows: records.count, messages: ["The CSV has no usable columns."])
+            return .init(added: 0, updated: 0, skipped: records.count, totalRows: records.count, messages: ["The CSV has no usable columns."])
         }
         if !normalizedNameAliases.contains(headers[nameColumn]) {
             let label = rawHeaders[nameColumn].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -289,10 +292,15 @@ final class FireVaultStore: ObservableObject {
                 continue
             }
 
-            let accountID = value([
+            let accountID = Self.canonicalAccountID(value([
                 "account id", "account number", "account no", "customer id", "customer number",
                 "site id", "site number", "client id", "client number"
-            ], from: row)
+            ], from: row))
+            if !accountID.isEmpty, !seenAccountIDs.insert(accountID).inserted {
+                skipped += 1
+                messages.append("Row \(rowNumber): duplicate Account Id \(accountID) appears more than once in this file.")
+                continue
+            }
             let street = value([
                 "address", "address 1", "address line 1", "street", "street address",
                 "site address", "service address", "location address", "property address"
@@ -301,26 +309,43 @@ final class FireVaultStore: ObservableObject {
             let state = value(["state", "province"], from: row)
             let zip = value(["zip", "zip code", "postal code", "postcode"], from: row)
             let address = [street, city, state, zip].filter { !$0.isEmpty }.joined(separator: ", ")
-            let duplicate = accounts.contains {
-                (!accountID.isEmpty && $0.accountId.caseInsensitiveCompare(accountID) == .orderedSame) ||
-                ($0.name.caseInsensitiveCompare(name) == .orderedSame && $0.address.caseInsensitiveCompare(address) == .orderedSame)
+            let category = value(["category", "type", "site group num", "sitegroupnum"], from: row)
+            let phone = value([
+                "phone", "phone number", "telephone", "site phone", "customer phone", "device phone"
+            ], from: row)
+            let latitude = Double(value(["latitude", "lat"], from: row))
+            let longitude = Double(value(["longitude", "lng", "lon"], from: row))
+
+            let existingIndex = accounts.firstIndex {
+                if !accountID.isEmpty {
+                    return Self.canonicalAccountID($0.accountId) == accountID
+                }
+                return $0.name.caseInsensitiveCompare(name) == .orderedSame &&
+                    $0.address.caseInsensitiveCompare(address) == .orderedSame
             }
-            if duplicate {
-                skipped += 1
-                messages.append("Row \(rowNumber): duplicate account skipped.")
+            if let existingIndex {
+                accounts[existingIndex].name = name
+                accounts[existingIndex].address = address.isEmpty ? accounts[existingIndex].address : address
+                accounts[existingIndex].category = category.isEmpty ? accounts[existingIndex].category : category
+                accounts[existingIndex].accountId = accountID.isEmpty ? accounts[existingIndex].accountId : accountID
+                accounts[existingIndex].phone = phone.isEmpty ? accounts[existingIndex].phone : phone
+                if let latitude { accounts[existingIndex].latitude = latitude }
+                if let longitude { accounts[existingIndex].longitude = longitude }
+                if !accounts[existingIndex].tags.contains("CSV Import") {
+                    accounts[existingIndex].tags.append("CSV Import")
+                }
+                updated += 1
                 continue
             }
 
-            let latitude = Double(value(["latitude", "lat"], from: row))
-            let longitude = Double(value(["longitude", "lng", "lon"], from: row))
             accounts.append(
                 .init(
                     id: UUID().uuidString,
                     name: name,
                     address: address.isEmpty ? "No address supplied" : address,
-                    category: value(["category", "type"], from: row),
+                    category: category,
                     accountId: accountID,
-                    phone: value(["phone", "phone number", "telephone", "site phone", "customer phone"], from: row),
+                    phone: phone,
                     favorite: false,
                     latitude: latitude,
                     longitude: longitude,
@@ -332,7 +357,16 @@ final class FireVaultStore: ObservableObject {
         }
 
         persist()
-        return .init(added: added, skipped: skipped, totalRows: records.count, messages: Array(messages.prefix(12)))
+        if updated > 0 {
+            messages.insert("\(updated) existing account\(updated == 1 ? "" : "s") updated by Account Id.", at: 0)
+        }
+        return .init(
+            added: added,
+            updated: updated,
+            skipped: skipped,
+            totalRows: records.count,
+            messages: Array(messages.prefix(12))
+        )
     }
 
     private func persist() {
@@ -384,6 +418,18 @@ final class FireVaultStore: ObservableObject {
     private static func isLikelyNameHeader(_ header: String) -> Bool {
         ["name", "customer", "site", "company", "business", "client", "property", "premise", "location"]
             .contains { header.contains($0) }
+    }
+
+    private static func canonicalAccountID(_ value: String) -> String {
+        let hyphens = Set("‐‑‒–—―−﹘﹣－")
+        return value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .drop(while: { $0 == "'" })
+            .map { character in
+                hyphens.contains(character) ? "-" : String(character).uppercased()
+            }
+            .joined()
+            .filter { !$0.isWhitespace }
     }
 
     static func parseCSV(_ source: String, delimiter explicitDelimiter: Character? = nil) -> [[String]] {

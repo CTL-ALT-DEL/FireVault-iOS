@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.05.02.
+//  Native everyday navigation for Build 1.05.03.
 //
 
 import SwiftUI

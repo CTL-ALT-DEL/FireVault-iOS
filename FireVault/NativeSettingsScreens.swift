@@ -2,7 +2,7 @@
 //  NativeSettingsScreens.swift
 //  FireVault
 //
-//  Pure SwiftUI Settings destinations for Build 1.05.02.
+//  Pure SwiftUI Settings destinations for Build 1.05.03.
 //
 
 import SwiftUI
@@ -416,6 +416,7 @@ struct NativeCSVImportView: View {
                 Section("Import Result") {
                     LabeledContent("Rows", value: "\(result.totalRows)")
                     LabeledContent("Added", value: "\(result.added)")
+                    LabeledContent("Updated", value: "\(result.updated)")
                     LabeledContent("Skipped", value: "\(result.skipped)")
                     ForEach(result.messages, id: \.self) { Text($0).font(.footnote).foregroundStyle(.secondary) }
                 }
@@ -459,12 +460,12 @@ struct NativeCSVImportView: View {
             let imported = try store.importAccountsCSV(data)
             result = imported
             errorMessage = ""
-            feedbackTitle = imported.added > 0 ? "CSV Import Complete" : "No Accounts Imported"
+            feedbackTitle = imported.added + imported.updated > 0 ? "CSV Import Complete" : "No Accounts Imported"
             var details = [
                 "File: \(url.lastPathComponent)",
                 "Size: \(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))",
                 "Rows found: \(imported.totalRows)",
-                "Added: \(imported.added) • Skipped: \(imported.skipped)"
+                "Added: \(imported.added) • Updated: \(imported.updated) • Skipped: \(imported.skipped)"
             ]
             details.append(contentsOf: imported.messages.prefix(5))
             feedbackMessage = details.joined(separator: "\n")

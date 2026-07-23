@@ -59,8 +59,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.05.02"), "Version 1.05.02")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.05.02"), "Build 1.05.02")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.05.03"), "Version 1.05.03")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.05.03"), "Build 1.05.03")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
@@ -182,6 +182,33 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(result.skipped, 0)
         XCTAssertEqual(store.accounts.last?.name, "Fallback Customer")
         XCTAssertTrue(result.messages.contains { $0.contains("Organization Label") })
+    }
+
+    func testPWACompatibleCSVAddsThenUpdatesByCanonicalAccountID() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let headers = "Account Id,Account Name,SiteID1,SiteID2,SiteLanguage,DeviceType,Site Phone,Device Phone,Device Phone Comment,Address,City,State,ZipCode,SiteGroupNum"
+        let firstCSV = headers + "\nG7C1234-01,Original Customer,S1,S2,English,Cell,2085550100,2085550199,Primary communicator,100 Main St,Boise,ID,83702,12"
+
+        let firstResult = try store.importAccountsCSV(Data(firstCSV.utf8))
+
+        XCTAssertEqual(firstResult.added, 1)
+        XCTAssertEqual(firstResult.updated, 0)
+        let imported = try XCTUnwrap(store.accounts.first { $0.accountId == "G7C1234-01" })
+        store.addNote(to: imported.id)
+
+        let secondCSV = headers + "\n'g7c1234–01,Updated Customer,S1,S2,English,Cell,2085550101,2085550199,Primary communicator,200 Main St,Boise,ID,83702,12"
+        let secondResult = try store.importAccountsCSV(Data(secondCSV.utf8))
+
+        XCTAssertEqual(secondResult.added, 0)
+        XCTAssertEqual(secondResult.updated, 1)
+        XCTAssertEqual(secondResult.skipped, 0)
+        let updated = try XCTUnwrap(store.accounts.first { $0.accountId == "G7C1234-01" })
+        XCTAssertEqual(updated.name, "Updated Customer")
+        XCTAssertEqual(updated.address, "200 Main St, Boise, ID, 83702")
+        XCTAssertFalse(updated.notes.isEmpty, "CSV updates must preserve native field notes")
     }
 
     func testDemoAndProductionVaultsStaySeparate() throws {
