@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  FireVault
 //
-//  Pure SwiftUI application root for Build 1.07.04.
+//  Pure SwiftUI application root for Build 1.08.01.
 //
 
 import SwiftUI
@@ -11,6 +11,7 @@ struct ContentView: View {
     @StateObject private var store = FireVaultStore()
     @StateObject private var settings = FireVaultNativeSettingsStore()
     @StateObject private var locationService = FireVaultLocationService()
+    @StateObject private var breadcrumbs = FireVaultBreadcrumbStore()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsSplash = true
 
@@ -56,7 +57,8 @@ struct ContentView: View {
                         ),
                         store: store,
                         settings: settings,
-                        locationService: locationService
+                        locationService: locationService,
+                        breadcrumbs: breadcrumbs
                     )
                     .transition(.opacity)
                 }

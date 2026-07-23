@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.07.04.
+//  Native everyday navigation for Build 1.08.01.
 //
 
 import SwiftUI
@@ -121,6 +121,7 @@ struct NativeAppShellView: View {
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @State private var keyboardVisible = false
 
     var body: some View {
@@ -133,7 +134,8 @@ struct NativeAppShellView: View {
                         payload: payload,
                         store: store,
                         settings: settings,
-                        locationService: locationService
+                        locationService: locationService,
+                        breadcrumbs: breadcrumbs
                     )
                 case .accounts: NativeAccountsView(payload: payload, store: store)
                 case .photo: NativePhotoView(store: store, settings: settings)
@@ -238,6 +240,7 @@ private struct NativeNearbyView: View {
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @State private var selectedID: String?
     @State private var showGeocodingConsent = false
     @State private var showMappingDetails = false
@@ -248,6 +251,7 @@ private struct NativeNearbyView: View {
     @State private var delayedMapFocusTask: Task<Void, Never>?
     @State private var mapLayer: FireVaultMapLayer = .standard
     @State private var mapIs3D = false
+    @State private var showsBreadcrumbs = false
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -305,6 +309,13 @@ private struct NativeNearbyView: View {
             statusHeader
                 .padding(.horizontal, 16)
 
+            FireVaultBreadcrumbCompactBar(
+                breadcrumbs: breadcrumbs,
+                accounts: store.accounts,
+                open: { showsBreadcrumbs = true }
+            )
+            .padding(.horizontal, 16)
+
             if shouldShowCoordinateSetup {
                 coordinateSetup
                     .padding(.horizontal, 16)
@@ -358,6 +369,12 @@ private struct NativeNearbyView: View {
             }
         } message: {
             Text("FireVault sends only street, city, state, and ZIP fields to the U.S. Census Geocoder, then uses Apple Maps for unmatched addresses. Account names, IDs, notes, photos, and files remain on this iPhone. Returned coordinates are saved locally.")
+        }
+        .fullScreenCover(isPresented: $showsBreadcrumbs) {
+            FireVaultBreadcrumbsView(
+                breadcrumbs: breadcrumbs,
+                store: store
+            )
         }
     }
 
@@ -2095,7 +2112,7 @@ private struct FVSettingsRow: View {
     }
 }
 
-private struct NativeShellCard<Content: View>: View {
+struct NativeShellCard<Content: View>: View {
     let content: Content
 
     init(@ViewBuilder content: () -> Content) {

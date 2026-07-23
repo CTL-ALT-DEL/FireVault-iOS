@@ -61,8 +61,90 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.07.04"), "Version 1.07.04")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.07.04"), "Build 1.07.04")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.08.01"), "Version 1.08.01")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.08.01"), "Build 1.08.01")
+    }
+
+    func testBreadcrumbRulesRejectPoorAccuracyAndDuplicatePoints() {
+        let timestamp = Date()
+        let first = CLLocation(
+            coordinate: .init(latitude: 43.615, longitude: -116.202),
+            altitude: 0,
+            horizontalAccuracy: 12,
+            verticalAccuracy: -1,
+            timestamp: timestamp
+        )
+        let inaccurate = CLLocation(
+            coordinate: .init(latitude: 43.616, longitude: -116.202),
+            altitude: 0,
+            horizontalAccuracy: 250,
+            verticalAccuracy: -1,
+            timestamp: timestamp
+        )
+        let duplicate = CLLocation(
+            coordinate: first.coordinate,
+            altitude: 0,
+            horizontalAccuracy: 10,
+            verticalAccuracy: -1,
+            timestamp: timestamp.addingTimeInterval(5)
+        )
+
+        XCTAssertTrue(FireVaultBreadcrumbRules.accepts(first, after: nil))
+        XCTAssertFalse(FireVaultBreadcrumbRules.accepts(inaccurate, after: first))
+        XCTAssertFalse(FireVaultBreadcrumbRules.accepts(duplicate, after: first))
+    }
+
+    func testBreadcrumbRulesMatchNearestAccountInsideRadius() throws {
+        let near = FireVaultWorkspaceAccount(
+            id: "near",
+            name: "Nearest Account",
+            address: "100 Main Street",
+            category: "Commercial",
+            accountId: "A-1",
+            phone: "",
+            favorite: false,
+            latitude: 43.615,
+            longitude: -116.202,
+            tags: [],
+            notes: [],
+            documents: [],
+            equipment: [],
+            locations: [],
+            recent: []
+        )
+        var far = near
+        far.id = "far"
+        far.name = "Far Account"
+        far.latitude = 43.7
+
+        let match = FireVaultBreadcrumbRules.closestAccount(
+            to: .init(latitude: 43.6151, longitude: -116.2021),
+            accounts: [far, near]
+        )
+
+        XCTAssertEqual(try XCTUnwrap(match).id, "near")
+    }
+
+    func testBreadcrumbDayCalculatesRecordedDistance() {
+        let start = Date()
+        let points = [
+            FireVaultBreadcrumbPoint(
+                timestamp: start,
+                latitude: 43.615,
+                longitude: -116.202,
+                horizontalAccuracy: 10
+            ),
+            FireVaultBreadcrumbPoint(
+                timestamp: start.addingTimeInterval(60),
+                latitude: 43.624,
+                longitude: -116.202,
+                horizontalAccuracy: 10
+            )
+        ]
+        let day = FireVaultBreadcrumbDay(startedAt: start, points: points)
+
+        XCTAssertGreaterThan(day.totalDistanceMeters, 900)
+        XCTAssertLessThan(day.totalDistanceMeters, 1_100)
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
