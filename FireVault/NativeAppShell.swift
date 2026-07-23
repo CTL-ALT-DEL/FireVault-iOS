@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.06.01.
+//  Native everyday navigation for Build 1.06.02.
 //
 
 import SwiftUI
@@ -160,10 +160,9 @@ struct NativeAppShellView: View {
             ForEach(FireVaultShellTab.allCases) { tab in
                 let isSelected = store.selectedTab == tab
                 Button {
-                    if tab == .nearby, isSelected {
-                        if payload.demoMode {
-                            store.refreshNearby()
-                        } else {
+                    if tab == .nearby {
+                        store.requestNearbyReset()
+                        if !payload.demoMode {
                             locationService.requestMapRecenter(
                                 highAccuracy: settings.gps.highAccuracy
                             )
@@ -219,10 +218,14 @@ private struct NativeNearbyView: View {
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var scrollAccountID: String?
     @State private var accountScrollWasActive = false
+    @State private var suppressNextIdleFocus = false
+    @State private var delayedMapFocusTask: Task<Void, Never>?
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
-        return payload.nearby.filter { $0.distanceMeters <= maximumMeters }
+        return payload.nearby
+            .filter { $0.distanceMeters <= maximumMeters }
+            .sorted { $0.distanceMeters < $1.distanceMeters }
     }
 
     private var selected: FireVaultNativeNearbyAccount? {
@@ -270,95 +273,63 @@ private struct NativeNearbyView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 12) {
-                statusHeader
+        VStack(spacing: 8) {
+            statusHeader
+                .padding(.horizontal, 16)
+
+            if shouldShowCoordinateSetup {
+                coordinateSetup
                     .padding(.horizontal, 16)
-
-                if shouldShowCoordinateSetup {
-                    coordinateSetup
-                        .padding(.horizontal, 16)
-                }
-                if !payload.demoMode,
-                   locationService.coordinate == nil,
-                   locationService.authorizationStatus == .denied {
-                    locationAccessSetup
-                        .padding(.horizontal, 16)
-                }
-
-                map
+            }
+            if !payload.demoMode,
+               locationService.coordinate == nil,
+               locationService.authorizationStatus == .denied {
+                locationAccessSetup
                     .padding(.horizontal, 16)
+            }
 
-                accountList
-            }
-            .padding(.top, 8)
-            .navigationTitle("Nearby")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                if !payload.demoMode,
-                   store.unmappedAccountCount > 0,
-                   !shouldShowCoordinateSetup {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showMappingDetails = true
-                        } label: {
-                            Image(systemName: "mappin.slash")
-                        }
-                        .buttonStyle(.glass)
-                        .accessibilityLabel("Review \(store.unmappedAccountCount) unmapped addresses")
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        if payload.demoMode {
-                            store.refreshNearby()
-                            cameraPosition = .region(overviewRegion)
-                        } else {
-                            selectedID = nil
-                            locationService.requestMapRecenter(highAccuracy: settings.gps.highAccuracy)
-                        }
-                    } label: {
-                        if locationService.isLocating, !payload.demoMode {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "location.circle.fill")
-                        }
-                    }
-                        .buttonStyle(.glassProminent)
-                        .accessibilityLabel(
-                            payload.demoMode ? "Reset demo map" : "Center map on current location"
-                        )
-                }
-            }
-            .task {
-                if payload.demoMode {
-                    cameraPosition = .region(overviewRegion)
-                } else if locationService.coordinate != nil {
-                    centerMapOnUser()
-                } else {
-                    locationService.requestMapRecenter(highAccuracy: settings.gps.highAccuracy)
-                }
-            }
-            .onChange(of: locationService.mapRecenterRequestID) { _, _ in
+            map
+                .padding(.horizontal, 16)
+
+            accountList
+        }
+        .padding(.top, 4)
+        .task {
+            scrollAccountID = nearbyRows.first?.id
+            if payload.demoMode {
+                cameraPosition = .region(overviewRegion)
+            } else if locationService.coordinate != nil {
                 centerMapOnUser()
+            } else {
+                locationService.requestMapRecenter(highAccuracy: settings.gps.highAccuracy)
             }
-            .onChange(of: store.geocodingProgress?.phase) { _, phase in
-                if phase == .complete {
-                    showMappingDetails = false
+        }
+        .onChange(of: store.nearbyResetRequestID) { _, _ in
+            resetNearby()
+        }
+        .onChange(of: locationService.mapRecenterRequestID) { _, _ in
+            guard !payload.demoMode else { return }
+            resetNearby()
+        }
+        .onChange(of: store.geocodingProgress?.phase) { _, phase in
+            if phase == .complete {
+                showMappingDetails = false
+            }
+        }
+        .onDisappear {
+            delayedMapFocusTask?.cancel()
+        }
+        .alert("Map Imported Addresses?", isPresented: $showGeocodingConsent) {
+            Button("Cancel", role: .cancel) {}
+            Button("Map Accounts") {
+                showGeocodingConsent = false
+                Task { @MainActor in
+                    await Task.yield()
+                    store.startGeocodingMissingAccounts()
                 }
             }
-            .alert("Map Imported Addresses?", isPresented: $showGeocodingConsent) {
-                Button("Cancel", role: .cancel) {}
-                Button("Map Accounts") {
-                    showGeocodingConsent = false
-                    Task { @MainActor in
-                        await Task.yield()
-                        store.startGeocodingMissingAccounts()
-                    }
-                }
-            } message: {
-                Text("FireVault sends only street, city, state, and ZIP fields to the U.S. Census Geocoder, then uses Apple Maps for unmatched addresses. Account names, IDs, notes, photos, and files remain on this iPhone. Returned coordinates are saved locally.")
-            }
+        } message: {
+            Text("FireVault sends only street, city, state, and ZIP fields to the U.S. Census Geocoder, then uses Apple Maps for unmatched addresses. Account names, IDs, notes, photos, and files remain on this iPhone. Returned coordinates are saved locally.")
         }
     }
 
@@ -371,6 +342,19 @@ private struct NativeNearbyView: View {
                 Text(payload.locationStatus).font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
+            if !payload.demoMode,
+               store.unmappedAccountCount > 0,
+               !shouldShowCoordinateSetup {
+                Button {
+                    showMappingDetails = true
+                } label: {
+                    Label("\(store.unmappedAccountCount)", systemImage: "mappin.slash")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(NativeShellPalette.amber)
+                .accessibilityLabel("Review \(store.unmappedAccountCount) unmapped addresses")
+            }
             Text(payload.today).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
         }
     }
@@ -626,13 +610,17 @@ private struct NativeNearbyView: View {
                 }
                 .scrollIndicators(.hidden)
                 .scrollPosition(id: $scrollAccountID, anchor: .top)
-                .scrollTargetBehavior(.viewAligned(limitBehavior: .always, anchor: .top))
                 .onScrollPhaseChange { _, newPhase in
                     if newPhase.isScrolling {
                         accountScrollWasActive = true
+                        delayedMapFocusTask?.cancel()
                     } else if newPhase == .idle, accountScrollWasActive {
                         accountScrollWasActive = false
-                        focusTopScrolledAccount()
+                        if suppressNextIdleFocus {
+                            suppressNextIdleFocus = false
+                        } else {
+                            scheduleTopAccountFocus()
+                        }
                     }
                 }
                 .accessibilityIdentifier("nearby-account-scroll")
@@ -737,12 +725,20 @@ private struct NativeNearbyView: View {
         .accessibilityIdentifier("nearby-account-\(row.id)")
     }
 
-    private func focusTopScrolledAccount() {
-        guard let scrollAccountID,
-              let row = nearbyRows.first(where: { $0.id == scrollAccountID }) else {
-            return
+    private func scheduleTopAccountFocus() {
+        delayedMapFocusTask?.cancel()
+        guard let requestedID = scrollAccountID else { return }
+
+        delayedMapFocusTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled,
+                  !accountScrollWasActive,
+                  scrollAccountID == requestedID,
+                  let row = nearbyRows.first(where: { $0.id == requestedID }) else {
+                return
+            }
+            selectAccount(row, scrollToCard: false)
         }
-        selectAccount(row, scrollToCard: false)
     }
 
     private func selectAccount(
@@ -773,6 +769,31 @@ private struct NativeNearbyView: View {
                     radiusMiles: settings.gps.nearbyRadiusMiles
                 )
             )
+        }
+    }
+
+    private func resetNearby() {
+        delayedMapFocusTask?.cancel()
+        accountScrollWasActive = false
+        selectedID = nil
+
+        if let closestID = nearbyRows.first?.id {
+            if scrollAccountID != closestID {
+                suppressNextIdleFocus = true
+                withAnimation(.smooth(duration: 0.35)) {
+                    scrollAccountID = closestID
+                }
+            }
+        } else {
+            scrollAccountID = nil
+        }
+
+        if payload.demoMode {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                cameraPosition = .region(overviewRegion)
+            }
+        } else {
+            centerMapOnUser()
         }
     }
 }

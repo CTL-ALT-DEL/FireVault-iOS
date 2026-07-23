@@ -61,8 +61,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.06.01"), "Version 1.06.01")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.06.01"), "Build 1.06.01")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.06.02"), "Version 1.06.02")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.06.02"), "Build 1.06.02")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
@@ -340,6 +340,27 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(region.center.longitude, coordinate.longitude, accuracy: 0.000_001)
         XCTAssertEqual(region.span.latitudeDelta, 0.012, accuracy: 0.000_001)
         XCTAssertEqual(region.span.longitudeDelta, 0.012, accuracy: 0.000_001)
+    }
+
+    func testNearbyPayloadIsSortedClosestFirstAndResetIsObservable() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let initialResetID = store.nearbyResetRequestID
+        let payload = store.appPayload(
+            userCoordinate: nil,
+            liveLocationStatus: "Testing"
+        )
+
+        XCTAssertEqual(
+            payload.nearby.map(\.distanceMeters),
+            payload.nearby.map(\.distanceMeters).sorted()
+        )
+
+        store.requestNearbyReset()
+
+        XCTAssertNotEqual(store.nearbyResetRequestID, initialResetID)
     }
 
     func testEverySettingsCatalogRowHasANativeDestinationIdentifier() {

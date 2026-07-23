@@ -2,7 +2,7 @@
 //  FireVaultStore.swift
 //  FireVault
 //
-//  Native application and demo-data authority for Build 1.06.00.
+//  Native application and demo-data authority for Build 1.06.02.
 //
 
 import Foundation
@@ -27,6 +27,7 @@ final class FireVaultStore: ObservableObject {
     @Published var locationStatus: String
     @Published private(set) var demoMode: Bool
     @Published private(set) var geocodingProgress: FireVaultGeocodingProgress?
+    @Published private(set) var nearbyResetRequestID = UUID()
 
     private let defaults: UserDefaults
     private let demoCoordinate = CLLocationCoordinate2D(latitude: 43.6150, longitude: -116.2023)
@@ -116,6 +117,13 @@ final class FireVaultStore: ObservableObject {
 
     func refreshNearby() {
         locationStatus = "Updated \(Date().formatted(date: .omitted, time: .shortened))"
+    }
+
+    func requestNearbyReset() {
+        nearbyResetRequestID = UUID()
+        if demoMode {
+            refreshNearby()
+        }
     }
 
     func startGeocodingMissingAccounts() {
