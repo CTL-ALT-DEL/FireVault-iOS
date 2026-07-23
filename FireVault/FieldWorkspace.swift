@@ -2,7 +2,7 @@
 //  FieldWorkspace.swift
 //  FireVault
 //
-//  Native, field-first Account workspace for Build 1.03.34.
+//  Native, field-first Account workspace for Build 1.04.01.
 //
 
 import SwiftUI
@@ -178,10 +178,8 @@ struct FieldWorkspaceView: View {
                     fieldActionDock
                     appNavigation
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 8)
-                .padding(.bottom, 6)
-                .background(.clear)
+                .padding(.top, 10)
+                .background(FieldWorkspacePalette.background.ignoresSafeArea(edges: .bottom))
             }
         }
         .tint(FieldWorkspacePalette.blue)
@@ -375,20 +373,36 @@ struct FieldWorkspaceView: View {
             }
         }
         .padding(7)
-        .glassEffect()
+        .background(FieldWorkspacePalette.actionSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(FieldWorkspacePalette.actionDivider, lineWidth: 1)
+        }
+        .padding(.horizontal, 14)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Field actions")
     }
 
     private var appNavigation: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 0) {
             WorkspaceNavButton(title: "Nearby", symbol: "location.circle") { bridge.perform("nearby") }
             WorkspaceNavButton(title: "Search", symbol: "magnifyingglass") { bridge.perform("search") }
             WorkspaceNavButton(title: "Photo", symbol: "photo") { bridge.perform("photo") }
             WorkspaceNavButton(title: "Settings", symbol: "slider.horizontal.3") { bridge.perform("settings") }
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 5)
-        .background(FieldWorkspacePalette.surface.opacity(0.92), in: Capsule())
-        .overlay { Capsule().stroke(.white.opacity(0.08), lineWidth: 1) }
+        .padding(.horizontal, 8)
+        .padding(.top, 5)
+        .padding(.bottom, 2)
+        .background(FieldWorkspacePalette.navigationBackground.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(FieldWorkspacePalette.navigationDivider)
+                .frame(height: 1)
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Main navigation")
+        .accessibilityIdentifier("workspace-main-navigation")
     }
 }
 
@@ -796,16 +810,19 @@ private struct WorkspaceNavButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 2) {
-                Image(systemName: symbol).font(.subheadline.weight(.semibold))
-                Text(title).font(.system(size: 10, weight: .semibold)).lineLimit(1)
+            VStack(spacing: 4) {
+                Image(systemName: symbol).font(.system(size: 20, weight: .semibold))
+                Text(title).font(.caption2.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(FieldWorkspacePalette.navigationInactive)
             .frame(maxWidth: .infinity)
-            .frame(height: 40)
+            .frame(minHeight: 58)
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
+        .accessibilityLabel(title)
+        .accessibilityHint("Leaves the account workspace and opens \(title)")
+        .accessibilityIdentifier("workspace-navigation-\(title.lowercased())")
     }
 }
 
@@ -831,6 +848,11 @@ private enum FieldWorkspacePalette {
     static let green = Color(red: 0.27, green: 0.86, blue: 0.57)
     static let amber = Color(red: 1.00, green: 0.72, blue: 0.28)
     static let purple = Color(red: 0.70, green: 0.49, blue: 1.00)
+    static let actionSurface = Color(red: 0.082, green: 0.108, blue: 0.138)
+    static let actionDivider = Color.white.opacity(0.12)
+    static let navigationBackground = Color(red: 0.045, green: 0.061, blue: 0.082)
+    static let navigationInactive = Color(red: 0.60, green: 0.65, blue: 0.72)
+    static let navigationDivider = Color.white.opacity(0.14)
 }
 
 private struct FieldWorkspaceView_Previews: PreviewProvider {

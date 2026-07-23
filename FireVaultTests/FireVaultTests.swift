@@ -44,7 +44,7 @@ final class FireVaultTests: XCTestCase {
     }
 
     func testWebIntegrationTargetsSharedKeyboardAndNavigationLayers() {
-        let source = FireVaultWebIntegration.source(version: "1.04.00")
+        let source = FireVaultWebIntegration.source(version: "1.04.01")
 
         XCTAssertTrue(source.contains("fvNativeKeyboard10334 main#app"))
         XCTAssertTrue(source.contains("fvNativeIOS10334 #appNav"))
@@ -56,12 +56,12 @@ final class FireVaultTests: XCTestCase {
     }
 
     func testWebIntegrationSynchronizesVisibleVersionAndPhotoOverlayHeader() {
-        let source = FireVaultWebIntegration.source(version: "1.04.00")
+        let source = FireVaultWebIntegration.source(version: "1.04.01")
 
         XCTAssertTrue(source.contains(".splashBuild492"))
         XCTAssertTrue(source.contains(".aboutGrid540"))
         XCTAssertTrue(source.contains("photoOverlayDetailHeader1032"))
-        XCTAssertTrue(source.contains("1.04.00"))
+        XCTAssertTrue(source.contains("1.04.01"))
     }
 
     func testNativeSettingsVersionStatusesOverrideOlderWebPayload() {
@@ -80,8 +80,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.04.00"), "Version 1.04.00")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.04.00"), "Build 1.04.00")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.04.01"), "Version 1.04.01")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.04.01"), "Build 1.04.01")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {

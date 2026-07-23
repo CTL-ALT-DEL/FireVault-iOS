@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.03.34.
+//  Native everyday navigation for Build 1.04.01.
 //
 
 import SwiftUI
@@ -163,9 +163,6 @@ struct NativeAppShellView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !keyboardVisible {
                 nativeNavigation
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .padding(.bottom, 6)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -181,8 +178,9 @@ struct NativeAppShellView: View {
     }
 
     private var nativeNavigation: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             ForEach(FireVaultShellTab.allCases) { tab in
+                let isSelected = selection == tab
                 Button {
                     if tab == .photo {
                         bridge.perform("photo", hideShell: true)
@@ -190,23 +188,40 @@ struct NativeAppShellView: View {
                         withAnimation(.snappy(duration: 0.25)) { selection = tab }
                     }
                 } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: tab.symbol).font(.system(size: 18, weight: .semibold))
-                        Text(tab.title).font(.caption2.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                    VStack(spacing: 4) {
+                        Image(systemName: tab.symbol)
+                            .font(.system(size: 20, weight: isSelected ? .bold : .semibold))
+                            .symbolVariant(isSelected ? .fill : .none)
+                        Text(tab.title)
+                            .font(.caption2.weight(isSelected ? .bold : .semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
-                    .foregroundStyle(selection == tab ? NativeShellPalette.blue : .secondary)
+                    .foregroundStyle(isSelected ? NativeShellPalette.blue : NativeShellPalette.navigationInactive)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 52)
-                    .background(selection == tab ? NativeShellPalette.blue.opacity(0.14) : .clear, in: Capsule())
+                    .frame(minHeight: 58)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(tab.title)
+                .accessibilityValue(isSelected ? "Selected" : "Not selected")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityIdentifier("main-navigation-\(tab.rawValue)")
             }
         }
-        .padding(5)
-        .background(NativeShellPalette.surface.opacity(0.92), in: Capsule())
-        .overlay { Capsule().stroke(.white.opacity(0.10), lineWidth: 1) }
+        .padding(.horizontal, 8)
+        .padding(.top, 5)
+        .padding(.bottom, 2)
+        .background(NativeShellPalette.navigationBackground.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(NativeShellPalette.navigationDivider)
+                .frame(height: 1)
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Main navigation")
+        .accessibilityIdentifier("main-navigation")
     }
 }
 
@@ -883,6 +898,9 @@ private enum NativeShellPalette {
     static let amber = Color(red: 1.0, green: 0.69, blue: 0.26)
     static let red = Color(red: 1.0, green: 0.34, blue: 0.40)
     static let purple = Color(red: 0.68, green: 0.48, blue: 1.0)
+    static let navigationBackground = Color(red: 0.045, green: 0.061, blue: 0.082)
+    static let navigationInactive = Color(red: 0.60, green: 0.65, blue: 0.72)
+    static let navigationDivider = Color.white.opacity(0.14)
     static func tint(_ name: String) -> Color {
         switch name { case "green": green; case "amber": amber; case "red": red; case "purple": purple; default: blue }
     }

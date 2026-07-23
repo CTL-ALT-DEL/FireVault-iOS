@@ -358,7 +358,7 @@ private struct FireVaultWebView: UIViewRepresentable {
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.keyboardDismissMode = .interactive
         webView.allowsBackForwardNavigationGestures = true
-        webView.customUserAgent = "FireVault-iOS/1.04.00"
+        webView.customUserAgent = "FireVault-iOS/1.04.01"
 
         context.coordinator.webView = webView
         appShellBridge.webView = webView
