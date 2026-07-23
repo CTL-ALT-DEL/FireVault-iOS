@@ -2,7 +2,7 @@
 //  FireVaultStore.swift
 //  FireVault
 //
-//  Native application and demo-data authority for Build 1.05.01.
+//  Native application and demo-data authority for Build 1.05.02.
 //
 
 import Foundation
@@ -218,35 +218,59 @@ final class FireVaultStore: ObservableObject {
     }
 
     func importAccountsCSV(_ data: Data) throws -> FireVaultCSVImportResult {
-        guard let source = Self.decodeCSV(data) else {
+        guard var source = Self.decodeCSV(data) else {
             throw CocoaError(.fileReadInapplicableStringEncoding)
         }
-        var rows = Self.parseCSV(source)
-        if rows.first?.first?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("sep=") == true {
-            rows.removeFirst()
+
+        var explicitDelimiter: Character?
+        if let firstBreak = source.firstIndex(where: { $0 == "\n" || $0 == "\r" }) {
+            let firstLine = source[..<firstBreak]
+                .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{feff}")))
+            if firstLine.lowercased().hasPrefix("sep="),
+               let separator = firstLine.dropFirst(4).first {
+                explicitDelimiter = separator
+                var contentStart = source.index(after: firstBreak)
+                if source[firstBreak] == "\r",
+                   contentStart < source.endIndex,
+                   source[contentStart] == "\n" {
+                    contentStart = source.index(after: contentStart)
+                }
+                source = String(source[contentStart...])
+            }
         }
+
+        let rows = Self.parseCSV(source, delimiter: explicitDelimiter)
         guard let rawHeaders = rows.first, rawHeaders.count > 0 else {
             return .init(added: 0, skipped: 0, totalRows: 0, messages: ["The CSV file is empty."])
         }
 
         let headers = rawHeaders.map(Self.normalizedHeader)
-        let nameAliases = ["name", "account name", "accountname", "site name", "sitename", "site", "customer name", "customername", "customer"]
-        guard headers.contains(where: nameAliases.contains) else {
-            return .init(
-                added: 0,
-                skipped: max(0, rows.count - 1),
-                totalRows: max(0, rows.count - 1),
-                messages: ["No recognized account-name column was found. Use Account Name, Site Name, Customer Name, or Name."]
-            )
-        }
+        let nameAliases = [
+            "name", "account name", "site name", "site", "customer name", "customer",
+            "company name", "company", "business name", "business", "client name", "client",
+            "property name", "property", "premise name", "premise", "location name", "location",
+            "display name", "description"
+        ]
         let records = rows.dropFirst().filter { row in row.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
         var added = 0
         var skipped = 0
         var messages: [String] = []
 
+        let normalizedNameAliases = nameAliases.map(Self.normalizedHeader)
+        let nameColumn = headers.firstIndex(where: normalizedNameAliases.contains)
+            ?? headers.firstIndex(where: Self.isLikelyNameHeader)
+            ?? 0
+        if !headers.indices.contains(nameColumn) {
+            return .init(added: 0, skipped: records.count, totalRows: records.count, messages: ["The CSV has no usable columns."])
+        }
+        if !normalizedNameAliases.contains(headers[nameColumn]) {
+            let label = rawHeaders[nameColumn].trimmingCharacters(in: .whitespacesAndNewlines)
+            messages.append("Used “\(label.isEmpty ? "Column 1" : label)” as the account-name column.")
+        }
+
         func value(_ aliases: [String], from row: [String]) -> String {
             for alias in aliases {
-                if let index = headers.firstIndex(of: alias), index < row.count {
+                if let index = headers.firstIndex(of: Self.normalizedHeader(alias)), index < row.count {
                     let result = row[index].trimmingCharacters(in: .whitespacesAndNewlines)
                     if !result.isEmpty { return result }
                 }
@@ -256,18 +280,26 @@ final class FireVaultStore: ObservableObject {
 
         for (offset, row) in records.enumerated() {
             let rowNumber = offset + 2
-            let name = value(nameAliases, from: row)
+            let name = nameColumn < row.count
+                ? row[nameColumn].trimmingCharacters(in: .whitespacesAndNewlines)
+                : ""
             guard !name.isEmpty else {
                 skipped += 1
                 messages.append("Row \(rowNumber): missing account name.")
                 continue
             }
 
-            let accountID = value(["account id", "accountid", "account number", "customer id"], from: row)
-            let street = value(["address", "street", "street address", "site address"], from: row)
+            let accountID = value([
+                "account id", "account number", "account no", "customer id", "customer number",
+                "site id", "site number", "client id", "client number"
+            ], from: row)
+            let street = value([
+                "address", "address 1", "address line 1", "street", "street address",
+                "site address", "service address", "location address", "property address"
+            ], from: row)
             let city = value(["city"], from: row)
             let state = value(["state", "province"], from: row)
-            let zip = value(["zip", "postal code", "zipcode"], from: row)
+            let zip = value(["zip", "zip code", "postal code", "postcode"], from: row)
             let address = [street, city, state, zip].filter { !$0.isEmpty }.joined(separator: ", ")
             let duplicate = accounts.contains {
                 (!accountID.isEmpty && $0.accountId.caseInsensitiveCompare(accountID) == .orderedSame) ||
@@ -288,7 +320,7 @@ final class FireVaultStore: ObservableObject {
                     address: address.isEmpty ? "No address supplied" : address,
                     category: value(["category", "type"], from: row),
                     accountId: accountID,
-                    phone: value(["phone", "telephone", "site phone"], from: row),
+                    phone: value(["phone", "phone number", "telephone", "site phone", "customer phone"], from: row),
                     favorite: false,
                     latitude: latitude,
                     longitude: longitude,
@@ -343,15 +375,19 @@ final class FireVaultStore: ObservableObject {
     }
 
     private static func normalizedHeader(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{feff}")))
+        let lowered = value
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{feff}")))
             .lowercased()
-            .replacingOccurrences(of: "_", with: " ")
-            .replacingOccurrences(of: "-", with: " ")
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
+        return String(lowered.filter { $0.isLetter || $0.isNumber })
     }
 
-    static func parseCSV(_ source: String) -> [[String]] {
+    private static func isLikelyNameHeader(_ header: String) -> Bool {
+        ["name", "customer", "site", "company", "business", "client", "property", "premise", "location"]
+            .contains { header.contains($0) }
+    }
+
+    static func parseCSV(_ source: String, delimiter explicitDelimiter: Character? = nil) -> [[String]] {
+        let delimiter = explicitDelimiter ?? detectedDelimiter(in: source)
         var rows: [[String]] = []
         var row: [String] = []
         var field = ""
@@ -368,7 +404,7 @@ final class FireVaultStore: ObservableObject {
                     continue
                 }
                 quoted.toggle()
-            } else if character == ",", !quoted {
+            } else if character == delimiter, !quoted {
                 row.append(field)
                 field = ""
             } else if (character == "\n" || character == "\r"), !quoted {
@@ -391,6 +427,26 @@ final class FireVaultStore: ObservableObject {
         row.append(field)
         if row.contains(where: { !$0.isEmpty }) { rows.append(row) }
         return rows
+    }
+
+    private static func detectedDelimiter(in source: String) -> Character {
+        let candidates: [Character] = [",", ";", "\t", "|"]
+        var counts = Dictionary(uniqueKeysWithValues: candidates.map { ($0, 0) })
+        var quoted = false
+
+        for character in source {
+            if character == "\"" {
+                quoted.toggle()
+            } else if !quoted, (character == "\n" || character == "\r") {
+                break
+            } else if !quoted, counts[character] != nil {
+                counts[character, default: 0] += 1
+            }
+        }
+
+        return candidates.max { lhs, rhs in
+            counts[lhs, default: 0] < counts[rhs, default: 0]
+        }.flatMap { counts[$0, default: 0] > 0 ? $0 : nil } ?? ","
     }
 
     static let demoAccounts: [FireVaultWorkspaceAccount] = [

@@ -2,7 +2,7 @@
 //  NativeSettingsScreens.swift
 //  FireVault
 //
-//  Pure SwiftUI Settings destinations for Build 1.05.01.
+//  Pure SwiftUI Settings destinations for Build 1.05.02.
 //
 
 import SwiftUI
@@ -455,17 +455,19 @@ struct NativeCSVImportView: View {
 
     private func importCSV(from url: URL) {
         do {
-            let imported = try store.importAccountsCSV(readCoordinatedData(from: url))
+            let data = try readCoordinatedData(from: url)
+            let imported = try store.importAccountsCSV(data)
             result = imported
             errorMessage = ""
             feedbackTitle = imported.added > 0 ? "CSV Import Complete" : "No Accounts Imported"
-            feedbackMessage = [
-                "\(imported.added) added",
-                "\(imported.skipped) skipped",
-                imported.messages.first
+            var details = [
+                "File: \(url.lastPathComponent)",
+                "Size: \(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))",
+                "Rows found: \(imported.totalRows)",
+                "Added: \(imported.added) • Skipped: \(imported.skipped)"
             ]
-            .compactMap { $0 }
-            .joined(separator: "\n")
+            details.append(contentsOf: imported.messages.prefix(5))
+            feedbackMessage = details.joined(separator: "\n")
             showFeedback = true
         } catch {
             presentError(error.localizedDescription)

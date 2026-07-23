@@ -59,8 +59,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.05.01"), "Version 1.05.01")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.05.01"), "Build 1.05.01")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.05.02"), "Version 1.05.02")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.05.02"), "Build 1.05.02")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
@@ -149,6 +149,39 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(result.added, 1)
         XCTAssertEqual(result.skipped, 0)
         XCTAssertTrue(store.accounts.contains { $0.name == "UTF16 Customer" })
+    }
+
+    func testNativeCSVImportDetectsSemicolonDelimiterAndLikelyNameColumn() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let csv = "sep=;\nCompany Title;Service Address;Account Number\nSemicolon Customer;400 Native Way;SEMI-1"
+
+        let result = try store.importAccountsCSV(Data(csv.utf8))
+
+        XCTAssertEqual(result.added, 1)
+        XCTAssertEqual(result.skipped, 0)
+        XCTAssertTrue(store.accounts.contains {
+            $0.name == "Semicolon Customer" &&
+            $0.address == "400 Native Way" &&
+            $0.accountId == "SEMI-1"
+        })
+    }
+
+    func testNativeCSVImportFallsBackToFirstColumnForUnknownHeaders() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let csv = "Organization Label|Street Detail|Reference\nFallback Customer|500 Native Way|FALLBACK-1"
+
+        let result = try store.importAccountsCSV(Data(csv.utf8))
+
+        XCTAssertEqual(result.added, 1)
+        XCTAssertEqual(result.skipped, 0)
+        XCTAssertEqual(store.accounts.last?.name, "Fallback Customer")
+        XCTAssertTrue(result.messages.contains { $0.contains("Organization Label") })
     }
 
     func testDemoAndProductionVaultsStaySeparate() throws {
