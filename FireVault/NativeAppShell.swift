@@ -9,6 +9,7 @@ import SwiftUI
 import Combine
 import MapKit
 import WebKit
+import UIKit
 
 @MainActor
 final class FireVaultAppShellBridge: ObservableObject {
@@ -144,28 +145,39 @@ private enum FireVaultShellTab: String, CaseIterable, Identifiable {
 struct NativeAppShellView: View {
     let payload: FireVaultAppPayload
     @ObservedObject var bridge: FireVaultAppShellBridge
+    @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var selection: FireVaultShellTab = .nearby
+    @State private var keyboardVisible = false
 
     var body: some View {
         ZStack {
             NativeShellPalette.background.ignoresSafeArea()
             Group {
                 switch selection {
-                case .nearby: NativeNearbyView(payload: payload, bridge: bridge)
+                case .nearby: NativeNearbyView(payload: payload, bridge: bridge, settings: settings)
                 case .accounts, .photo: NativeAccountsView(payload: payload, bridge: bridge)
-                case .settings: NativeSettingsView(payload: payload, bridge: bridge)
+                case .settings: NativeSettingsView(payload: payload, bridge: bridge, settings: settings)
                 }
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            nativeNavigation
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-                .padding(.bottom, 6)
+            if !keyboardVisible {
+                nativeNavigation
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    .padding(.bottom, 6)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .tint(NativeShellPalette.blue)
         .preferredColorScheme(.dark)
         .onAppear { selection = FireVaultShellTab(rawValue: payload.initialTab) ?? .nearby }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            withAnimation(.easeOut(duration: 0.18)) { keyboardVisible = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(.easeOut(duration: 0.18)) { keyboardVisible = false }
+        }
     }
 
     private var nativeNavigation: some View {
@@ -201,14 +213,20 @@ struct NativeAppShellView: View {
 private struct NativeNearbyView: View {
     let payload: FireVaultAppPayload
     @ObservedObject var bridge: FireVaultAppShellBridge
+    @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var selectedID: String?
 
+    private var nearbyRows: [FireVaultNativeNearbyAccount] {
+        let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
+        return payload.nearby.filter { $0.distanceMeters <= maximumMeters }
+    }
+
     private var selected: FireVaultNativeNearbyAccount? {
-        payload.nearby.first(where: { $0.id == selectedID }) ?? payload.nearby.first
+        nearbyRows.first(where: { $0.id == selectedID }) ?? nearbyRows.first
     }
 
     private var mapRegion: MKCoordinateRegion {
-        let coordinates = payload.nearby.compactMap(\.account.coordinate)
+        let coordinates = nearbyRows.compactMap(\.account.coordinate)
         guard let first = coordinates.first else {
             return .init(center: .init(latitude: 43.615, longitude: -116.202), span: .init(latitudeDelta: 0.18, longitudeDelta: 0.18))
         }
@@ -263,17 +281,21 @@ private struct NativeNearbyView: View {
 
     private var map: some View {
         Group {
-            if payload.nearby.isEmpty {
+            if nearbyRows.isEmpty {
                 NativeShellCard {
                     ContentUnavailableView(
-                        "No Nearby Map Yet",
+                        payload.nearby.isEmpty ? "No Nearby Map Yet" : "No Accounts in Range",
                         systemImage: "map",
-                        description: Text("Refresh location to display GPS-ready accounts on Apple Maps.")
+                        description: Text(
+                            payload.nearby.isEmpty
+                                ? "Refresh location to display GPS-ready accounts on Apple Maps."
+                                : "Increase the Nearby Radius in Settings to include more accounts."
+                        )
                     )
                 }
             } else {
                 Map(initialPosition: .region(mapRegion)) {
-                    ForEach(Array(payload.nearby.enumerated()), id: \.element.id) { index, row in
+                    ForEach(Array(nearbyRows.enumerated()), id: \.element.id) { index, row in
                         if let coordinate = row.account.coordinate {
                             Annotation(row.account.name, coordinate: coordinate) {
                                 Button { selectedID = row.id } label: {
@@ -324,17 +346,26 @@ private struct NativeNearbyView: View {
     private var accountList: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("CLOSEST ACCOUNTS").font(.caption.bold()).tracking(1.2).foregroundStyle(.secondary)
+                Text("WITHIN \(settings.gps.nearbyRadiusMiles.formatted(.number.precision(.fractionLength(0...2)))) MILES")
+                    .font(.caption.bold()).tracking(1.2).foregroundStyle(.secondary)
                 Spacer()
-                Text("\(payload.nearby.count)").foregroundStyle(.secondary)
+                Text("\(nearbyRows.count)").foregroundStyle(.secondary)
             }
-            if payload.nearby.isEmpty {
-                ContentUnavailableView("Location Check Needed", systemImage: "location.slash", description: Text("Tap the location button to compare this iPhone with GPS-ready accounts."))
+            if nearbyRows.isEmpty {
+                ContentUnavailableView(
+                    payload.nearby.isEmpty ? "Location Check Needed" : "No Accounts in Range",
+                    systemImage: "location.slash",
+                    description: Text(
+                        payload.nearby.isEmpty
+                            ? "Tap the location button to compare this iPhone with GPS-ready accounts."
+                            : "Change the native Nearby Radius in Settings."
+                    )
+                )
                     .frame(maxWidth: .infinity).padding(.vertical, 30)
             } else {
                 NativeShellCard {
                     VStack(spacing: 0) {
-                        ForEach(Array(payload.nearby.prefix(12).enumerated()), id: \.element.id) { index, row in
+                        ForEach(Array(nearbyRows.prefix(12).enumerated()), id: \.element.id) { index, row in
                             Button { selectedID = row.id } label: {
                                 HStack(spacing: 12) {
                                     Text("\(index + 1)").font(.caption.bold()).frame(width: 30, height: 30).background(NativeShellPalette.blue.opacity(0.14), in: Circle())
@@ -348,7 +379,7 @@ private struct NativeNearbyView: View {
                                 .padding(.vertical, 12).contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            if index < min(payload.nearby.count, 12) - 1 { Divider().padding(.leading, 42) }
+                            if index < min(nearbyRows.count, 12) - 1 { Divider().padding(.leading, 42) }
                         }
                     }
                 }
@@ -451,6 +482,7 @@ private struct NativeAccountRow: View {
 private struct NativeSettingsView: View {
     let payload: FireVaultAppPayload
     @ObservedObject var bridge: FireVaultAppShellBridge
+    @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var search = ""
     private let versionInfo = FireVaultVersionInfo()
 
@@ -545,23 +577,7 @@ private struct NativeSettingsView: View {
         Section {
             ForEach(group.items) { item in
                 let status = item.displayStatus(nativeVersion: versionInfo.version)
-                Button {
-                    bridge.perform(
-                        "openSetting",
-                        payload: ["id": item.id, "group": group.id],
-                        hideShell: true
-                    )
-                } label: {
-                    FVSettingsRow(
-                        item: item,
-                        status: status,
-                        tint: NativeShellPalette.tint(group.tint)
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(item.accessibilityLabel)
-                .accessibilityValue(status)
-                .accessibilityHint("Opens \(item.title)")
+                settingsRow(item, group: group, status: status)
             }
         } header: {
             Label(group.title, systemImage: group.symbol)
@@ -570,6 +586,55 @@ private struct NativeSettingsView: View {
             if !group.subtitle.isEmpty {
                 Text(group.subtitle)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func settingsRow(
+        _ item: FireVaultNativeSettingItem,
+        group: FireVaultNativeSettingsGroup,
+        status: String
+    ) -> some View {
+        let row = FVSettingsRow(
+            item: item,
+            status: item.id == "gps" ? settings.gps.radiusStatus : status,
+            tint: NativeShellPalette.tint(group.tint)
+        )
+
+        switch item.id {
+        case "gps":
+            NavigationLink {
+                NativeGPSSettingsView(settings: settings)
+            } label: { row }
+                .accessibilityLabel(item.accessibilityLabel)
+                .accessibilityValue(settings.gps.radiusStatus)
+                .accessibilityHint("Opens native GPS and Maps settings")
+        case "about":
+            NavigationLink {
+                NativeAboutFireVaultView(versionInfo: versionInfo)
+            } label: { row }
+                .accessibilityLabel(item.accessibilityLabel)
+                .accessibilityValue(status)
+                .accessibilityHint("Opens native FireVault information")
+        case "updates":
+            NavigationLink {
+                NativeUpdatesView(versionInfo: versionInfo)
+            } label: { row }
+                .accessibilityLabel(item.accessibilityLabel)
+                .accessibilityValue(status)
+                .accessibilityHint("Opens native build information")
+        default:
+            Button {
+                bridge.perform(
+                    "openSetting",
+                    payload: ["id": item.id, "group": group.id],
+                    hideShell: true
+                )
+            } label: { row }
+                .buttonStyle(.plain)
+                .accessibilityLabel(item.accessibilityLabel)
+                .accessibilityValue(status)
+                .accessibilityHint("Opens \(item.title)")
         }
     }
 
@@ -586,6 +651,160 @@ private struct NativeSettingsView: View {
         } footer: {
             Text("A field workspace for notes, files, scans, photos, equipment, and account maps.")
         }
+    }
+}
+
+private extension FireVaultGPSPreferences {
+    var radiusStatus: String {
+        "\(nearbyRadiusMiles.formatted(.number.precision(.fractionLength(0...2)))) mi"
+    }
+}
+
+private struct NativeGPSSettingsView: View {
+    @ObservedObject var settings: FireVaultNativeSettingsStore
+    @State private var draft: FireVaultGPSPreferences
+    @State private var radiusText: String
+    @State private var saved = false
+    @FocusState private var radiusFocused: Bool
+
+    init(settings: FireVaultNativeSettingsStore) {
+        self.settings = settings
+        let current = settings.gps
+        _draft = State(initialValue: current)
+        _radiusText = State(
+            initialValue: current.nearbyRadiusMiles.formatted(
+                .number.precision(.fractionLength(0...2))
+            )
+        )
+    }
+
+    private var enteredRadius: Double? {
+        Double(radiusText.replacingOccurrences(of: ",", with: "."))
+    }
+
+    private var radiusIsValid: Bool {
+        guard let enteredRadius else { return false }
+        return FireVaultGPSPreferences.allowedRadius.contains(enteredRadius)
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("Default map", value: "Apple Maps")
+
+                Toggle("High-accuracy GPS", isOn: $draft.highAccuracy)
+
+                LabeledContent {
+                    TextField("Miles", text: $radiusText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .focused($radiusFocused)
+                        .frame(maxWidth: 100)
+                        .accessibilityLabel("Nearby radius in miles")
+                } label: {
+                    Text("Nearby radius")
+                }
+
+                if !radiusIsValid {
+                    Label("Enter a distance from 0.25 to 25 miles.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            } header: {
+                Text("Map Preferences")
+            } footer: {
+                Text("This native distance controls the accounts displayed on the Nearby map and list.")
+            }
+
+            Section("GPS Tools") {
+                Toggle("Show GPS capture controls", isOn: $draft.gpsToolsEnabled)
+                Toggle("Include coordinates in reports", isOn: $draft.includeCoordinatesInReports)
+                Toggle("Address assistance", isOn: $draft.addressAssistanceEnabled)
+            }
+
+            if saved {
+                Section {
+                    Label("GPS & Maps settings saved", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(NativeShellPalette.green)
+                        .accessibilityAddTraits(.isStaticText)
+                }
+            }
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .navigationTitle("GPS & Maps")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Save", action: save)
+                    .disabled(!radiusIsValid)
+            }
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { radiusFocused = false }
+            }
+        }
+        .onChange(of: radiusText) { _, _ in saved = false }
+        .onChange(of: draft) { _, _ in saved = false }
+    }
+
+    private func save() {
+        guard let enteredRadius, radiusIsValid else { return }
+        draft.nearbyRadiusMiles = enteredRadius
+        settings.saveGPS(draft)
+        radiusFocused = false
+        saved = true
+    }
+}
+
+private struct NativeAboutFireVaultView: View {
+    let versionInfo: FireVaultVersionInfo
+
+    var body: some View {
+        List {
+            Section {
+                VStack(spacing: 14) {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .font(.system(size: 52, weight: .semibold))
+                        .foregroundStyle(NativeShellPalette.red)
+                        .accessibilityHidden(true)
+                    Text("FireVault")
+                        .font(.largeTitle.bold())
+                    Text("A field workspace for fire alarm technicians, combining account information, notes, files, document scans, photos, equipment records, and site mapping.")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 22)
+                .accessibilityElement(children: .combine)
+            }
+
+            Section("Application") {
+                LabeledContent("Version", value: versionInfo.version)
+                LabeledContent("Build", value: versionInfo.build)
+            }
+        }
+        .navigationTitle("About FireVault")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct NativeUpdatesView: View {
+    let versionInfo: FireVaultVersionInfo
+
+    var body: some View {
+        List {
+            Section {
+                Label("FireVault is installed", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(NativeShellPalette.green)
+                LabeledContent("Version", value: versionInfo.version)
+                LabeledContent("Build", value: versionInfo.build)
+            } footer: {
+                Text("Native FireVault updates are delivered with the installed iOS application. This screen no longer manages PWA files or browser caches.")
+            }
+        }
+        .navigationTitle("App Updates")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

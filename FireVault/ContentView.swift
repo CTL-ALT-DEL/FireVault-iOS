@@ -188,6 +188,7 @@ struct ContentView: View {
     @State private var reloadToken = UUID()
     @StateObject private var appShellBridge = FireVaultAppShellBridge()
     @StateObject private var workspaceBridge = FireVaultWorkspaceBridge()
+    @StateObject private var nativeSettings = FireVaultNativeSettingsStore()
 
     var body: some View {
         ZStack {
@@ -197,8 +198,11 @@ struct ContentView: View {
                 loadState: $loadState,
                 reloadToken: reloadToken,
                 appShellBridge: appShellBridge,
-                workspaceBridge: workspaceBridge
+                workspaceBridge: workspaceBridge,
+                nativeSettings: nativeSettings
             )
+                .opacity(appShellBridge.payload == nil && workspaceBridge.account == nil ? 1 : 0)
+                .allowsHitTesting(appShellBridge.payload == nil && workspaceBridge.account == nil)
                 .ignoresSafeArea(.container, edges: .bottom)
                 .ignoresSafeArea(.keyboard, edges: .bottom)
 
@@ -213,7 +217,11 @@ struct ContentView: View {
             }
 
             if let payload = appShellBridge.payload, loadState == .ready {
-                NativeAppShellView(payload: payload, bridge: appShellBridge)
+                NativeAppShellView(
+                    payload: payload,
+                    bridge: appShellBridge,
+                    settings: nativeSettings
+                )
                     .transition(.opacity)
                     .zIndex(2)
             }
@@ -309,6 +317,7 @@ private struct FireVaultWebView: UIViewRepresentable {
     let reloadToken: UUID
     @ObservedObject var appShellBridge: FireVaultAppShellBridge
     @ObservedObject var workspaceBridge: FireVaultWorkspaceBridge
+    @ObservedObject var nativeSettings: FireVaultNativeSettingsStore
 
     private let appURL = URL(string: "https://ctl-alt-del.github.io/FireVault2/")!
 
@@ -317,7 +326,8 @@ private struct FireVaultWebView: UIViewRepresentable {
             loadState: $loadState,
             allowedHost: appURL.host,
             appShellBridge: appShellBridge,
-            workspaceBridge: workspaceBridge
+            workspaceBridge: workspaceBridge,
+            nativeSettings: nativeSettings
         )
     }
 
@@ -348,7 +358,7 @@ private struct FireVaultWebView: UIViewRepresentable {
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.keyboardDismissMode = .interactive
         webView.allowsBackForwardNavigationGestures = true
-        webView.customUserAgent = "FireVault-iOS/1.03.34"
+        webView.customUserAgent = "FireVault-iOS/1.04.00"
 
         context.coordinator.webView = webView
         appShellBridge.webView = webView
@@ -376,6 +386,7 @@ private struct FireVaultWebView: UIViewRepresentable {
         private let allowedHost: String?
         private let appShellBridge: FireVaultAppShellBridge
         private let workspaceBridge: FireVaultWorkspaceBridge
+        private let nativeSettings: FireVaultNativeSettingsStore
         private let locationManager = CLLocationManager()
         private var pendingLocationRequestID: String?
         private var activeSearches: [String: MKLocalSearch] = [:]
@@ -390,12 +401,14 @@ private struct FireVaultWebView: UIViewRepresentable {
             loadState: Binding<FireVaultLoadState>,
             allowedHost: String?,
             appShellBridge: FireVaultAppShellBridge,
-            workspaceBridge: FireVaultWorkspaceBridge
+            workspaceBridge: FireVaultWorkspaceBridge,
+            nativeSettings: FireVaultNativeSettingsStore
         ) {
             _loadState = loadState
             self.allowedHost = allowedHost
             self.appShellBridge = appShellBridge
             self.workspaceBridge = workspaceBridge
+            self.nativeSettings = nativeSettings
             super.init()
             locationManager.delegate = self
             locationManager.desiredAccuracy = kCLLocationAccuracyBest
@@ -406,7 +419,19 @@ private struct FireVaultWebView: UIViewRepresentable {
                 "window.fireVaultNativeIntegration10334?.syncVisibleVersion();"
             )
             setNativeShellActive(nativeShellActive)
+            importLegacyGPSPreferences(from: webView)
             loadState = .ready
+        }
+
+        private func importLegacyGPSPreferences(from webView: WKWebView) {
+            webView.evaluateJavaScript(
+                "typeof data !== 'undefined' ? (data.settings?.gps ?? null) : null"
+            ) { [weak self] result, _ in
+                guard let self else { return }
+                Task { @MainActor in
+                    self.nativeSettings.importLegacyGPSIfNeeded(result)
+                }
+            }
         }
 
         func webView(

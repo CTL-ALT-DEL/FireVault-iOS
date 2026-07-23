@@ -8,6 +8,7 @@
 import XCTest
 @testable import FireVault
 
+@MainActor
 final class FireVaultTests: XCTestCase {
     func testSettingsItemAccessibilityLabelIncludesUsefulContext() {
         let item = FireVaultNativeSettingItem(
@@ -43,7 +44,7 @@ final class FireVaultTests: XCTestCase {
     }
 
     func testWebIntegrationTargetsSharedKeyboardAndNavigationLayers() {
-        let source = FireVaultWebIntegration.source(version: "1.03.34")
+        let source = FireVaultWebIntegration.source(version: "1.04.00")
 
         XCTAssertTrue(source.contains("fvNativeKeyboard10334 main#app"))
         XCTAssertTrue(source.contains("fvNativeIOS10334 #appNav"))
@@ -55,12 +56,12 @@ final class FireVaultTests: XCTestCase {
     }
 
     func testWebIntegrationSynchronizesVisibleVersionAndPhotoOverlayHeader() {
-        let source = FireVaultWebIntegration.source(version: "1.03.34")
+        let source = FireVaultWebIntegration.source(version: "1.04.00")
 
         XCTAssertTrue(source.contains(".splashBuild492"))
         XCTAssertTrue(source.contains(".aboutGrid540"))
         XCTAssertTrue(source.contains("photoOverlayDetailHeader1032"))
-        XCTAssertTrue(source.contains("1.03.34"))
+        XCTAssertTrue(source.contains("1.04.00"))
     }
 
     func testNativeSettingsVersionStatusesOverrideOlderWebPayload() {
@@ -79,7 +80,54 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.03.34"), "Version 1.03.34")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.03.34"), "Build 1.03.34")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.04.00"), "Version 1.04.00")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.04.00"), "Build 1.04.00")
+    }
+
+    func testNativeGPSPreferencesClampRadiusToSupportedRange() {
+        var low = FireVaultGPSPreferences()
+        low.nearbyRadiusMiles = 0.1
+        XCTAssertEqual(low.normalized.nearbyRadiusMiles, 0.25)
+
+        var high = FireVaultGPSPreferences()
+        high.nearbyRadiusMiles = 80
+        XCTAssertEqual(high.normalized.nearbyRadiusMiles, 25)
+    }
+
+    func testNativeGPSSettingsPersistAndReload() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = FireVaultNativeSettingsStore(defaults: defaults)
+        var preferences = FireVaultGPSPreferences()
+        preferences.nearbyRadiusMiles = 3.5
+        preferences.highAccuracy = false
+        store.saveGPS(preferences)
+
+        let reloaded = FireVaultNativeSettingsStore(defaults: defaults)
+        XCTAssertEqual(reloaded.gps.nearbyRadiusMiles, 3.5)
+        XCTAssertFalse(reloaded.gps.highAccuracy)
+    }
+
+    func testLegacyGPSImportRunsOnceWithoutOverwritingNativeChoice() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = FireVaultNativeSettingsStore(defaults: defaults)
+        XCTAssertTrue(store.importLegacyGPSIfNeeded([
+            "nearbyRadiusMiles": 4.25,
+            "highAccuracy": false,
+            "enabled": true,
+            "includeInReports": false,
+            "addressAssist": true
+        ]))
+        XCTAssertEqual(store.gps.nearbyRadiusMiles, 4.25)
+        XCTAssertFalse(store.gps.highAccuracy)
+        XCTAssertFalse(store.gps.includeCoordinatesInReports)
+
+        XCTAssertFalse(store.importLegacyGPSIfNeeded(["nearbyRadiusMiles": 12]))
+        XCTAssertEqual(store.gps.nearbyRadiusMiles, 4.25)
     }
 }
