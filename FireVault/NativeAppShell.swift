@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.05.00.
+//  Native everyday navigation for Build 1.05.01.
 //
 
 import SwiftUI
@@ -266,11 +266,13 @@ private struct NativeNearbyView: View {
             if nearbyRows.isEmpty {
                 NativeShellCard {
                     ContentUnavailableView(
-                        payload.nearby.isEmpty ? "No Nearby Map Yet" : "No Accounts in Range",
+                        payload.nearby.isEmpty ? "No Mapped Accounts" : "No Accounts in Range",
                         systemImage: "map",
                         description: Text(
                             payload.nearby.isEmpty
-                                ? "Refresh location to display GPS-ready accounts on Apple Maps."
+                                ? (payload.demoMode
+                                    ? "Refresh location to display GPS-ready accounts on Apple Maps."
+                                    : "Import accounts with latitude and longitude, or add locations to native accounts.")
                                 : "Increase the Nearby Radius in Settings to include more accounts."
                         )
                     )
@@ -337,11 +339,13 @@ private struct NativeNearbyView: View {
             }
             if nearbyRows.isEmpty {
                 ContentUnavailableView(
-                    payload.nearby.isEmpty ? "Location Check Needed" : "No Accounts in Range",
+                    payload.nearby.isEmpty ? "No Mapped Accounts" : "No Accounts in Range",
                     systemImage: "location.slash",
                     description: Text(
                         payload.nearby.isEmpty
-                            ? "Tap the location button to compare this iPhone with GPS-ready accounts."
+                            ? (payload.demoMode
+                                ? "Tap the location button to compare this iPhone with GPS-ready accounts."
+                                : "Import accounts through Settings, then add GPS coordinates for Nearby.")
                             : "Change the native Nearby Radius in Settings."
                     )
                 )
@@ -405,7 +409,17 @@ private struct NativeAccountsView: View {
         NavigationStack {
             List {
                 if accounts.isEmpty {
-                    ContentUnavailableView.search(text: search).listRowBackground(Color.clear)
+                    if search.isEmpty {
+                        ContentUnavailableView(
+                            "No Accounts",
+                            systemImage: "building.2",
+                            description: Text("Add an account here or import a CSV from Settings.")
+                        )
+                        .listRowBackground(Color.clear)
+                    } else {
+                        ContentUnavailableView.search(text: search)
+                            .listRowBackground(Color.clear)
+                    }
                 } else {
                     Section {
                         ForEach(accounts) { account in
@@ -431,7 +445,7 @@ private struct NativeAccountsView: View {
                         }
                     } label: { Label(sort.rawValue, systemImage: "arrow.up.arrow.down") }
                     .buttonStyle(.glass)
-                    Button { store.addDemoAccount() } label: { Image(systemName: "plus") }
+                    Button { store.addAccount() } label: { Image(systemName: "plus") }
                         .buttonStyle(.glassProminent).accessibilityLabel("Add Account")
                 }
             }
@@ -651,6 +665,7 @@ private struct NativeSettingsView: View {
         case "webdav": settings.preferences.webDAV.enabled ? "Configured" : "Off"
         case "privacy": settings.preferences.privacy.enabled ? "On" : "Off"
         case "customerImport": "Native CSV"
+        case "demo": store.demoMode ? "Active" : "Off"
         case "about": "Version \(versionInfo.version)"
         case "updates": "Build \(versionInfo.version)"
         default: fallback

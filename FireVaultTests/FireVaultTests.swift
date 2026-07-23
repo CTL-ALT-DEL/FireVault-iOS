@@ -59,8 +59,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.05.00"), "Version 1.05.00")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.05.00"), "Build 1.05.00")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.05.01"), "Version 1.05.01")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.05.01"), "Build 1.05.01")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
@@ -134,6 +134,46 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(result.added, 1)
         XCTAssertEqual(result.skipped, 1)
         XCTAssertTrue(store.accounts.contains { $0.accountId == "NATIVE-1" })
+    }
+
+    func testNativeCSVImportSupportsUTF16AndCamelCaseNameHeader() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let csv = "customerName,address,accountId\nUTF16 Customer,300 Native Way,UTF16-1"
+        let data = try XCTUnwrap(csv.data(using: .utf16))
+
+        let result = try store.importAccountsCSV(data)
+
+        XCTAssertEqual(result.added, 1)
+        XCTAssertEqual(result.skipped, 0)
+        XCTAssertTrue(store.accounts.contains { $0.name == "UTF16 Customer" })
+    }
+
+    func testDemoAndProductionVaultsStaySeparate() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+
+        XCTAssertTrue(store.demoMode)
+        XCTAssertFalse(store.accounts.isEmpty)
+
+        store.exitDemoMode()
+        XCTAssertFalse(store.demoMode)
+        XCTAssertTrue(store.accounts.isEmpty)
+
+        let csv = "Account Name,Address,Account ID\nProduction Account,1 Main Street,PROD-1"
+        _ = try store.importAccountsCSV(Data(csv.utf8))
+        XCTAssertEqual(store.accounts.map(\.accountId), ["PROD-1"])
+
+        store.enterDemoMode()
+        XCTAssertTrue(store.demoMode)
+        XCTAssertFalse(store.accounts.contains { $0.accountId == "PROD-1" })
+
+        store.exitDemoMode()
+        XCTAssertEqual(store.accounts.map(\.accountId), ["PROD-1"])
     }
 
     func testEverySettingsCatalogRowHasANativeDestinationIdentifier() {

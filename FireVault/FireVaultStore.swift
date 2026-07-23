@@ -2,7 +2,7 @@
 //  FireVaultStore.swift
 //  FireVault
 //
-//  Native application and demo-data authority for Build 1.05.00.
+//  Native application and demo-data authority for Build 1.05.01.
 //
 
 import Foundation
@@ -23,20 +23,28 @@ final class FireVaultStore: ObservableObject {
     @Published var accounts: [FireVaultWorkspaceAccount]
     @Published var selectedAccountID: String?
     @Published var selectedTab: FireVaultShellTab = .nearby
-    @Published var locationStatus = "Demo location ready"
+    @Published var locationStatus: String
+    @Published private(set) var demoMode: Bool
 
     private let defaults: UserDefaults
-    private let storageKey = "firevault.native.demo-accounts.v1"
     private let demoCoordinate = CLLocationCoordinate2D(latitude: 43.6150, longitude: -116.2023)
+
+    private enum Key {
+        static let demoMode = "firevault.native.demo-mode.v1"
+        static let demoAccounts = "firevault.native.demo-accounts.v1"
+        static let productionAccounts = "firevault.native.production-accounts.v1"
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: storageKey),
-           let saved = try? JSONDecoder().decode([FireVaultWorkspaceAccount].self, from: data),
-           !saved.isEmpty {
-            accounts = saved
+        let activeDemoMode = defaults.object(forKey: Key.demoMode) as? Bool ?? true
+        demoMode = activeDemoMode
+        locationStatus = activeDemoMode ? "Demo location ready" : "Location ready"
+
+        if activeDemoMode {
+            accounts = Self.savedAccounts(defaults: defaults, key: Key.demoAccounts) ?? Self.demoAccounts
         } else {
-            accounts = Self.demoAccounts
+            accounts = Self.savedAccounts(defaults: defaults, key: Key.productionAccounts) ?? []
         }
     }
 
@@ -63,9 +71,9 @@ final class FireVaultStore: ObservableObject {
         return .init(
             build: FireVaultVersionInfo().version,
             initialTab: selectedTab.rawValue,
-            demoMode: true,
+            demoMode: demoMode,
             today: Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()),
-            technicianName: "Demo Technician",
+            technicianName: demoMode ? "Demo Technician" : "Field Technician",
             locationStatus: locationStatus,
             accounts: nativeAccounts,
             nearby: nearby,
@@ -93,20 +101,20 @@ final class FireVaultStore: ObservableObject {
         persist()
     }
 
-    func addDemoAccount() {
+    func addAccount() {
         let number = accounts.count + 1
         accounts.append(
             .init(
                 id: UUID().uuidString,
-                name: "Demo Account \(number)",
+                name: demoMode ? "Demo Account \(number)" : "New Account \(number)",
                 address: "\(100 + number) Native Way, Boise, ID 83702",
                 category: "Commercial",
-                accountId: "DEMO-\(number.formatted(.number.precision(.integerLength(2))))",
+                accountId: "\(demoMode ? "DEMO" : "NEW")-\(number.formatted(.number.precision(.integerLength(2))))",
                 phone: "20855501\(number.formatted(.number.precision(.integerLength(2))))",
                 favorite: false,
                 latitude: 43.615 + Double(number) * 0.002,
                 longitude: -116.202 + Double(number) * 0.002,
-                tags: ["Native Demo"],
+                tags: [demoMode ? "Native Demo" : "Native"],
                 notes: [],
                 documents: [],
                 equipment: [],
@@ -185,21 +193,52 @@ final class FireVaultStore: ObservableObject {
     }
 
     func resetDemo() {
+        guard demoMode else { return }
         accounts = Self.demoAccounts
         selectedAccountID = nil
-        defaults.removeObject(forKey: storageKey)
+        defaults.removeObject(forKey: Key.demoAccounts)
+    }
+
+    func exitDemoMode() {
+        guard demoMode else { return }
+        selectedAccountID = nil
+        demoMode = false
+        defaults.set(false, forKey: Key.demoMode)
+        accounts = Self.savedAccounts(defaults: defaults, key: Key.productionAccounts) ?? []
+        locationStatus = "Location ready"
+    }
+
+    func enterDemoMode() {
+        guard !demoMode else { return }
+        selectedAccountID = nil
+        demoMode = true
+        defaults.set(true, forKey: Key.demoMode)
+        accounts = Self.savedAccounts(defaults: defaults, key: Key.demoAccounts) ?? Self.demoAccounts
+        locationStatus = "Demo location ready"
     }
 
     func importAccountsCSV(_ data: Data) throws -> FireVaultCSVImportResult {
-        guard let source = String(data: data, encoding: .utf8) else {
+        guard let source = Self.decodeCSV(data) else {
             throw CocoaError(.fileReadInapplicableStringEncoding)
         }
-        let rows = Self.parseCSV(source)
+        var rows = Self.parseCSV(source)
+        if rows.first?.first?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("sep=") == true {
+            rows.removeFirst()
+        }
         guard let rawHeaders = rows.first, rawHeaders.count > 0 else {
             return .init(added: 0, skipped: 0, totalRows: 0, messages: ["The CSV file is empty."])
         }
 
         let headers = rawHeaders.map(Self.normalizedHeader)
+        let nameAliases = ["name", "account name", "accountname", "site name", "sitename", "site", "customer name", "customername", "customer"]
+        guard headers.contains(where: nameAliases.contains) else {
+            return .init(
+                added: 0,
+                skipped: max(0, rows.count - 1),
+                totalRows: max(0, rows.count - 1),
+                messages: ["No recognized account-name column was found. Use Account Name, Site Name, Customer Name, or Name."]
+            )
+        }
         let records = rows.dropFirst().filter { row in row.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
         var added = 0
         var skipped = 0
@@ -217,7 +256,7 @@ final class FireVaultStore: ObservableObject {
 
         for (offset, row) in records.enumerated() {
             let rowNumber = offset + 2
-            let name = value(["name", "account name", "site name", "customer name", "customer"], from: row)
+            let name = value(nameAliases, from: row)
             guard !name.isEmpty else {
                 skipped += 1
                 messages.append("Row \(rowNumber): missing account name.")
@@ -266,7 +305,21 @@ final class FireVaultStore: ObservableObject {
 
     private func persist() {
         guard let data = try? JSONEncoder().encode(accounts) else { return }
-        defaults.set(data, forKey: storageKey)
+        defaults.set(data, forKey: demoMode ? Key.demoAccounts : Key.productionAccounts)
+    }
+
+    private static func savedAccounts(defaults: UserDefaults, key: String) -> [FireVaultWorkspaceAccount]? {
+        guard let data = defaults.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode([FireVaultWorkspaceAccount].self, from: data)
+    }
+
+    private static func decodeCSV(_ data: Data) -> String? {
+        for encoding in [String.Encoding.utf8, .utf16, .utf16LittleEndian, .utf16BigEndian, .windowsCP1252, .macOSRoman] {
+            if let value = String(data: data, encoding: encoding) {
+                return value
+            }
+        }
+        return nil
     }
 
     private static func nativeAccount(_ account: FireVaultWorkspaceAccount) -> FireVaultNativeAccount {
@@ -290,7 +343,7 @@ final class FireVaultStore: ObservableObject {
     }
 
     private static func normalizedHeader(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines)
+        value.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{feff}")))
             .lowercased()
             .replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ")

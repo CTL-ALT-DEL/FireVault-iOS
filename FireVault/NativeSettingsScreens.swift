@@ -2,11 +2,12 @@
 //  NativeSettingsScreens.swift
 //  FireVault
 //
-//  Pure SwiftUI Settings destinations for Build 1.05.00.
+//  Pure SwiftUI Settings destinations for Build 1.05.01.
 //
 
 import SwiftUI
 import UniformTypeIdentifiers
+import Foundation
 
 enum NativeSettingsCatalog {
     static let groups: [FireVaultNativeSettingsGroup] = [
@@ -33,7 +34,7 @@ enum NativeSettingsCatalog {
         group("help", "Help & About", "Native documentation and application information", "questionmark.circle", "red", [
             item("manual", "Help & User Manual", "Native quick-start instructions", "book.closed"),
             item("updates", "App Updates", "Installed native version", "arrow.down.circle"),
-            item("demo", "Demo Mode", "Reset fictional native accounts", "theatermasks"),
+            item("demo", "Demo Mode", "Enter, exit, or reset the fictional vault", "theatermasks"),
             item("about", "About FireVault", "Version and application information", "info.circle")
         ])
     ]
@@ -384,14 +385,30 @@ struct NativePrivacySettingsView: View {
 struct NativeCSVImportView: View {
     @ObservedObject var store: FireVaultStore
     @State private var showImporter = false
+    @State private var isImporting = false
     @State private var result: FireVaultCSVImportResult?
     @State private var errorMessage = ""
+    @State private var showFeedback = false
+    @State private var feedbackTitle = ""
+    @State private var feedbackMessage = ""
 
     var body: some View {
         List {
             Section("Native CSV Import") {
-                Button("Choose CSV File", systemImage: "doc.badge.plus") { showImporter = true }
+                Button("Choose CSV File", systemImage: "doc.badge.plus") {
+                    result = nil
+                    errorMessage = ""
+                    showImporter = true
+                }
                     .buttonStyle(.borderedProminent)
+                    .disabled(isImporting)
+                if isImporting {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Reading and importing CSV…")
+                    }
+                    .accessibilityElement(children: .combine)
+                }
                 Text("Recognized columns include Account Name, Address, City, State, ZIP, Account ID, Category, Phone, Latitude, and Longitude.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
@@ -409,37 +426,137 @@ struct NativeCSVImportView: View {
         }
         .navigationTitle("Customer CSV Import")
         .navigationBarTitleDisplayMode(.inline)
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.commaSeparatedText, .plainText]) { selection in
-            do {
-                let url = try selection.get()
-                let accessed = url.startAccessingSecurityScopedResource()
-                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-                result = try store.importAccountsCSV(Data(contentsOf: url))
-                errorMessage = ""
-            } catch {
-                errorMessage = error.localizedDescription
+        .fileImporter(
+            isPresented: $showImporter,
+            allowedContentTypes: [.commaSeparatedText, .plainText, .data],
+            allowsMultipleSelection: false
+        ) { selection in
+            switch selection {
+            case .success(let urls):
+                guard let url = urls.first else {
+                    presentError("No file was returned by the document picker.")
+                    return
+                }
+                isImporting = true
+                Task { @MainActor in
+                    await Task.yield()
+                    importCSV(from: url)
+                }
+            case .failure(let error):
+                presentError(error.localizedDescription)
             }
         }
+        .alert(feedbackTitle, isPresented: $showFeedback) {
+            Button("OK") {}
+        } message: {
+            Text(feedbackMessage)
+        }
+    }
+
+    private func importCSV(from url: URL) {
+        do {
+            let imported = try store.importAccountsCSV(readCoordinatedData(from: url))
+            result = imported
+            errorMessage = ""
+            feedbackTitle = imported.added > 0 ? "CSV Import Complete" : "No Accounts Imported"
+            feedbackMessage = [
+                "\(imported.added) added",
+                "\(imported.skipped) skipped",
+                imported.messages.first
+            ]
+            .compactMap { $0 }
+            .joined(separator: "\n")
+            showFeedback = true
+        } catch {
+            presentError(error.localizedDescription)
+        }
+        isImporting = false
+    }
+
+    private func readCoordinatedData(from url: URL) throws -> Data {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessed { url.stopAccessingSecurityScopedResource() }
+        }
+
+        var coordinationError: NSError?
+        var readResult: Result<Data, Error>?
+        NSFileCoordinator().coordinate(
+            readingItemAt: url,
+            options: [],
+            error: &coordinationError
+        ) { coordinatedURL in
+            readResult = Result {
+                try Data(contentsOf: coordinatedURL, options: .mappedIfSafe)
+            }
+        }
+
+        if let coordinationError { throw coordinationError }
+        guard let readResult else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        return try readResult.get()
+    }
+
+    private func presentError(_ message: String) {
+        isImporting = false
+        errorMessage = message
+        feedbackTitle = "CSV Import Failed"
+        feedbackMessage = message
+        showFeedback = true
     }
 }
 
 struct NativeDemoSettingsView: View {
     @ObservedObject var store: FireVaultStore
     @State private var confirmReset = false
+    @State private var confirmExit = false
+    @State private var confirmEnter = false
 
     var body: some View {
         List {
             Section {
-                Label("Native Demo Mode is active", systemImage: "theatermasks.fill")
-                    .foregroundStyle(.orange)
+                Label(
+                    store.demoMode ? "Native Demo Mode is active" : "Demo Mode is off",
+                    systemImage: store.demoMode ? "theatermasks.fill" : "checkmark.shield.fill"
+                )
+                .foregroundStyle(store.demoMode ? .orange : .green)
                 LabeledContent("Accounts", value: "\(store.accounts.count)")
-                Button("Reset Native Demo Data", role: .destructive) { confirmReset = true }
+                if store.demoMode {
+                    Button("Exit Demo Mode", systemImage: "rectangle.portrait.and.arrow.forward") {
+                        confirmExit = true
+                    }
+                    .foregroundStyle(.blue)
+                    Button("Reset Native Demo Data", role: .destructive) {
+                        confirmReset = true
+                    }
+                } else {
+                    Button("Enter Demo Mode", systemImage: "theatermasks") {
+                        confirmEnter = true
+                    }
+                }
             } footer: {
-                Text("Reset restores the bundled fictional Boise accounts. No PWA data is used.")
+                Text(
+                    store.demoMode
+                        ? "Exit switches to your separate production vault. Demo accounts remain available if you return."
+                        : "Production and demo accounts are stored separately. Entering Demo Mode will not change production accounts."
+                )
             }
         }
         .navigationTitle("Demo Mode")
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog("Exit Demo Mode?", isPresented: $confirmExit, titleVisibility: .visible) {
+            Button("Exit Demo Mode") { store.exitDemoMode() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("FireVault will open the production vault. It starts empty until you add or import accounts.")
+        }
+        .confirmationDialog("Enter Demo Mode?", isPresented: $confirmEnter, titleVisibility: .visible) {
+            Button("Enter Demo Mode") { store.enterDemoMode() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("FireVault will switch to the separate fictional demo vault.")
+        }
         .confirmationDialog("Reset all native demo changes?", isPresented: $confirmReset, titleVisibility: .visible) {
             Button("Reset Demo Data", role: .destructive) { store.resetDemo() }
             Button("Cancel", role: .cancel) {}
@@ -457,7 +574,7 @@ struct NativeManualView: View {
                 Label("Use Settings for native preferences and CSV import.", systemImage: "gearshape")
             }
             Section("Native Transition") {
-                Text("FireVault 1.05.00 removes the hosted web runtime. Features are rebuilt with SwiftUI, MapKit, PhotosUI, and native iOS storage.")
+                Text("FireVault 1.05 removes the hosted web runtime. Features are rebuilt with SwiftUI, MapKit, PhotosUI, and native iOS storage.")
             }
         }
         .navigationTitle("Help & User Manual")
