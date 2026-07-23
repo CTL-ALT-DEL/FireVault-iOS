@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.06.00.
+//  Native everyday navigation for Build 1.06.01.
 //
 
 import SwiftUI
@@ -228,6 +228,16 @@ private struct NativeNearbyView: View {
     private var selected: FireVaultNativeNearbyAccount? {
         guard let selectedID else { return nil }
         return nearbyRows.first(where: { $0.id == selectedID })
+    }
+
+    private var selectedWorkspaceAccount: FireVaultWorkspaceAccount? {
+        guard let selected else { return nil }
+        return store.accounts.first(where: { $0.id == selected.account.id })
+    }
+
+    private var selectedHasPhone: Bool {
+        guard let selected else { return false }
+        return selected.account.phone.contains(where: \.isNumber)
     }
 
     private var canDisplayMap: Bool {
@@ -516,6 +526,48 @@ private struct NativeNearbyView: View {
                         .accessibilityLabel("\(selected.account.name), \(selected.account.address)")
                     }
                 }
+                .overlay(alignment: .bottomTrailing) {
+                    if let selected {
+                        HStack(spacing: 8) {
+                            Button {
+                                store.call(selected.account.phone)
+                            } label: {
+                                Image(systemName: "phone.fill")
+                                    .font(.headline)
+                                    .foregroundStyle(selectedHasPhone ? NativeShellPalette.green : .secondary)
+                                    .frame(width: 44, height: 44)
+                                    .background(NativeShellPalette.surface, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!selectedHasPhone)
+                            .accessibilityLabel("Call \(selected.account.name)")
+                            .accessibilityValue(selectedHasPhone ? selected.account.phone : "No phone number")
+                            .accessibilityIdentifier("nearby-map-call")
+
+                            Button {
+                                guard let account = selectedWorkspaceAccount else { return }
+                                store.openRoute(for: account)
+                            } label: {
+                                Image(systemName: "arrow.triangle.turn.up.right.diamond.fill")
+                                    .font(.headline)
+                                    .foregroundStyle(NativeShellPalette.blue)
+                                    .frame(width: 44, height: 44)
+                                    .background(NativeShellPalette.surface, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(selectedWorkspaceAccount == nil)
+                            .accessibilityLabel("Route to \(selected.account.name)")
+                            .accessibilityIdentifier("nearby-map-route")
+                        }
+                        .padding(7)
+                        .background(Color.black.opacity(0.88), in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(.white.opacity(0.16), lineWidth: 1)
+                        }
+                        .padding(10)
+                    }
+                }
                 .accessibilityIdentifier("nearby-fixed-map")
             }
         }
@@ -562,7 +614,7 @@ private struct NativeNearbyView: View {
                 .padding(.horizontal, 16)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 12) {
+                    LazyVStack(spacing: 8) {
                         ForEach(Array(nearbyRows.enumerated()), id: \.element.id) { index, row in
                             accountCard(row, index: index)
                                 .id(row.id)
@@ -593,65 +645,95 @@ private struct NativeNearbyView: View {
         _ row: FireVaultNativeNearbyAccount,
         index: Int
     ) -> some View {
-        NativeShellCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    Text("\(index + 1)")
-                        .font(.caption.bold())
-                        .foregroundStyle(.white)
-                        .frame(width: 30, height: 30)
-                        .background(
-                            selectedID == row.id ? NativeShellPalette.red : NativeShellPalette.blue,
-                            in: Circle()
-                        )
+        Button {
+            selectAccount(row, scrollToCard: false)
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Text("\(index + 1)")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.white)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        selectedID == row.id ? NativeShellPalette.red : NativeShellPalette.blue,
+                        in: Circle()
+                    )
+                    .padding(.top, 1)
 
-                    VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(row.account.name)
-                            .font(.headline)
+                            .font(.subheadline.bold())
                             .foregroundStyle(.primary)
                             .lineLimit(1)
-                        Text(row.account.address)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
+
+                        Spacer(minLength: 4)
+
+                        Text(row.distanceLabel)
+                            .font(.caption.bold())
+                            .foregroundStyle(NativeShellPalette.green)
+                            .fixedSize()
                     }
 
-                    Spacer(minLength: 8)
-                    Text(row.distanceLabel)
-                        .font(.subheadline.bold())
-                        .foregroundStyle(NativeShellPalette.green)
-                }
+                    Text(row.account.address)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
 
-                HStack(spacing: 10) {
-                    Button("Show on Map", systemImage: "mappin.and.ellipse") {
-                        selectAccount(row, scrollToCard: false)
-                    }
-                    .buttonStyle(.bordered)
+                    HStack(spacing: 10) {
+                        Label(
+                            row.account.accountId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? "No Account ID"
+                                : row.account.accountId,
+                            systemImage: "number"
+                        )
+                        .lineLimit(1)
 
-                    Button("Open", systemImage: "arrow.up.right") {
-                        store.openAccount(row.account.id)
+                        Label(
+                            row.account.category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? "Uncategorized"
+                                : row.account.category,
+                            systemImage: "tag.fill"
+                        )
+                        .lineLimit(1)
                     }
-                    .buttonStyle(.borderedProminent)
-
-                    Button {
-                        if let account = store.accounts.first(where: { $0.id == row.account.id }) {
-                            store.openRoute(for: account)
-                        }
-                    } label: {
-                        Image(systemName: "arrow.triangle.turn.up.right.diamond")
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("Route to \(row.account.name)")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
                 }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                selectedID == row.id
+                    ? NativeShellPalette.blue.opacity(0.12)
+                    : NativeShellPalette.surface,
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(
+                        selectedID == row.id
+                            ? NativeShellPalette.blue.opacity(0.82)
+                            : .white.opacity(0.07),
+                        lineWidth: selectedID == row.id ? 1.5 : 1
+                    )
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(
-                    selectedID == row.id ? NativeShellPalette.blue.opacity(0.8) : .clear,
-                    lineWidth: 2
-                )
-        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            [
+                row.account.name,
+                row.account.address,
+                row.account.accountId.isEmpty ? "No account ID" : "Account ID \(row.account.accountId)",
+                row.account.category.isEmpty ? "Uncategorized" : "Category \(row.account.category)",
+                row.distanceLabel
+            ].joined(separator: ", ")
+        )
+        .accessibilityHint("Selects this account on the map")
+        .accessibilityValue(selectedID == row.id ? "Selected" : "Not selected")
+        .accessibilityAddTraits(selectedID == row.id ? .isSelected : [])
         .accessibilityIdentifier("nearby-account-\(row.id)")
     }
 
