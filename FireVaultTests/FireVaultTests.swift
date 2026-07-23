@@ -7,6 +7,7 @@
 
 import XCTest
 import CoreLocation
+import MapKit
 @testable import FireVault
 
 @MainActor
@@ -60,8 +61,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.05.07"), "Version 1.05.07")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.05.07"), "Build 1.05.07")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.06.00"), "Version 1.06.00")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.06.00"), "Build 1.06.00")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
@@ -314,6 +315,31 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(store.unmappedAccountCount, 0)
         XCTAssertEqual(payload.nearby.map(\.account.accountId), ["MAP-1"])
         XCTAssertEqual(try XCTUnwrap(payload.nearby.first?.distanceMeters), 0, accuracy: 0.01)
+    }
+
+    func testNearbyUserCameraStaysCenteredOnCurrentLocation() {
+        let coordinate = CLLocationCoordinate2D(latitude: 43.615, longitude: -116.2023)
+
+        let region = FireVaultNearbyMapCamera.userRegion(
+            coordinate: coordinate,
+            radiusMiles: 2
+        )
+
+        XCTAssertEqual(region.center.latitude, coordinate.latitude, accuracy: 0.000_001)
+        XCTAssertEqual(region.center.longitude, coordinate.longitude, accuracy: 0.000_001)
+        XCTAssertGreaterThan(region.span.latitudeDelta, 0)
+        XCTAssertGreaterThan(region.span.longitudeDelta, 0)
+    }
+
+    func testNearbyAccountCameraUsesTightAccountZoom() {
+        let coordinate = CLLocationCoordinate2D(latitude: 43.6178, longitude: -116.197)
+
+        let region = FireVaultNearbyMapCamera.accountRegion(coordinate: coordinate)
+
+        XCTAssertEqual(region.center.latitude, coordinate.latitude, accuracy: 0.000_001)
+        XCTAssertEqual(region.center.longitude, coordinate.longitude, accuracy: 0.000_001)
+        XCTAssertEqual(region.span.latitudeDelta, 0.012, accuracy: 0.000_001)
+        XCTAssertEqual(region.span.longitudeDelta, 0.012, accuracy: 0.000_001)
     }
 
     func testEverySettingsCatalogRowHasANativeDestinationIdentifier() {

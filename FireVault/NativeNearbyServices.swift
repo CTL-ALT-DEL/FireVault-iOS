@@ -2,13 +2,39 @@
 //  NativeNearbyServices.swift
 //  FireVault
 //
-//  Native location and imported-address geocoding for Build 1.05.07.
+//  Native location and imported-address geocoding for Build 1.06.00.
 //
 
 import Combine
 import CoreLocation
 import Foundation
+import MapKit
 import UIKit
+
+enum FireVaultNearbyMapCamera {
+    static func userRegion(
+        coordinate: CLLocationCoordinate2D,
+        radiusMiles: Double
+    ) -> MKCoordinateRegion {
+        let latitudeDelta = max(0.024, min(1.2, radiusMiles / 69 * 2.4))
+        let latitudeRadians = coordinate.latitude * .pi / 180
+        let longitudeScale = max(0.2, abs(cos(latitudeRadians)))
+        return .init(
+            center: coordinate,
+            span: .init(
+                latitudeDelta: latitudeDelta,
+                longitudeDelta: latitudeDelta / longitudeScale
+            )
+        )
+    }
+
+    static func accountRegion(coordinate: CLLocationCoordinate2D) -> MKCoordinateRegion {
+        .init(
+            center: coordinate,
+            span: .init(latitudeDelta: 0.012, longitudeDelta: 0.012)
+        )
+    }
+}
 
 struct FireVaultPostalAddress: Equatable {
     let street: String
@@ -218,6 +244,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
     @Published private(set) var statusText = "Tap the location button to find nearby accounts"
     @Published private(set) var authorizationStatus: CLAuthorizationStatus
     @Published private(set) var isLocating = false
+    @Published private(set) var mapRecenterRequestID = UUID()
 
     private let manager: CLLocationManager
 
@@ -253,6 +280,11 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
             isLocating = false
             statusText = "Location is unavailable"
         }
+    }
+
+    func requestMapRecenter(highAccuracy: Bool) {
+        mapRecenterRequestID = UUID()
+        requestCurrentLocation(highAccuracy: highAccuracy)
     }
 
     func openAppSettings() {
@@ -294,6 +326,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         coordinate = location.coordinate
         isLocating = false
         statusText = "Updated \(Date().formatted(date: .omitted, time: .shortened))"
+        mapRecenterRequestID = UUID()
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {

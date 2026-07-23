@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.05.07.
+//  Native everyday navigation for Build 1.06.00.
 //
 
 import SwiftUI
@@ -160,6 +160,15 @@ struct NativeAppShellView: View {
             ForEach(FireVaultShellTab.allCases) { tab in
                 let isSelected = store.selectedTab == tab
                 Button {
+                    if tab == .nearby, isSelected {
+                        if payload.demoMode {
+                            store.refreshNearby()
+                        } else {
+                            locationService.requestMapRecenter(
+                                highAccuracy: settings.gps.highAccuracy
+                            )
+                        }
+                    }
                     withAnimation(.snappy(duration: 0.25)) { store.selectedTab = tab }
                 } label: {
                     VStack(spacing: 4) {
@@ -207,6 +216,9 @@ private struct NativeNearbyView: View {
     @State private var selectedID: String?
     @State private var showGeocodingConsent = false
     @State private var showMappingDetails = false
+    @State private var cameraPosition: MapCameraPosition = .automatic
+    @State private var scrollAccountID: String?
+    @State private var accountScrollWasActive = false
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -214,7 +226,8 @@ private struct NativeNearbyView: View {
     }
 
     private var selected: FireVaultNativeNearbyAccount? {
-        nearbyRows.first(where: { $0.id == selectedID }) ?? nearbyRows.first
+        guard let selectedID else { return nil }
+        return nearbyRows.first(where: { $0.id == selectedID })
     }
 
     private var canDisplayMap: Bool {
@@ -228,7 +241,7 @@ private struct NativeNearbyView: View {
         return showMappingDetails
     }
 
-    private var mapRegion: MKCoordinateRegion {
+    private var overviewRegion: MKCoordinateRegion {
         var coordinates = nearbyRows.compactMap(\.account.coordinate)
         if !payload.demoMode, let currentLocation = locationService.coordinate {
             coordinates.append(currentLocation)
@@ -248,26 +261,27 @@ private struct NativeNearbyView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    statusHeader
-                    if shouldShowCoordinateSetup {
-                        coordinateSetup
-                    }
-                    if !payload.demoMode,
-                       locationService.coordinate == nil,
-                       locationService.authorizationStatus == .denied {
-                        locationAccessSetup
-                    }
-                    map
-                    if let selected { selectedCard(selected) }
-                    accountList
+            VStack(spacing: 12) {
+                statusHeader
+                    .padding(.horizontal, 16)
+
+                if shouldShowCoordinateSetup {
+                    coordinateSetup
+                        .padding(.horizontal, 16)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 110)
+                if !payload.demoMode,
+                   locationService.coordinate == nil,
+                   locationService.authorizationStatus == .denied {
+                    locationAccessSetup
+                        .padding(.horizontal, 16)
+                }
+
+                map
+                    .padding(.horizontal, 16)
+
+                accountList
             }
-            .scrollIndicators(.hidden)
+            .padding(.top, 8)
             .navigationTitle("Nearby")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -288,8 +302,10 @@ private struct NativeNearbyView: View {
                     Button {
                         if payload.demoMode {
                             store.refreshNearby()
+                            cameraPosition = .region(overviewRegion)
                         } else {
-                            locationService.requestCurrentLocation(highAccuracy: settings.gps.highAccuracy)
+                            selectedID = nil
+                            locationService.requestMapRecenter(highAccuracy: settings.gps.highAccuracy)
                         }
                     } label: {
                         if locationService.isLocating, !payload.demoMode {
@@ -299,13 +315,22 @@ private struct NativeNearbyView: View {
                         }
                     }
                         .buttonStyle(.glassProminent)
-                        .accessibilityLabel("Refresh nearby accounts")
+                        .accessibilityLabel(
+                            payload.demoMode ? "Reset demo map" : "Center map on current location"
+                        )
                 }
             }
             .task {
-                if !payload.demoMode, locationService.coordinate == nil {
-                    locationService.requestCurrentLocation(highAccuracy: settings.gps.highAccuracy)
+                if payload.demoMode {
+                    cameraPosition = .region(overviewRegion)
+                } else if locationService.coordinate != nil {
+                    centerMapOnUser()
+                } else {
+                    locationService.requestMapRecenter(highAccuracy: settings.gps.highAccuracy)
                 }
+            }
+            .onChange(of: locationService.mapRecenterRequestID) { _, _ in
+                centerMapOnUser()
             }
             .onChange(of: store.geocodingProgress?.phase) { _, phase in
                 if phase == .complete {
@@ -428,7 +453,7 @@ private struct NativeNearbyView: View {
                     )
                 }
             } else {
-                Map(initialPosition: .region(mapRegion)) {
+                Map(position: $cameraPosition) {
                     if !payload.demoMode, let currentLocation = locationService.coordinate {
                         Annotation("Your Location", coordinate: currentLocation) {
                             ZStack {
@@ -451,7 +476,9 @@ private struct NativeNearbyView: View {
                     ForEach(Array(nearbyRows.enumerated()), id: \.element.id) { index, row in
                         if let coordinate = row.account.coordinate {
                             Annotation(row.account.name, coordinate: coordinate) {
-                                Button { selectedID = row.id } label: {
+                                Button {
+                                    selectAccount(row, scrollToCard: true)
+                                } label: {
                                     Text("\(index + 1)")
                                         .font(.caption.bold()).foregroundStyle(.white)
                                         .frame(width: 32, height: 32)
@@ -464,9 +491,32 @@ private struct NativeNearbyView: View {
                         }
                     }
                 }
-                .frame(height: 280)
+                .frame(height: 270)
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .overlay { RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.white.opacity(0.10), lineWidth: 1) }
+                .overlay(alignment: .topLeading) {
+                    if let selected {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(selected.account.name)
+                                .font(.subheadline.bold())
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                            Text(selected.account.address)
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.78))
+                                .lineLimit(2)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: 260, alignment: .leading)
+                        .background(.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                        .padding(10)
+                        .allowsHitTesting(false)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("\(selected.account.name), \(selected.account.address)")
+                    }
+                }
+                .accessibilityIdentifier("nearby-fixed-map")
             }
         }
     }
@@ -492,70 +542,155 @@ private struct NativeNearbyView: View {
         return "Increase the Nearby Radius in Settings to include more accounts."
     }
 
-    private func selectedCard(_ row: FireVaultNativeNearbyAccount) -> some View {
-        NativeShellCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(row.account.name).font(.title3.bold()).foregroundStyle(.white)
-                        Text(row.account.address).font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text(row.distanceLabel).font(.headline).foregroundStyle(NativeShellPalette.green)
-                }
-                HStack(spacing: 10) {
-                    Button("Open", systemImage: "arrow.up.right") {
-                        store.openAccount(row.account.id)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    Button("Route", systemImage: "arrow.triangle.turn.up.right.diamond") {
-                        if let account = store.accounts.first(where: { $0.id == row.account.id }) {
-                            store.openRoute(for: account)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-        }
-    }
-
     private var accountList: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("WITHIN \(settings.gps.nearbyRadiusMiles.formatted(.number.precision(.fractionLength(0...2)))) MILES")
+                Text("NEARBY ACCOUNTS • \(settings.gps.nearbyRadiusMiles.formatted(.number.precision(.fractionLength(0...2)))) MI")
                     .font(.caption.bold()).tracking(1.2).foregroundStyle(.secondary)
                 Spacer()
                 Text("\(nearbyRows.count)").foregroundStyle(.secondary)
             }
+            .padding(.horizontal, 16)
+
             if nearbyRows.isEmpty {
                 ContentUnavailableView(
                     emptyMapTitle,
                     systemImage: "location.slash",
                     description: Text(emptyMapDescription)
                 )
-                    .frame(maxWidth: .infinity).padding(.vertical, 30)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 16)
             } else {
-                NativeShellCard {
-                    VStack(spacing: 0) {
-                        ForEach(Array(nearbyRows.prefix(12).enumerated()), id: \.element.id) { index, row in
-                            Button { selectedID = row.id } label: {
-                                HStack(spacing: 12) {
-                                    Text("\(index + 1)").font(.caption.bold()).frame(width: 30, height: 30).background(NativeShellPalette.blue.opacity(0.14), in: Circle())
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(row.account.name).font(.headline).foregroundStyle(.primary).lineLimit(1)
-                                        Text(row.account.address).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                    }
-                                    Spacer()
-                                    Text(row.distanceLabel).font(.subheadline.bold()).foregroundStyle(NativeShellPalette.green)
-                                }
-                                .padding(.vertical, 12).contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            if index < min(nearbyRows.count, 12) - 1 { Divider().padding(.leading, 42) }
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(Array(nearbyRows.enumerated()), id: \.element.id) { index, row in
+                            accountCard(row, index: index)
+                                .id(row.id)
                         }
                     }
+                    .scrollTargetLayout()
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
+                }
+                .scrollIndicators(.hidden)
+                .scrollPosition(id: $scrollAccountID, anchor: .top)
+                .scrollTargetBehavior(.viewAligned(limitBehavior: .always, anchor: .top))
+                .onScrollPhaseChange { _, newPhase in
+                    if newPhase.isScrolling {
+                        accountScrollWasActive = true
+                    } else if newPhase == .idle, accountScrollWasActive {
+                        accountScrollWasActive = false
+                        focusTopScrolledAccount()
+                    }
+                }
+                .accessibilityIdentifier("nearby-account-scroll")
+            }
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    private func accountCard(
+        _ row: FireVaultNativeNearbyAccount,
+        index: Int
+    ) -> some View {
+        NativeShellCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    Text("\(index + 1)")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white)
+                        .frame(width: 30, height: 30)
+                        .background(
+                            selectedID == row.id ? NativeShellPalette.red : NativeShellPalette.blue,
+                            in: Circle()
+                        )
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(row.account.name)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text(row.account.address)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: 8)
+                    Text(row.distanceLabel)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(NativeShellPalette.green)
+                }
+
+                HStack(spacing: 10) {
+                    Button("Show on Map", systemImage: "mappin.and.ellipse") {
+                        selectAccount(row, scrollToCard: false)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Open", systemImage: "arrow.up.right") {
+                        store.openAccount(row.account.id)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button {
+                        if let account = store.accounts.first(where: { $0.id == row.account.id }) {
+                            store.openRoute(for: account)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.triangle.turn.up.right.diamond")
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("Route to \(row.account.name)")
                 }
             }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(
+                    selectedID == row.id ? NativeShellPalette.blue.opacity(0.8) : .clear,
+                    lineWidth: 2
+                )
+        }
+        .accessibilityIdentifier("nearby-account-\(row.id)")
+    }
+
+    private func focusTopScrolledAccount() {
+        guard let scrollAccountID,
+              let row = nearbyRows.first(where: { $0.id == scrollAccountID }) else {
+            return
+        }
+        selectAccount(row, scrollToCard: false)
+    }
+
+    private func selectAccount(
+        _ row: FireVaultNativeNearbyAccount,
+        scrollToCard: Bool
+    ) {
+        guard let coordinate = row.account.coordinate else { return }
+        selectedID = row.id
+        if scrollToCard {
+            withAnimation(.snappy(duration: 0.28)) {
+                scrollAccountID = row.id
+            }
+        }
+        withAnimation(.easeInOut(duration: 0.3)) {
+            cameraPosition = .region(
+                FireVaultNearbyMapCamera.accountRegion(coordinate: coordinate)
+            )
+        }
+    }
+
+    private func centerMapOnUser() {
+        guard let coordinate = locationService.coordinate else { return }
+        selectedID = nil
+        withAnimation(.easeInOut(duration: 0.3)) {
+            cameraPosition = .region(
+                FireVaultNearbyMapCamera.userRegion(
+                    coordinate: coordinate,
+                    radiusMiles: settings.gps.nearbyRadiusMiles
+                )
+            )
         }
     }
 }

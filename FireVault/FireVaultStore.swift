@@ -2,7 +2,7 @@
 //  FireVaultStore.swift
 //  FireVault
 //
-//  Native application and demo-data authority for Build 1.05.07.
+//  Native application and demo-data authority for Build 1.06.00.
 //
 
 import Foundation

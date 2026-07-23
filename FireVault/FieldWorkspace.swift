@@ -2,7 +2,7 @@
 //  FieldWorkspace.swift
 //  FireVault
 //
-//  Native, field-first Account workspace for Build 1.05.07.
+//  Native, field-first Account workspace for Build 1.06.00.
 //
 
 import SwiftUI
