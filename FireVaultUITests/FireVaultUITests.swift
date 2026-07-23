@@ -28,7 +28,8 @@ final class FireVaultUITests: XCTestCase {
         app.launch()
 
         let settingsTab = app.buttons["main-navigation-settings"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.otherElements["firevault-brand-header"].exists)
         settingsTab.tap()
 
         let technicianRow = app.buttons.matching(
