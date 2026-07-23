@@ -2,7 +2,7 @@
 //  NativeNearbyServices.swift
 //  FireVault
 //
-//  Native location and imported-address geocoding for Build 1.05.06.
+//  Native location and imported-address geocoding for Build 1.05.07.
 //
 
 import Combine
@@ -15,6 +15,12 @@ struct FireVaultPostalAddress: Equatable {
     let city: String
     let state: String
     let zip: String
+
+    var singleLine: String {
+        [street, city, state, zip]
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+    }
 
     init?(combinedAddress: String) {
         let value = combinedAddress.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -69,6 +75,7 @@ struct FireVaultGeocodingProgress: Equatable {
     enum Phase: Equatable {
         case preparing
         case submitting
+        case appleFallback
         case saving
         case complete
         case cancelled
@@ -82,7 +89,7 @@ struct FireVaultGeocodingProgress: Equatable {
     var message: String
 
     var isRunning: Bool {
-        phase == .preparing || phase == .submitting || phase == .saving
+        phase == .preparing || phase == .submitting || phase == .appleFallback || phase == .saving
     }
 
     var fractionComplete: Double {

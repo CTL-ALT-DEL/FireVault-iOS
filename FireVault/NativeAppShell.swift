@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.05.06.
+//  Native everyday navigation for Build 1.05.07.
 //
 
 import SwiftUI
@@ -206,6 +206,7 @@ private struct NativeNearbyView: View {
     @ObservedObject var locationService: FireVaultLocationService
     @State private var selectedID: String?
     @State private var showGeocodingConsent = false
+    @State private var showMappingDetails = false
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -216,8 +217,22 @@ private struct NativeNearbyView: View {
         nearbyRows.first(where: { $0.id == selectedID }) ?? nearbyRows.first
     }
 
+    private var canDisplayMap: Bool {
+        !nearbyRows.isEmpty || (!payload.demoMode && locationService.coordinate != nil)
+    }
+
+    private var shouldShowCoordinateSetup: Bool {
+        guard !payload.demoMode, store.unmappedAccountCount > 0 else { return false }
+        if store.geocodingProgress?.isRunning == true { return true }
+        if store.mappedAccountCount == 0 { return true }
+        return showMappingDetails
+    }
+
     private var mapRegion: MKCoordinateRegion {
-        let coordinates = nearbyRows.compactMap(\.account.coordinate)
+        var coordinates = nearbyRows.compactMap(\.account.coordinate)
+        if !payload.demoMode, let currentLocation = locationService.coordinate {
+            coordinates.append(currentLocation)
+        }
         guard let first = coordinates.first else {
             return .init(center: .init(latitude: 43.615, longitude: -116.202), span: .init(latitudeDelta: 0.18, longitudeDelta: 0.18))
         }
@@ -236,7 +251,7 @@ private struct NativeNearbyView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     statusHeader
-                    if !payload.demoMode, store.unmappedAccountCount > 0 {
+                    if shouldShowCoordinateSetup {
                         coordinateSetup
                     }
                     if !payload.demoMode,
@@ -256,6 +271,19 @@ private struct NativeNearbyView: View {
             .navigationTitle("Nearby")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
+                if !payload.demoMode,
+                   store.unmappedAccountCount > 0,
+                   !shouldShowCoordinateSetup {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showMappingDetails = true
+                        } label: {
+                            Image(systemName: "mappin.slash")
+                        }
+                        .buttonStyle(.glass)
+                        .accessibilityLabel("Review \(store.unmappedAccountCount) unmapped addresses")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         if payload.demoMode {
@@ -279,13 +307,22 @@ private struct NativeNearbyView: View {
                     locationService.requestCurrentLocation(highAccuracy: settings.gps.highAccuracy)
                 }
             }
+            .onChange(of: store.geocodingProgress?.phase) { _, phase in
+                if phase == .complete {
+                    showMappingDetails = false
+                }
+            }
             .alert("Map Imported Addresses?", isPresented: $showGeocodingConsent) {
                 Button("Cancel", role: .cancel) {}
                 Button("Map Accounts") {
-                    store.startGeocodingMissingAccounts()
+                    showGeocodingConsent = false
+                    Task { @MainActor in
+                        await Task.yield()
+                        store.startGeocodingMissingAccounts()
+                    }
                 }
             } message: {
-                Text("FireVault will send only street, city, state, and ZIP fields to the U.S. Census Geocoder. Account names, IDs, notes, photos, and files remain on this iPhone. Returned coordinates are saved locally.")
+                Text("FireVault sends only street, city, state, and ZIP fields to the U.S. Census Geocoder, then uses Apple Maps for unmatched addresses. Account names, IDs, notes, photos, and files remain on this iPhone. Returned coordinates are saved locally.")
             }
         }
     }
@@ -323,9 +360,22 @@ private struct NativeNearbyView: View {
     private var coordinateSetup: some View {
         NativeShellCard {
             VStack(alignment: .leading, spacing: 12) {
-                Label("Map Imported Accounts", systemImage: "mappin.and.ellipse")
-                    .font(.headline)
-                    .foregroundStyle(.white)
+                HStack {
+                    Label("Map Imported Accounts", systemImage: "mappin.and.ellipse")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Spacer()
+                    if store.mappedAccountCount > 0,
+                       store.geocodingProgress?.isRunning != true {
+                        Button {
+                            showMappingDetails = false
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Close address mapping")
+                    }
+                }
 
                 HStack {
                     LabeledContent("Mapped", value: "\(store.mappedAccountCount)")
@@ -369,7 +419,7 @@ private struct NativeNearbyView: View {
 
     private var map: some View {
         Group {
-            if nearbyRows.isEmpty {
+            if !canDisplayMap {
                 NativeShellCard {
                     ContentUnavailableView(
                         emptyMapTitle,
@@ -379,6 +429,25 @@ private struct NativeNearbyView: View {
                 }
             } else {
                 Map(initialPosition: .region(mapRegion)) {
+                    if !payload.demoMode, let currentLocation = locationService.coordinate {
+                        Annotation("Your Location", coordinate: currentLocation) {
+                            ZStack {
+                                Circle()
+                                    .fill(NativeShellPalette.blue.opacity(0.22))
+                                    .frame(width: 38, height: 38)
+                                Circle()
+                                    .fill(.white)
+                                    .frame(width: 22, height: 22)
+                                Circle()
+                                    .fill(NativeShellPalette.blue)
+                                    .frame(width: 14, height: 14)
+                            }
+                            .shadow(radius: 4)
+                            .accessibilityElement()
+                            .accessibilityLabel("Your current location")
+                            .accessibilityIdentifier("nearby-current-location")
+                        }
+                    }
                     ForEach(Array(nearbyRows.enumerated()), id: \.element.id) { index, row in
                         if let coordinate = row.account.coordinate {
                             Annotation(row.account.name, coordinate: coordinate) {

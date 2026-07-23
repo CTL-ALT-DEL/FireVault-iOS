@@ -2,7 +2,7 @@
 //  NativeSettingsScreens.swift
 //  FireVault
 //
-//  Pure SwiftUI Settings destinations for Build 1.05.06.
+//  Pure SwiftUI Settings destinations for Build 1.05.07.
 //
 
 import SwiftUI

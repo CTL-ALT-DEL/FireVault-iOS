@@ -2,7 +2,7 @@
 //  FireVaultStore.swift
 //  FireVault
 //
-//  Native application and demo-data authority for Build 1.05.06.
+//  Native application and demo-data authority for Build 1.05.07.
 //
 
 import Foundation
@@ -158,7 +158,20 @@ final class FireVaultStore: ObservableObject {
                     matched: 0,
                     message: "Calculating account coordinates…"
                 )
-                let matches = try await FireVaultCensusGeocoder().geocode(requests)
+                let censusMatches = try await FireVaultCensusGeocoder().geocode(requests)
+                try Task.checkCancellation()
+
+                let censusTokens = Set(censusMatches.map(\.token))
+                let censusMisses = requests.filter { !censusTokens.contains($0.token) }
+                var matches = censusMatches
+                if !censusMisses.isEmpty {
+                    let appleMatches = try await self.geocodeCensusMissesWithApple(
+                        censusMisses,
+                        alreadyMatched: censusMatches.count,
+                        total: requests.count
+                    )
+                    matches.append(contentsOf: appleMatches)
+                }
                 try Task.checkCancellation()
 
                 self.geocodingProgress = .init(
@@ -197,6 +210,46 @@ final class FireVaultStore: ObservableObject {
             }
             self.geocodingTask = nil
         }
+    }
+
+    private func geocodeCensusMissesWithApple(
+        _ requests: [FireVaultGeocodingRequest],
+        alreadyMatched: Int,
+        total: Int
+    ) async throws -> [FireVaultGeocodingMatch] {
+        var matches: [FireVaultGeocodingMatch] = []
+
+        for (offset, record) in requests.enumerated() {
+            try Task.checkCancellation()
+            geocodingProgress = .init(
+                phase: .appleFallback,
+                completed: min(total, alreadyMatched + offset),
+                total: total,
+                matched: alreadyMatched + matches.count,
+                message: "Trying Apple Maps for \(requests.count) unmatched address\(requests.count == 1 ? "" : "es")…"
+            )
+
+            guard let request = MKGeocodingRequest(addressString: record.address.singleLine) else {
+                continue
+            }
+            do {
+                let mapItems = try await request.mapItems
+                try Task.checkCancellation()
+                if let coordinate = mapItems.first?.location.coordinate,
+                   CLLocationCoordinate2DIsValid(coordinate) {
+                    matches.append(
+                        .init(
+                            token: record.token,
+                            latitude: coordinate.latitude,
+                            longitude: coordinate.longitude
+                        )
+                    )
+                }
+            } catch {
+                // A single address failure must not discard other successful coordinates.
+            }
+        }
+        return matches
     }
 
     func cancelGeocoding() {

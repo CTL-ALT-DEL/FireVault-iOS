@@ -60,8 +60,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.05.06"), "Version 1.05.06")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.05.06"), "Build 1.05.06")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.05.07"), "Version 1.05.07")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.05.07"), "Build 1.05.07")
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
@@ -257,6 +257,7 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(address.city, "Boise")
         XCTAssertEqual(address.state, "ID")
         XCTAssertEqual(address.zip, "83702")
+        XCTAssertEqual(address.singleLine, "100 Main St, Boise, ID, 83702")
     }
 
     func testCensusBatchPayloadUsesOpaqueTokenAndOmitsAccountIdentity() throws {
