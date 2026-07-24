@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.08.02.
+//  Native everyday navigation for Build 1.08.03.
 //
 
 import SwiftUI
@@ -373,7 +373,10 @@ private struct NativeNearbyView: View {
         .fullScreenCover(isPresented: $showsBreadcrumbs) {
             FireVaultBreadcrumbsView(
                 breadcrumbs: breadcrumbs,
-                store: store
+                store: store,
+                technicianName: settings.preferences.technician.name,
+                companyName: settings.preferences.technician.company,
+                includeCoordinatesInReports: settings.gps.includeCoordinatesInReports
             )
         }
     }

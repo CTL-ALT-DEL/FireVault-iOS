@@ -61,8 +61,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.08.02"), "Version 1.08.02")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.08.02"), "Build 1.08.02")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.08.03"), "Version 1.08.03")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.08.03"), "Build 1.08.03")
     }
 
     func testBreadcrumbRulesRejectPoorAccuracyAndDuplicatePoints() {
@@ -235,6 +235,114 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(stop.accountName, "Central Library")
         XCTAssertNil(stop.technicianNote)
         XCTAssertFalse(stop.isPersonalStop)
+    }
+
+    func testBreadcrumbReportRedactsEveryPersonalStopDetail() throws {
+        let start = Date(timeIntervalSince1970: 1_785_000_000)
+        let accountStop = FireVaultBreadcrumbStop(
+            arrival: start.addingTimeInterval(900),
+            departure: start.addingTimeInterval(2_700),
+            latitude: 43.615,
+            longitude: -116.202,
+            accountID: "FV-42",
+            accountName: "Central Library",
+            accountAddress: "100 Main Street",
+            technicianNote: "Replaced detector.",
+            isPersonal: false
+        )
+        let personalStop = FireVaultBreadcrumbStop(
+            arrival: start.addingTimeInterval(3_600),
+            departure: start.addingTimeInterval(4_200),
+            latitude: 44.999,
+            longitude: -115.999,
+            accountID: "PRIVATE-ID",
+            accountName: "Private Location Name",
+            accountAddress: "Private Address",
+            technicianNote: "Secret personal note",
+            isPersonal: true
+        )
+        let day = FireVaultBreadcrumbDay(
+            startedAt: start,
+            endedAt: start.addingTimeInterval(7_200),
+            stops: [accountStop, personalStop]
+        )
+
+        let report = FireVaultBreadcrumbReport(
+            day: day,
+            technicianName: "Taylor",
+            companyName: "Bannerman",
+            includeCoordinates: true,
+            generatedAt: start.addingTimeInterval(7_200)
+        )
+        let redacted = try XCTUnwrap(
+            report.visits.first(where: { $0.classification == .personal })
+        )
+        let csv = try XCTUnwrap(String(data: report.csvData, encoding: .utf8))
+
+        XCTAssertEqual(report.accountVisitCount, 1)
+        XCTAssertEqual(report.personalStopCount, 1)
+        XCTAssertEqual(redacted.title, "Personal Stop")
+        XCTAssertTrue(redacted.accountName.isEmpty)
+        XCTAssertTrue(redacted.accountAddress.isEmpty)
+        XCTAssertTrue(redacted.accountID.isEmpty)
+        XCTAssertTrue(redacted.technicianNote.isEmpty)
+        XCTAssertNil(redacted.latitude)
+        XCTAssertNil(redacted.longitude)
+        XCTAssertFalse(report.plainText.contains("Private Location Name"))
+        XCTAssertFalse(report.plainText.contains("Secret personal note"))
+        XCTAssertFalse(csv.contains("Private Address"))
+        XCTAssertFalse(csv.contains("44.999"))
+    }
+
+    func testBreadcrumbReportCSVQuotesTechnicianContent() throws {
+        let start = Date(timeIntervalSince1970: 1_785_000_000)
+        let stop = FireVaultBreadcrumbStop(
+            arrival: start,
+            departure: start.addingTimeInterval(600),
+            latitude: 43.615,
+            longitude: -116.202,
+            accountID: "A-1",
+            accountName: "Acme, Inc.",
+            accountAddress: "100 Main Street",
+            technicianNote: "Panel says \"East\"",
+            isPersonal: false
+        )
+        let report = FireVaultBreadcrumbReport(
+            day: .init(
+                startedAt: start,
+                endedAt: start.addingTimeInterval(600),
+                stops: [stop]
+            ),
+            technicianName: "Taylor",
+            companyName: "",
+            includeCoordinates: false,
+            generatedAt: start.addingTimeInterval(600)
+        )
+        let csv = try XCTUnwrap(String(data: report.csvData, encoding: .utf8))
+
+        XCTAssertTrue(csv.contains("\"Acme, Inc.\""))
+        XCTAssertTrue(csv.contains("\"Panel says \"\"East\"\"\""))
+        XCTAssertFalse(csv.contains("43.615000"))
+    }
+
+    func testBreadcrumbReportProducesValidPDFData() {
+        let start = Date(timeIntervalSince1970: 1_785_000_000)
+        let report = FireVaultBreadcrumbReport(
+            day: .init(
+                startedAt: start,
+                endedAt: start.addingTimeInterval(3_600)
+            ),
+            technicianName: "Taylor",
+            companyName: "Bannerman",
+            includeCoordinates: false,
+            generatedAt: start.addingTimeInterval(3_600)
+        )
+
+        XCTAssertGreaterThan(report.pdfData.count, 500)
+        XCTAssertEqual(
+            String(data: report.pdfData.prefix(4), encoding: .ascii),
+            "%PDF"
+        )
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {

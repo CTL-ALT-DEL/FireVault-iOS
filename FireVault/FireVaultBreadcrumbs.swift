@@ -2,7 +2,7 @@
 //  FireVaultBreadcrumbs.swift
 //  FireVault
 //
-//  Native daily travel and editable technician-stop history for Build 1.08.02.
+//  Native daily travel and editable technician-stop history for Build 1.08.03.
 //
 
 import Combine
@@ -596,10 +596,14 @@ struct FireVaultBreadcrumbCompactBar: View {
 struct FireVaultBreadcrumbsView: View {
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @ObservedObject var store: FireVaultStore
+    let technicianName: String
+    let companyName: String
+    let includeCoordinatesInReports: Bool
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDayID: UUID?
     @State private var confirmsEnd = false
     @State private var editingStop: BreadcrumbStopSelection?
+    @State private var showsReport = false
 
     private var selectedDay: FireVaultBreadcrumbDay? {
         if let selectedDayID {
@@ -638,6 +642,14 @@ struct FireVaultBreadcrumbsView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close", systemImage: "xmark", action: dismiss.callAsFunction)
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if selectedDay != nil {
+                        Button("Report", systemImage: "doc.text") {
+                            showsReport = true
+                        }
+                        .accessibilityHint("Previews and exports this workday report")
+                    }
+                }
             }
             .confirmationDialog(
                 "End Today’s Workday?",
@@ -668,6 +680,18 @@ struct FireVaultBreadcrumbsView: View {
                 store.openAccount(accountID)
                 editingStop = nil
                 dismiss()
+            }
+        }
+        .sheet(isPresented: $showsReport) {
+            if let selectedDay {
+                FireVaultBreadcrumbReportView(
+                    report: .init(
+                        day: selectedDay,
+                        technicianName: technicianName,
+                        companyName: companyName,
+                        includeCoordinates: includeCoordinatesInReports
+                    )
+                )
             }
         }
     }
