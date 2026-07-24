@@ -61,8 +61,13 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.08.04"), "Version 1.08.04")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.08.04"), "Build 1.08.04")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.08.05"), "Version 1.08.05")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.08.05"), "Build 1.08.05")
+    }
+
+    func testNearbyListProvidesRunwayForFinalAccountToReachTop() {
+        XCTAssertEqual(FireVaultNearbyListLayout.bottomRunway(for: 420), 348)
+        XCTAssertEqual(FireVaultNearbyListLayout.bottomRunway(for: 60), 0)
     }
 
     func testBreadcrumbRulesRejectPoorAccuracyAndDuplicatePoints() {

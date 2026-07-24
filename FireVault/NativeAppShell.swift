@@ -2,7 +2,7 @@
 //  NativeAppShell.swift
 //  FireVault
 //
-//  Native everyday navigation for Build 1.08.04.
+//  Native everyday navigation for Build 1.08.05.
 //
 
 import SwiftUI
@@ -49,6 +49,13 @@ struct FireVaultNativeNearbyAccount: Codable, Identifiable, Equatable {
     let account: FireVaultNativeAccount
     let distanceMeters: Double
     let distanceLabel: String
+}
+
+enum FireVaultNearbyListLayout {
+    /// Non-selectable space that lets the final account align with the top.
+    static func bottomRunway(for viewportHeight: CGFloat) -> CGFloat {
+        max(0, viewportHeight - 72)
+    }
 }
 
 struct FireVaultNativeSettingsGroup: Codable, Identifiable, Equatable {
@@ -727,36 +734,49 @@ private struct NativeNearbyView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, 16)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(Array(nearbyRows.enumerated()), id: \.element.id) { index, row in
-                            accountCard(row, index: index)
-                                .id(row.id)
+                GeometryReader { listGeometry in
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            LazyVStack(spacing: 8) {
+                                ForEach(Array(nearbyRows.enumerated()), id: \.element.id) { index, row in
+                                    accountCard(row, index: index)
+                                        .id(row.id)
+                                }
+                            }
+                            .scrollTargetLayout()
+
+                            Color.clear
+                                .frame(
+                                    height: FireVaultNearbyListLayout.bottomRunway(
+                                        for: listGeometry.size.height
+                                    )
+                                )
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 20)
+                    }
+                    .scrollIndicators(.hidden)
+                    .scrollPosition(id: $scrollAccountID, anchor: .top)
+                    .scrollTargetBehavior(
+                        .viewAligned(limitBehavior: .never, anchor: .top)
+                    )
+                    .onScrollPhaseChange { _, newPhase in
+                        if newPhase.isScrolling {
+                            accountScrollWasActive = true
+                            delayedMapFocusTask?.cancel()
+                        } else if newPhase == .idle, accountScrollWasActive {
+                            accountScrollWasActive = false
+                            if suppressNextIdleFocus {
+                                suppressNextIdleFocus = false
+                            } else {
+                                scheduleTopAccountFocus()
+                            }
                         }
                     }
-                    .scrollTargetLayout()
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 20)
+                    .accessibilityIdentifier("nearby-account-scroll")
                 }
-                .scrollIndicators(.hidden)
-                .scrollPosition(id: $scrollAccountID, anchor: .top)
-                .scrollTargetBehavior(
-                    .viewAligned(limitBehavior: .never, anchor: .top)
-                )
-                .onScrollPhaseChange { _, newPhase in
-                    if newPhase.isScrolling {
-                        accountScrollWasActive = true
-                        delayedMapFocusTask?.cancel()
-                    } else if newPhase == .idle, accountScrollWasActive {
-                        accountScrollWasActive = false
-                        if suppressNextIdleFocus {
-                            suppressNextIdleFocus = false
-                        } else {
-                            scheduleTopAccountFocus()
-                        }
-                    }
-                }
-                .accessibilityIdentifier("nearby-account-scroll")
             }
         }
         .frame(maxHeight: .infinity)
