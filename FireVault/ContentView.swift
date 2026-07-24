@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  FireVault
 //
-//  Pure SwiftUI application root for Build 1.08.03.
+//  Pure SwiftUI application root for Build 1.08.04.
 //
 
 import SwiftUI
@@ -13,6 +13,7 @@ struct ContentView: View {
     @StateObject private var locationService = FireVaultLocationService()
     @StateObject private var breadcrumbs = FireVaultBreadcrumbStore()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showsSplash = true
 
     var body: some View {
@@ -29,12 +30,17 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.2), value: store.selectedAccountID)
         .preferredColorScheme(.dark)
         .task {
+            breadcrumbs.restoreActiveWorkday(accounts: store.accounts)
             guard showsSplash else { return }
             try? await Task.sleep(for: .seconds(reduceMotion ? 1.15 : 3.65))
             guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: reduceMotion ? 0.18 : 0.5)) {
                 showsSplash = false
             }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            breadcrumbs.restoreActiveWorkday(accounts: store.accounts)
         }
     }
 

@@ -127,6 +127,33 @@ final class FireVaultUITests: XCTestCase {
     }
 
     @MainActor
+    func testBreadcrumbTrackingPrivacyAndPermissionStateAreReachable() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(
+            app.buttons["main-navigation-nearby"].waitForExistence(timeout: 8)
+        )
+        app.buttons["main-navigation-nearby"].tap()
+
+        let breadcrumbsBar = app.descendants(matching: .any)["breadcrumbs-compact-bar"]
+        XCTAssertTrue(breadcrumbsBar.waitForExistence(timeout: 5))
+        breadcrumbsBar.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["breadcrumbs-tracking-controls"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["breadcrumbs-location-permission"].exists
+        )
+        XCTAssertFalse(
+            app.webViews.firstMatch.exists,
+            "Breadcrumbs must remain a fully native iOS workflow"
+        )
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {

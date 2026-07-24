@@ -2,7 +2,7 @@
 //  FireVaultBreadcrumbs.swift
 //  FireVault
 //
-//  Native daily travel and editable technician-stop history for Build 1.08.03.
+//  Native daily travel and editable technician-stop history for Build 1.08.04.
 //
 
 import Combine
@@ -169,11 +169,86 @@ enum FireVaultBreadcrumbRules {
     }
 }
 
+struct FireVaultBreadcrumbPermissionState: Equatable {
+    let authorizationStatus: CLAuthorizationStatus
+    let accuracyAuthorization: CLAccuracyAuthorization
+
+    var isAuthorized: Bool {
+        authorizationStatus == .authorizedAlways
+            || authorizationStatus == .authorizedWhenInUse
+    }
+
+    var requiresSettings: Bool {
+        authorizationStatus == .denied
+            || (isAuthorized && accuracyAuthorization == .reducedAccuracy)
+    }
+
+    var title: String {
+        switch authorizationStatus {
+        case .authorizedAlways:
+            accuracyAuthorization == .fullAccuracy
+                ? "Background Tracking Ready"
+                : "Approximate Location"
+        case .authorizedWhenInUse:
+            accuracyAuthorization == .fullAccuracy
+                ? "Background Tracking Ready"
+                : "Approximate Location"
+        case .denied:
+            "Location Access Off"
+        case .restricted:
+            "Location Restricted"
+        case .notDetermined:
+            "Location Permission Needed"
+        @unknown default:
+            "Location Unavailable"
+        }
+    }
+
+    var detail: String {
+        switch authorizationStatus {
+        case .authorizedAlways:
+            if accuracyAuthorization == .reducedAccuracy {
+                return "Turn on Precise Location in iOS Settings so Breadcrumbs can recognize short stops and nearby accounts."
+            }
+            return "Breadcrumbs can continue an active workday while FireVault is in the background."
+        case .authorizedWhenInUse:
+            if accuracyAuthorization == .reducedAccuracy {
+                return "Turn on Precise Location in iOS Settings so Breadcrumbs can recognize short stops and nearby accounts."
+            }
+            return "An active workday continues in the background and uses the visible iOS location indicator."
+        case .denied:
+            return "Allow location access in iOS Settings before starting or resuming a Breadcrumbs workday."
+        case .restricted:
+            return "Location access is restricted by this iPhone’s system or management settings."
+        case .notDetermined:
+            return "FireVault asks for location access only when you start your first Breadcrumbs workday."
+        @unknown default:
+            return "This iPhone is not currently providing location access to FireVault."
+        }
+    }
+
+    var systemImage: String {
+        switch authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            accuracyAuthorization == .fullAccuracy
+                ? "location.fill"
+                : "location.circle"
+        case .denied, .restricted:
+            "location.slash.fill"
+        case .notDetermined:
+            "location"
+        @unknown default:
+            "exclamationmark.triangle.fill"
+        }
+    }
+}
+
 @MainActor
 final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published private(set) var days: [FireVaultBreadcrumbDay]
     @Published private(set) var isRecording = false
     @Published private(set) var authorizationStatus: CLAuthorizationStatus
+    @Published private(set) var accuracyAuthorization: CLAccuracyAuthorization
     @Published private(set) var statusText = "Ready to start today’s route"
 
     private let manager: CLLocationManager
@@ -181,6 +256,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     private var accounts: [FireVaultWorkspaceAccount] = []
     private var candidateLocations: [CLLocation] = []
     private var activeStopID: UUID?
+    private var sessionIsPrepared = false
 
     var activeDay: FireVaultBreadcrumbDay? {
         days.first(where: \.isActive)
@@ -190,12 +266,20 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         activeDay ?? days.first(where: { Calendar.current.isDateInToday($0.startedAt) })
     }
 
+    var permissionState: FireVaultBreadcrumbPermissionState {
+        .init(
+            authorizationStatus: authorizationStatus,
+            accuracyAuthorization: accuracyAuthorization
+        )
+    }
+
     init(archiveURL: URL? = nil) {
         let manager = CLLocationManager()
         self.manager = manager
         self.archiveURL = archiveURL ?? Self.defaultArchiveURL
         days = Self.load(from: archiveURL ?? Self.defaultArchiveURL)
         authorizationStatus = manager.authorizationStatus
+        accuracyAuthorization = manager.accuracyAuthorization
         super.init()
 
         manager.delegate = self
@@ -211,6 +295,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     func startWorkday(accounts: [FireVaultWorkspaceAccount]) {
         self.accounts = accounts
+        sessionIsPrepared = true
         if activeDay == nil {
             days.insert(.init(startedAt: Date()), at: 0)
             persist()
@@ -221,9 +306,12 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     }
 
     func pauseWorkday() {
-        guard activeDay != nil else { return }
-        manager.stopUpdatingLocation()
-        isRecording = false
+        guard let index = activeDayIndex else { return }
+        finalizeStopIfNeeded(in: index, at: Date())
+        stopLocationUpdates()
+        candidateLocations.removeAll()
+        activeStopID = nil
+        sessionIsPrepared = false
         updateActiveDay { $0.isPaused = true }
         statusText = "Breadcrumbs paused"
     }
@@ -234,7 +322,25 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             return
         }
         self.accounts = accounts
+        sessionIsPrepared = true
         updateActiveDay { $0.isPaused = false }
+        beginLocationUpdates()
+    }
+
+    func restoreActiveWorkday(accounts: [FireVaultWorkspaceAccount]) {
+        self.accounts = accounts
+        authorizationStatus = manager.authorizationStatus
+        accuracyAuthorization = manager.accuracyAuthorization
+        guard let activeDay else { return }
+        guard !activeDay.isPaused else {
+            sessionIsPrepared = false
+            stopLocationUpdates()
+            statusText = "Breadcrumbs paused"
+            return
+        }
+        guard !isRecording else { return }
+        sessionIsPrepared = true
+        restoreTrackingContext()
         beginLocationUpdates()
     }
 
@@ -244,10 +350,10 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         finalizeStopIfNeeded(in: index, at: end)
         days[index].endedAt = end
         days[index].isPaused = false
-        manager.stopUpdatingLocation()
-        isRecording = false
+        stopLocationUpdates()
         candidateLocations.removeAll()
         activeStopID = nil
+        sessionIsPrepared = false
         statusText = "Workday complete"
         persist()
     }
@@ -318,20 +424,26 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         authorizationStatus = manager.authorizationStatus
-        guard activeDay != nil else { return }
+        accuracyAuthorization = manager.accuracyAuthorization
+        guard sessionIsPrepared, let activeDay else { return }
+        guard !activeDay.isPaused else {
+            stopLocationUpdates()
+            statusText = "Breadcrumbs paused"
+            return
+        }
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse:
             startAuthorizedUpdates()
         case .denied:
-            isRecording = false
+            stopLocationUpdates()
             statusText = "Location access is off for Breadcrumbs"
         case .restricted:
-            isRecording = false
+            stopLocationUpdates()
             statusText = "Location access is restricted"
         case .notDetermined:
             statusText = "Waiting for location permission…"
         @unknown default:
-            isRecording = false
+            stopLocationUpdates()
             statusText = "Location is unavailable"
         }
     }
@@ -344,7 +456,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         if let locationError = error as? CLError, locationError.code == .denied {
-            isRecording = false
+            stopLocationUpdates()
             statusText = "Location access is off for Breadcrumbs"
         } else {
             statusText = "Waiting for a reliable GPS position…"
@@ -357,6 +469,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     private func beginLocationUpdates() {
         authorizationStatus = manager.authorizationStatus
+        accuracyAuthorization = manager.accuracyAuthorization
         switch manager.authorizationStatus {
         case .notDetermined:
             statusText = "Waiting for location permission…"
@@ -364,23 +477,33 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         case .authorizedAlways, .authorizedWhenInUse:
             startAuthorizedUpdates()
         case .denied:
-            isRecording = false
+            stopLocationUpdates()
             statusText = "Location access is off for Breadcrumbs"
         case .restricted:
-            isRecording = false
+            stopLocationUpdates()
             statusText = "Location access is restricted"
         @unknown default:
-            isRecording = false
+            stopLocationUpdates()
             statusText = "Location is unavailable"
         }
     }
 
     private func startAuthorizedUpdates() {
+        guard sessionIsPrepared, activeDay?.isPaused == false else { return }
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = true
         manager.startUpdatingLocation()
         isRecording = true
-        statusText = "Recording today’s route"
+        statusText = accuracyAuthorization == .fullAccuracy
+            ? "Recording today’s route"
+            : "Recording with approximate location"
+    }
+
+    private func stopLocationUpdates() {
+        manager.stopUpdatingLocation()
+        manager.allowsBackgroundLocationUpdates = false
+        manager.showsBackgroundLocationIndicator = false
+        isRecording = false
     }
 
     private func record(_ location: CLLocation) {
@@ -397,8 +520,46 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             )
         )
         updateStopDetection(with: location, dayIndex: index)
-        statusText = "Recording • \(days[index].points.count) GPS points"
+        statusText = accuracyAuthorization == .fullAccuracy
+            ? "Recording • \(days[index].points.count) GPS points"
+            : "Recording approximate location • \(days[index].points.count) points"
         persist()
+    }
+
+    private func restoreTrackingContext() {
+        guard candidateLocations.isEmpty, activeStopID == nil, let day = activeDay else {
+            return
+        }
+
+        if let openStop = day.stops.last(where: { $0.departure == nil }) {
+            activeStopID = openStop.id
+            candidateLocations = day.points
+                .filter { $0.timestamp >= openStop.arrival }
+                .map(\.location)
+            if candidateLocations.isEmpty {
+                candidateLocations = [
+                    CLLocation(
+                        coordinate: openStop.coordinate,
+                        altitude: 0,
+                        horizontalAccuracy: FireVaultBreadcrumbRules.maximumHorizontalAccuracy,
+                        verticalAccuracy: -1,
+                        timestamp: openStop.arrival
+                    )
+                ]
+            }
+            return
+        }
+
+        guard let lastPoint = day.points.last else { return }
+        let lastLocation = lastPoint.location
+        candidateLocations = day.points
+            .reversed()
+            .prefix { point in
+                lastLocation.distance(from: point.location)
+                    <= FireVaultBreadcrumbRules.stopRadius
+            }
+            .reversed()
+            .map(\.location)
     }
 
     private func updateStopDetection(with location: CLLocation, dayIndex: Int) {
@@ -754,17 +915,43 @@ struct FireVaultBreadcrumbsView: View {
                     }
                 }
 
-                if breadcrumbs.authorizationStatus == .denied {
+                Divider()
+
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(breadcrumbs.permissionState.title)
+                            .font(.subheadline.weight(.semibold))
+                        Text(breadcrumbs.permissionState.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: breadcrumbs.permissionState.systemImage)
+                        .foregroundStyle(
+                            breadcrumbs.permissionState.isAuthorized
+                                ? NativeShellPalette.green
+                                : NativeShellPalette.amber
+                        )
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("breadcrumbs-location-permission")
+
+                if breadcrumbs.permissionState.requiresSettings {
                     Button("Open Location Settings", systemImage: "gearshape") {
                         breadcrumbs.openLocationSettings()
                     }
                     .buttonStyle(.borderedProminent)
-                } else if breadcrumbs.activeDay == nil {
-                    Button("Start Workday", systemImage: "play.fill") {
-                        breadcrumbs.startWorkday(accounts: store.accounts)
-                        selectedDayID = breadcrumbs.activeDay?.id
+                }
+
+                if breadcrumbs.activeDay == nil {
+                    if breadcrumbs.authorizationStatus != .denied,
+                       breadcrumbs.authorizationStatus != .restricted {
+                        Button("Start Workday", systemImage: "play.fill") {
+                            breadcrumbs.startWorkday(accounts: store.accounts)
+                            selectedDayID = breadcrumbs.activeDay?.id
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    .buttonStyle(.borderedProminent)
                 } else {
                     HStack {
                         if breadcrumbs.isRecording {
@@ -772,7 +959,8 @@ struct FireVaultBreadcrumbsView: View {
                                 breadcrumbs.pauseWorkday()
                             }
                             .buttonStyle(.bordered)
-                        } else {
+                        } else if breadcrumbs.permissionState.isAuthorized
+                                    || breadcrumbs.authorizationStatus == .notDetermined {
                             Button("Resume", systemImage: "play.fill") {
                                 breadcrumbs.resumeWorkday(accounts: store.accounts)
                             }
@@ -785,8 +973,13 @@ struct FireVaultBreadcrumbsView: View {
                         .buttonStyle(.bordered)
                     }
                 }
+
+                Text("Breadcrumbs starts only when you choose Start Workday. Route history stays in FireVault on this iPhone unless you explicitly export a report.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
+        .accessibilityIdentifier("breadcrumbs-tracking-controls")
     }
 
     @ViewBuilder
@@ -798,7 +991,7 @@ struct FireVaultBreadcrumbsView: View {
                     systemImage: "map",
                     description: Text(
                         day.isActive
-                            ? "Keep FireVault running while the first reliable GPS positions are collected."
+                            ? "Keep the workday active while FireVault collects the first reliable GPS positions. Recording can continue while you use other apps."
                             : "No reliable GPS points were recorded for this workday."
                     )
                 )

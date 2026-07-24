@@ -2,7 +2,7 @@
 //  FireVaultBreadcrumbReport.swift
 //  FireVault
 //
-//  Native Breadcrumbs daily reporting and export for Build 1.08.03.
+//  Native Breadcrumbs daily reporting and export for Build 1.08.04.
 //
 
 import SwiftUI

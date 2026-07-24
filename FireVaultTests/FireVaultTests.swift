@@ -61,8 +61,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.08.03"), "Version 1.08.03")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.08.03"), "Build 1.08.03")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.08.04"), "Version 1.08.04")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.08.04"), "Build 1.08.04")
     }
 
     func testBreadcrumbRulesRejectPoorAccuracyAndDuplicatePoints() {
@@ -157,6 +157,43 @@ final class FireVaultTests: XCTestCase {
 
         XCTAssertEqual(normalized.arrival, arrival)
         XCTAssertEqual(normalized.departure, arrival)
+    }
+
+    func testBreadcrumbPermissionExplainsContinuousBackgroundRecording() {
+        let permission = FireVaultBreadcrumbPermissionState(
+            authorizationStatus: .authorizedWhenInUse,
+            accuracyAuthorization: .fullAccuracy
+        )
+
+        XCTAssertTrue(permission.isAuthorized)
+        XCTAssertFalse(permission.requiresSettings)
+        XCTAssertEqual(permission.title, "Background Tracking Ready")
+        XCTAssertTrue(permission.detail.contains("background"))
+        XCTAssertTrue(permission.detail.contains("iOS location indicator"))
+    }
+
+    func testBreadcrumbPermissionRecommendsPreciseLocation() {
+        let permission = FireVaultBreadcrumbPermissionState(
+            authorizationStatus: .authorizedWhenInUse,
+            accuracyAuthorization: .reducedAccuracy
+        )
+
+        XCTAssertTrue(permission.isAuthorized)
+        XCTAssertTrue(permission.requiresSettings)
+        XCTAssertEqual(permission.title, "Approximate Location")
+        XCTAssertTrue(permission.detail.contains("Precise Location"))
+    }
+
+    func testBreadcrumbPermissionDirectsDeniedUserToSettings() {
+        let permission = FireVaultBreadcrumbPermissionState(
+            authorizationStatus: .denied,
+            accuracyAuthorization: .reducedAccuracy
+        )
+
+        XCTAssertFalse(permission.isAuthorized)
+        XCTAssertTrue(permission.requiresSettings)
+        XCTAssertEqual(permission.title, "Location Access Off")
+        XCTAssertTrue(permission.detail.contains("iOS Settings"))
     }
 
     func testBreadcrumbStopCanBeAssignedAndMarkedPersonal() {

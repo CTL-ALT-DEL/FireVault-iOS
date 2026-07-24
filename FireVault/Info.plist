@@ -24,6 +24,8 @@
 	<string>FireVault uses the camera to photograph and scan fire alarm equipment and site documents.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>FireVault uses your location to identify nearby accounts and record a workday route when you start Breadcrumbs.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>FireVault records Breadcrumbs only after you start a workday, allowing the route and detected stops to continue while you use other apps.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>FireVault imports site and equipment photos that you select from your photo library.</string>
 	<key>UIApplicationSceneManifest</key>
