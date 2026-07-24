@@ -2,7 +2,7 @@
 //  FireVaultBreadcrumbs.swift
 //  FireVault
 //
-//  Native daily travel and account-stop history for Build 1.08.01.
+//  Native daily travel and editable technician-stop history for Build 1.08.02.
 //
 
 import Combine
@@ -42,21 +42,59 @@ struct FireVaultBreadcrumbStop: Codable, Identifiable, Equatable {
     var accountID: String?
     var accountName: String?
     var accountAddress: String?
+    var technicianNote: String?
+    var isPersonal: Bool?
 
     var coordinate: CLLocationCoordinate2D {
         .init(latitude: latitude, longitude: longitude)
     }
 
     var title: String {
-        accountName ?? "Unrecognized Stop"
+        if isPersonalStop { return "Personal Stop" }
+        return accountName ?? "Unrecognized Stop"
     }
 
     var subtitle: String {
-        accountAddress ?? "Tap to identify this location"
+        if isPersonalStop { return "Not associated with an account" }
+        return accountAddress ?? "Tap to review and identify this location"
     }
 
     var duration: TimeInterval {
         max(0, (departure ?? Date()).timeIntervalSince(arrival))
+    }
+
+    var isPersonalStop: Bool {
+        isPersonal ?? false
+    }
+
+    mutating func assign(to account: FireVaultWorkspaceAccount?) {
+        isPersonal = false
+        accountID = account?.id
+        accountName = account?.name
+        accountAddress = account?.address
+    }
+
+    mutating func markPersonal(_ personal: Bool) {
+        isPersonal = personal
+        guard personal else { return }
+        accountID = nil
+        accountName = nil
+        accountAddress = nil
+    }
+
+    mutating func updateVisit(
+        arrival: Date,
+        departure: Date?,
+        technicianNote: String
+    ) {
+        let interval = FireVaultBreadcrumbRules.normalizedVisit(
+            arrival: arrival,
+            departure: departure
+        )
+        self.arrival = interval.arrival
+        self.departure = interval.departure
+        let trimmedNote = technicianNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.technicianNote = trimmedNote.isEmpty ? nil : trimmedNote
     }
 }
 
@@ -88,6 +126,14 @@ enum FireVaultBreadcrumbRules {
     static let stopRadius: CLLocationDistance = 85
     static let minimumStopDuration: TimeInterval = 180
     static let accountMatchRadius: CLLocationDistance = 175
+
+    static func normalizedVisit(
+        arrival: Date,
+        departure: Date?
+    ) -> (arrival: Date, departure: Date?) {
+        guard let departure else { return (arrival, nil) }
+        return (arrival, max(arrival, departure))
+    }
 
     static func accepts(_ location: CLLocation, after previous: CLLocation?) -> Bool {
         guard location.horizontalAccuracy >= 0,
@@ -210,6 +256,59 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         guard days.first(where: { $0.id == id })?.isActive != true else { return }
         days.removeAll { $0.id == id }
         persist()
+    }
+
+    func stop(dayID: UUID, stopID: UUID) -> FireVaultBreadcrumbStop? {
+        days.first(where: { $0.id == dayID })?
+            .stops.first(where: { $0.id == stopID })
+    }
+
+    @discardableResult
+    func updateStop(
+        dayID: UUID,
+        stopID: UUID,
+        arrival: Date,
+        departure: Date?,
+        account: FireVaultWorkspaceAccount?,
+        technicianNote: String,
+        isPersonal: Bool
+    ) -> Bool {
+        guard let dayIndex = days.firstIndex(where: { $0.id == dayID }),
+              let stopIndex = days[dayIndex].stops.firstIndex(where: { $0.id == stopID }) else {
+            return false
+        }
+
+        var stop = days[dayIndex].stops[stopIndex]
+        stop.updateVisit(
+            arrival: arrival,
+            departure: departure,
+            technicianNote: technicianNote
+        )
+        if isPersonal {
+            stop.markPersonal(true)
+        } else {
+            stop.assign(to: account)
+        }
+        days[dayIndex].stops[stopIndex] = stop
+        days[dayIndex].stops.sort { $0.arrival < $1.arrival }
+        persist()
+        return true
+    }
+
+    @discardableResult
+    func deleteStop(dayID: UUID, stopID: UUID) -> Bool {
+        guard let dayIndex = days.firstIndex(where: { $0.id == dayID }),
+              days[dayIndex].stops.contains(where: { $0.id == stopID }) else {
+            return false
+        }
+
+        days[dayIndex].stops.removeAll { $0.id == stopID }
+        if activeStopID == stopID {
+            activeStopID = nil
+            candidateLocations.removeAll()
+        }
+        persist()
+        return true
     }
 
     func openLocationSettings() {
@@ -500,6 +599,7 @@ struct FireVaultBreadcrumbsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDayID: UUID?
     @State private var confirmsEnd = false
+    @State private var editingStop: BreadcrumbStopSelection?
 
     private var selectedDay: FireVaultBreadcrumbDay? {
         if let selectedDayID {
@@ -557,6 +657,18 @@ struct FireVaultBreadcrumbsView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             selectedDayID = breadcrumbs.today?.id ?? breadcrumbs.days.first?.id
+        }
+        .sheet(item: $editingStop) { selection in
+            FireVaultBreadcrumbStopEditor(
+                breadcrumbs: breadcrumbs,
+                store: store,
+                dayID: selection.dayID,
+                stopID: selection.stopID
+            ) { accountID in
+                store.openAccount(accountID)
+                editingStop = nil
+                dismiss()
+            }
         }
     }
 
@@ -684,7 +796,7 @@ struct FireVaultBreadcrumbsView: View {
                             .font(.caption.bold())
                             .foregroundStyle(.white)
                             .frame(width: 30, height: 30)
-                            .background(NativeShellPalette.blue, in: Circle())
+                            .background(stopTint(stop), in: Circle())
                             .overlay { Circle().stroke(.white.opacity(0.85), lineWidth: 2) }
                     }
                 }
@@ -728,6 +840,15 @@ struct FireVaultBreadcrumbsView: View {
         .padding(.vertical, 13)
         .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 18))
         .accessibilityElement(children: .contain)
+        .overlay(alignment: .bottom) {
+            if day.stops.contains(where: { $0.accountID == nil && !$0.isPersonalStop }) {
+                Text("\(day.stops.filter { $0.accountID == nil && !$0.isPersonalStop }.count) need review")
+                    .font(.caption2.bold())
+                    .foregroundStyle(NativeShellPalette.amber)
+                    .offset(y: 20)
+            }
+        }
+        .padding(.bottom, day.stops.contains(where: { $0.accountID == nil && !$0.isPersonalStop }) ? 16 : 0)
     }
 
     private func timeline(_ day: FireVaultBreadcrumbDay) -> some View {
@@ -750,20 +871,19 @@ struct FireVaultBreadcrumbsView: View {
                     ForEach(Array(day.stops.enumerated()), id: \.element.id) { index, stop in
                         Divider().padding(.leading, 52)
                         Button {
-                            guard let accountID = stop.accountID else { return }
-                            store.openAccount(accountID)
-                            dismiss()
+                            editingStop = .init(dayID: day.id, stopID: stop.id)
                         } label: {
                             BreadcrumbTimelineRow(
                                 time: stop.arrival,
                                 title: stop.title,
-                                subtitle: "\(stop.subtitle) • \(stop.duration.fireVaultDuration)",
+                                subtitle: stopTimelineSubtitle(stop),
                                 symbol: "\(index + 1).circle.fill",
-                                tint: stop.accountID == nil ? NativeShellPalette.amber : NativeShellPalette.blue
+                                tint: stopTint(stop),
+                                showsDisclosure: true
                             )
                         }
                         .buttonStyle(.plain)
-                        .disabled(stop.accountID == nil)
+                        .accessibilityHint("Opens this stop for review and editing")
                     }
 
                     if let endedAt = day.endedAt {
@@ -788,6 +908,436 @@ struct FireVaultBreadcrumbsView: View {
                 }
             }
         }
+    }
+
+    private func stopTint(_ stop: FireVaultBreadcrumbStop) -> Color {
+        if stop.isPersonalStop { return .secondary }
+        return stop.accountID == nil ? NativeShellPalette.amber : NativeShellPalette.blue
+    }
+
+    private func stopTimelineSubtitle(_ stop: FireVaultBreadcrumbStop) -> String {
+        var parts = [stop.subtitle, stop.duration.fireVaultDuration]
+        if stop.technicianNote?.isEmpty == false {
+            parts.append("Note added")
+        }
+        return parts.joined(separator: " • ")
+    }
+}
+
+private struct BreadcrumbStopSelection: Identifiable {
+    let dayID: UUID
+    let stopID: UUID
+    var id: UUID { stopID }
+}
+
+private struct FireVaultBreadcrumbStopEditor: View {
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+    @ObservedObject var store: FireVaultStore
+    @Environment(\.dismiss) private var dismiss
+
+    let dayID: UUID
+    let stopID: UUID
+    let openAccount: (String) -> Void
+
+    @State private var arrival: Date
+    @State private var departure: Date
+    @State private var hasDeparture: Bool
+    @State private var selectedAccountID: String?
+    @State private var technicianNote: String
+    @State private var isPersonal: Bool
+    @State private var showsAccountPicker = false
+    @State private var confirmsDelete = false
+
+    init(
+        breadcrumbs: FireVaultBreadcrumbStore,
+        store: FireVaultStore,
+        dayID: UUID,
+        stopID: UUID,
+        openAccount: @escaping (String) -> Void
+    ) {
+        self.breadcrumbs = breadcrumbs
+        self.store = store
+        self.dayID = dayID
+        self.stopID = stopID
+        self.openAccount = openAccount
+
+        let stop = breadcrumbs.stop(dayID: dayID, stopID: stopID)
+        let arrival = stop?.arrival ?? Date()
+        _arrival = State(initialValue: arrival)
+        _departure = State(initialValue: stop?.departure ?? arrival.addingTimeInterval(15 * 60))
+        _hasDeparture = State(initialValue: stop?.departure != nil)
+        _selectedAccountID = State(initialValue: stop?.accountID)
+        _technicianNote = State(initialValue: stop?.technicianNote ?? "")
+        _isPersonal = State(initialValue: stop?.isPersonalStop ?? false)
+    }
+
+    private var selectedAccount: FireVaultWorkspaceAccount? {
+        guard let selectedAccountID else { return nil }
+        return store.accounts.first(where: { $0.id == selectedAccountID })
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                visitSection
+                classificationSection
+                if let account = selectedAccount, !isPersonal {
+                    activitySection(account)
+                }
+                noteSection
+                locationSection
+                deleteSection
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .navigationTitle("Review Stop")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        save()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+            .sheet(isPresented: $showsAccountPicker) {
+                FireVaultBreadcrumbAccountPicker(
+                    accounts: store.accounts,
+                    selectedAccountID: selectedAccountID
+                ) { accountID in
+                    selectedAccountID = accountID
+                    isPersonal = false
+                    showsAccountPicker = false
+                }
+            }
+            .confirmationDialog(
+                "Delete This Stop?",
+                isPresented: $confirmsDelete,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Stop", role: .destructive) {
+                    breadcrumbs.deleteStop(dayID: dayID, stopID: stopID)
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The route remains intact, but this stop will be removed from the daily log.")
+            }
+        }
+        .tint(NativeShellPalette.blue)
+        .preferredColorScheme(.dark)
+    }
+
+    private var visitSection: some View {
+        Section {
+            DatePicker(
+                "Arrived",
+                selection: $arrival,
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            Toggle("Departure recorded", isOn: $hasDeparture)
+            if hasDeparture {
+                DatePicker(
+                    "Departed",
+                    selection: $departure,
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+            } else {
+                LabeledContent("Status", value: "Still at this stop")
+            }
+            LabeledContent(
+                "Duration",
+                value: previewDuration.fireVaultDuration
+            )
+        } header: {
+            Text("Visit Time")
+        } footer: {
+            Text("Correct the arrival or departure time when GPS stop detection was early or late.")
+        }
+    }
+
+    private var classificationSection: some View {
+        Section {
+            Toggle(isOn: $isPersonal) {
+                Label("Personal Stop", systemImage: "person.crop.circle")
+            }
+            .onChange(of: isPersonal) { _, personal in
+                if personal {
+                    selectedAccountID = nil
+                }
+            }
+
+            if isPersonal {
+                LabeledContent("Account", value: "Not associated")
+            } else {
+                Button {
+                    showsAccountPicker = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Label("Account", systemImage: "building.2")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(selectedAccount?.name ?? "Choose Account")
+                                .foregroundStyle(
+                                    selectedAccount == nil
+                                        ? NativeShellPalette.amber
+                                        : .secondary
+                                )
+                                .lineLimit(1)
+                            if let accountID = selectedAccount?.accountId, !accountID.isEmpty {
+                                Text(accountID)
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.caption.bold())
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    "Account, \(selectedAccount?.name ?? "not assigned")"
+                )
+                .accessibilityHint("Opens the searchable account directory")
+            }
+        } header: {
+            Text("Stop Classification")
+        } footer: {
+            Text(
+                isPersonal
+                    ? "Personal stops remain in the route but are not associated with customer activity."
+                    : "Assigning an account turns this detected location into a technician visit."
+            )
+        }
+    }
+
+    private func activitySection(_ account: FireVaultWorkspaceAccount) -> some View {
+        Section {
+            HStack {
+                BreadcrumbActivityCount(
+                    title: "NOTES",
+                    value: account.notes.count,
+                    symbol: "note.text"
+                )
+                BreadcrumbActivityCount(
+                    title: "FILES",
+                    value: account.documents.count,
+                    symbol: "doc"
+                )
+                BreadcrumbActivityCount(
+                    title: "EQUIPMENT",
+                    value: account.equipment.count,
+                    symbol: "wrench.and.screwdriver"
+                )
+            }
+            .listRowInsets(.init(top: 12, leading: 8, bottom: 12, trailing: 8))
+
+            Button("Open Account Workspace", systemImage: "arrow.up.right.square") {
+                save(openingAccount: account.id)
+            }
+        } header: {
+            Text("Technician Activity")
+        } footer: {
+            Text("Current native records for \(account.name).")
+        }
+    }
+
+    private var noteSection: some View {
+        Section {
+            TextField(
+                "Reason for visit, work performed, or follow-up needed",
+                text: $technicianNote,
+                axis: .vertical
+            )
+            .lineLimit(3...7)
+            .textInputAutocapitalization(.sentences)
+            .accessibilityLabel("Technician visit note")
+        } header: {
+            Text("Visit Note")
+        } footer: {
+            Text("This note belongs to the Breadcrumbs visit and does not create a separate account note.")
+        }
+    }
+
+    private var locationSection: some View {
+        Section("Detected Location") {
+            if let stop = breadcrumbs.stop(dayID: dayID, stopID: stopID) {
+                LabeledContent("Latitude", value: stop.latitude.formatted(.number.precision(.fractionLength(5))))
+                LabeledContent("Longitude", value: stop.longitude.formatted(.number.precision(.fractionLength(5))))
+            }
+        }
+    }
+
+    private var deleteSection: some View {
+        Section {
+            Button("Delete Incorrect Stop", systemImage: "trash", role: .destructive) {
+                confirmsDelete = true
+            }
+        }
+    }
+
+    private var previewDuration: TimeInterval {
+        guard hasDeparture else {
+            return max(0, Date().timeIntervalSince(arrival))
+        }
+        return max(0, departure.timeIntervalSince(arrival))
+    }
+
+    private func save(openingAccount accountID: String? = nil) {
+        breadcrumbs.updateStop(
+            dayID: dayID,
+            stopID: stopID,
+            arrival: arrival,
+            departure: hasDeparture ? departure : nil,
+            account: isPersonal ? nil : selectedAccount,
+            technicianNote: technicianNote,
+            isPersonal: isPersonal
+        )
+
+        if let accountID {
+            openAccount(accountID)
+        } else {
+            dismiss()
+        }
+    }
+}
+
+private struct FireVaultBreadcrumbAccountPicker: View {
+    let accounts: [FireVaultWorkspaceAccount]
+    let selectedAccountID: String?
+    let select: (String?) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+
+    private var filteredAccounts: [FireVaultWorkspaceAccount] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            return accounts.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        }
+        return accounts
+            .filter { account in
+                [
+                    account.name,
+                    account.address,
+                    account.accountId,
+                    account.category
+                ]
+                .contains { $0.localizedCaseInsensitiveContains(query) }
+            }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Button {
+                    select(nil)
+                } label: {
+                    accountRow(
+                        title: "Leave Unassigned",
+                        subtitle: "Review this stop later",
+                        symbol: "questionmark.circle",
+                        isSelected: selectedAccountID == nil
+                    )
+                }
+                .buttonStyle(.plain)
+
+                ForEach(filteredAccounts) { account in
+                    Button {
+                        select(account.id)
+                    } label: {
+                        accountRow(
+                            title: account.name,
+                            subtitle: accountPickerSubtitle(account),
+                            symbol: "building.2",
+                            isSelected: selectedAccountID == account.id
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .searchable(text: $searchText, prompt: "Name, address, ID, or category")
+            .navigationTitle("Choose Account")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+            .overlay {
+                if !searchText.isEmpty && filteredAccounts.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .tint(NativeShellPalette.blue)
+    }
+
+    private func accountRow(
+        title: String,
+        subtitle: String,
+        symbol: String,
+        isSelected: Bool
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .foregroundStyle(isSelected ? NativeShellPalette.blue : .secondary)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text(subtitle)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer()
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(NativeShellPalette.blue)
+            }
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func accountPickerSubtitle(_ account: FireVaultWorkspaceAccount) -> String {
+        [account.address, account.accountId, account.category]
+            .filter { !$0.isEmpty }
+            .joined(separator: " • ")
+    }
+}
+
+private struct BreadcrumbActivityCount: View {
+    let title: String
+    let value: Int
+    let symbol: String
+
+    var body: some View {
+        VStack(spacing: 5) {
+            Image(systemName: symbol)
+                .foregroundStyle(NativeShellPalette.blue)
+            Text(value, format: .number)
+                .font(.headline.monospacedDigit())
+            Text(title)
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -817,6 +1367,7 @@ private struct BreadcrumbTimelineRow: View {
     let subtitle: String?
     let symbol: String
     let tint: Color
+    var showsDisclosure = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -842,6 +1393,12 @@ private struct BreadcrumbTimelineRow: View {
                 }
             }
             Spacer(minLength: 0)
+            if showsDisclosure {
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold())
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 24)
+            }
         }
         .padding(.vertical, 11)
         .contentShape(Rectangle())

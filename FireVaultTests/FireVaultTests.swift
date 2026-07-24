@@ -61,8 +61,8 @@ final class FireVaultTests: XCTestCase {
             status: "Build 1.03.30"
         )
 
-        XCTAssertEqual(about.displayStatus(nativeVersion: "1.08.01"), "Version 1.08.01")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.08.01"), "Build 1.08.01")
+        XCTAssertEqual(about.displayStatus(nativeVersion: "1.08.02"), "Version 1.08.02")
+        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.08.02"), "Build 1.08.02")
     }
 
     func testBreadcrumbRulesRejectPoorAccuracyAndDuplicatePoints() {
@@ -145,6 +145,96 @@ final class FireVaultTests: XCTestCase {
 
         XCTAssertGreaterThan(day.totalDistanceMeters, 900)
         XCTAssertLessThan(day.totalDistanceMeters, 1_100)
+    }
+
+    func testBreadcrumbVisitTimesNeverProduceNegativeDuration() {
+        let arrival = Date()
+        let earlierDeparture = arrival.addingTimeInterval(-600)
+        let normalized = FireVaultBreadcrumbRules.normalizedVisit(
+            arrival: arrival,
+            departure: earlierDeparture
+        )
+
+        XCTAssertEqual(normalized.arrival, arrival)
+        XCTAssertEqual(normalized.departure, arrival)
+    }
+
+    func testBreadcrumbStopCanBeAssignedAndMarkedPersonal() {
+        let account = FireVaultWorkspaceAccount(
+            id: "account-1",
+            name: "Central Library",
+            address: "100 Main Street",
+            category: "Commercial",
+            accountId: "FV-42",
+            phone: "",
+            favorite: false,
+            latitude: 43.615,
+            longitude: -116.202,
+            tags: [],
+            notes: [],
+            documents: [],
+            equipment: [],
+            locations: [],
+            recent: []
+        )
+        var stop = FireVaultBreadcrumbStop(
+            arrival: Date(),
+            latitude: 43.615,
+            longitude: -116.202
+        )
+
+        stop.assign(to: account)
+        XCTAssertEqual(stop.accountID, account.id)
+        XCTAssertEqual(stop.title, account.name)
+
+        stop.markPersonal(true)
+        XCTAssertTrue(stop.isPersonalStop)
+        XCTAssertNil(stop.accountID)
+        XCTAssertEqual(stop.title, "Personal Stop")
+    }
+
+    func testBreadcrumbStopTrimsVisitNote() {
+        let arrival = Date()
+        var stop = FireVaultBreadcrumbStop(
+            arrival: arrival,
+            latitude: 43.615,
+            longitude: -116.202
+        )
+
+        stop.updateVisit(
+            arrival: arrival,
+            departure: arrival.addingTimeInterval(300),
+            technicianNote: "  Follow up with site contact.  "
+        )
+
+        XCTAssertEqual(stop.technicianNote, "Follow up with site contact.")
+        XCTAssertEqual(stop.duration, 300, accuracy: 0.01)
+    }
+
+    func testBreadcrumbStopDecodesArchiveCreatedBeforeEditableFields() throws {
+        let legacyJSON = """
+        {
+          "id": "B71AB6AE-F22E-46EC-97D7-43383A5B7132",
+          "arrival": "2026-07-22T15:30:00Z",
+          "departure": "2026-07-22T16:00:00Z",
+          "latitude": 43.615,
+          "longitude": -116.202,
+          "accountID": "account-1",
+          "accountName": "Central Library",
+          "accountAddress": "100 Main Street"
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let stop = try decoder.decode(
+            FireVaultBreadcrumbStop.self,
+            from: Data(legacyJSON.utf8)
+        )
+
+        XCTAssertEqual(stop.accountName, "Central Library")
+        XCTAssertNil(stop.technicianNote)
+        XCTAssertFalse(stop.isPersonalStop)
     }
 
     func testNativeGPSPreferencesClampRadiusToSupportedRange() {
