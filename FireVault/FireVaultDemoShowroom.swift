@@ -9,7 +9,7 @@ import Foundation
 
 @MainActor
 enum FireVaultDemoShowroom {
-    static let seedVersion = 2
+    static let seedVersion = 3
     static let accountCount = 30
     static let breadcrumbDayCount = 7
 
@@ -44,18 +44,16 @@ enum FireVaultDemoShowroom {
     }
 
     static var summary: (equipment: Int, locations: Int, notes: Int, routePoints: Int) {
-        let allAccounts = accounts
-        let days = breadcrumbDays
-        return (
-            equipment: allAccounts.reduce(0) { $0 + $1.equipment.count },
-            locations: allAccounts.reduce(0) { $0 + $1.locations.count },
-            notes: allAccounts.reduce(0) { $0 + $1.notes.count },
-            routePoints: days.reduce(0) { $0 + $1.points.count }
+        (
+            equipment: accounts.reduce(0) { $0 + $1.equipment.count },
+            locations: accounts.reduce(0) { $0 + $1.locations.count },
+            notes: accounts.reduce(0) { $0 + $1.notes.count },
+            routePoints: breadcrumbDays.reduce(0) { $0 + $1.points.count }
         )
     }
 
-    static let accounts: [FireVaultWorkspaceAccount] = siteSeeds.enumerated().map { index, site in
-        makeAccount(index: index, site: site)
+    static let accounts: [FireVaultWorkspaceAccount] = sites.enumerated().map {
+        makeAccount(index: $0.offset, site: $0.element)
     }
 
     static let breadcrumbDays: [FireVaultBreadcrumbDay] = makeBreadcrumbDays()
@@ -65,9 +63,10 @@ enum FireVaultDemoShowroom {
             for: .applicationSupportDirectory,
             in: .userDomainMask
         ).first ?? FileManager.default.temporaryDirectory
+
         return root
             .appendingPathComponent("FireVault", isDirectory: true)
-            .appendingPathComponent("breadcrumbs-demo-v2.json")
+            .appendingPathComponent("breadcrumbs-demo-v3.json")
     }
 
     private static func writeBreadcrumbArchive(to url: URL) {
@@ -76,8 +75,14 @@ enum FireVaultDemoShowroom {
                 at: url.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            let data = try JSONEncoder.fireVaultBreadcrumbs.encode(breadcrumbDays)
-            try data.write(to: url, options: .atomic)
+
+            // Keep the demo encoder local. The live Breadcrumbs encoder is intentionally
+            // private to FireVaultBreadcrumbs.swift and must not be accessed from here.
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.sortedKeys]
+            let data = try encoder.encode(breadcrumbDays)
+            try data.write(to: url, options: Data.WritingOptions.atomic)
         } catch {
             // Demo seeding must never prevent the production app from opening.
         }
@@ -92,7 +97,7 @@ enum FireVaultDemoShowroom {
         let favorite: Bool
     }
 
-    private static let siteSeeds: [SiteSeed] = [
+    private static let sites: [SiteSeed] = [
         .init(name: "Pioneer Elementary School", address: "825 West Jefferson Street, Boise, ID 83702", category: "Education", latitude: 43.6194, longitude: -116.2024, favorite: true),
         .init(name: "Central Valley High School", address: "1100 North 8th Street, Boise, ID 83702", category: "Education", latitude: 43.6260, longitude: -116.1997, favorite: false),
         .init(name: "Mountain View Medical Center", address: "1550 River Street, Boise, ID 83702", category: "Healthcare", latitude: 43.6178, longitude: -116.1970, favorite: true),
@@ -125,7 +130,7 @@ enum FireVaultDemoShowroom {
         .init(name: "Iron Creek Industrial Complex", address: "10900 West Executive Drive, Boise, ID 83713", category: "Industrial", latitude: 43.6177, longitude: -116.3272, favorite: true)
     ]
 
-    private static let manufacturers = [
+    private static let manufacturers: [(name: String, model: String)] = [
         ("Notifier", "NFS2-3030"),
         ("Fire-Lite", "ES-200X"),
         ("Silent Knight", "6820"),
@@ -138,21 +143,17 @@ enum FireVaultDemoShowroom {
 
     private static func makeAccount(index: Int, site: SiteSeed) -> FireVaultWorkspaceAccount {
         let sequence = index + 1
-        let equipmentCount = 6 + (index % 5)
-        let locationCount = 4 + (index % 3)
-        let noteCount = 2 + (index % 4)
-
-        let equipment = (0..<equipmentCount).map { item in
-            makeEquipment(siteIndex: index, itemIndex: item)
+        let equipment = (0..<(6 + index % 5)).map {
+            makeEquipment(siteIndex: index, itemIndex: $0)
         }
         let locations = makeLocations(
             siteIndex: index,
-            count: locationCount,
+            count: 4 + index % 3,
             latitude: site.latitude,
             longitude: site.longitude
         )
-        let notes = (0..<noteCount).map { item in
-            makeNote(siteIndex: index, itemIndex: item)
+        let notes = (0..<(2 + index % 4)).map {
+            makeNote(siteIndex: index, itemIndex: $0)
         }
         let documents = [
             FireVaultWorkspaceDocument(
@@ -197,7 +198,7 @@ enum FireVaultDemoShowroom {
 
     private static func makeEquipment(siteIndex: Int, itemIndex: Int) -> FireVaultWorkspaceEquipment {
         let manufacturer = manufacturers[(siteIndex + itemIndex) % manufacturers.count]
-        let types = [
+        let equipmentTypes: [(title: String, detail: String)] = [
             ("Fire Alarm Control Panel", "Main system panel"),
             ("Remote Annunciator", "Lobby annunciator"),
             ("NAC Power Supply", "Remote notification power"),
@@ -209,19 +210,15 @@ enum FireVaultDemoShowroom {
             ("BDA System", "Radio enhancement head-end"),
             ("Generator Interface", "Emergency power monitoring")
         ]
-        let type = types[itemIndex % types.count]
-        let title = itemIndex == 0
-            ? "\(manufacturer.0) \(manufacturer.1)"
-            : "\(type.0)"
-        let subtitle = itemIndex == 0
-            ? "Main fire alarm panel • \(type.1)"
-            : "\(manufacturer.0) sample equipment • \(type.1)"
-        let status = itemIndex.isMultiple(of: 7) && itemIndex > 0 ? "Monitor" : "Active"
+        let equipmentType = equipmentTypes[itemIndex % equipmentTypes.count]
+
         return .init(
             id: "demo-eq-\(siteIndex + 1)-\(itemIndex + 1)",
-            title: title,
-            subtitle: subtitle,
-            status: status
+            title: itemIndex == 0 ? "\(manufacturer.name) \(manufacturer.model)" : equipmentType.title,
+            subtitle: itemIndex == 0
+                ? "Main fire alarm panel • \(equipmentType.detail)"
+                : "\(manufacturer.name) sample equipment • \(equipmentType.detail)",
+            status: itemIndex.isMultiple(of: 7) && itemIndex > 0 ? "Monitor" : "Active"
         )
     }
 
@@ -231,7 +228,7 @@ enum FireVaultDemoShowroom {
         latitude: Double,
         longitude: Double
     ) -> [FireVaultWorkspaceLocation] {
-        let templates = [
+        let templates: [(label: String, subtitle: String, type: String, latitudeOffset: Double, longitudeOffset: Double)] = [
             ("Main Fire Alarm Panel", "Main electrical room; check in before entry", "Panel", 0.00005, 0.00004),
             ("Riser Room", "Exterior sprinkler riser room on service side", "Riser Room", -0.00018, 0.00016),
             ("Technician Parking", "Use marked service parking near loading area", "Parking", 0.00024, -0.00020),
@@ -239,21 +236,22 @@ enum FireVaultDemoShowroom {
             ("Remote Annunciator", "Inside main lobby beside security desk", "Annunciator", -0.00008, -0.00012),
             ("Loading Dock", "Service entrance available after 7 AM", "Service", -0.00025, 0.00028)
         ]
+
         return templates.prefix(count).enumerated().map { itemIndex, item in
             .init(
                 id: "demo-loc-\(siteIndex + 1)-\(itemIndex + 1)",
-                label: item.0,
-                subtitle: item.1,
-                type: item.2,
+                label: item.label,
+                subtitle: item.subtitle,
+                type: item.type,
                 plusCode: String(format: "85M5+%02d%02d", siteIndex + 10, itemIndex + 10),
-                latitude: latitude + item.3,
-                longitude: longitude + item.4
+                latitude: latitude + item.latitudeOffset,
+                longitude: longitude + item.longitudeOffset
             )
         }
     }
 
     private static func makeNote(siteIndex: Int, itemIndex: Int) -> FireVaultWorkspaceNote {
-        let templates = [
+        let templates: [(title: String, text: String)] = [
             ("Arrival instructions", "Call the facilities contact before arrival and check in at the main entrance."),
             ("Panel access", "Main panel key is maintained by facilities. Do not leave the panel unattended while open."),
             ("Recent service", "Battery load test passed during the previous visit; verify date labels at the next inspection."),
@@ -262,10 +260,11 @@ enum FireVaultDemoShowroom {
             ("Coordination", "Coordinate sprinkler and elevator testing with the customer before placing systems on test.")
         ]
         let note = templates[(siteIndex + itemIndex) % templates.count]
+
         return .init(
             id: "demo-note-\(siteIndex + 1)-\(itemIndex + 1)",
-            title: note.0,
-            text: note.1,
+            title: note.title,
+            text: note.text,
             date: itemIndex == 0 ? "Today" : "Jul \(20 - itemIndex)"
         )
     }
@@ -296,14 +295,14 @@ enum FireVaultDemoShowroom {
                 guard let latitude = account.latitude, let longitude = account.longitude else { continue }
                 let destination = (latitude: latitude, longitude: longitude)
                 let travelMinutes = 18 + ((dayOffset + stopOrder) % 4) * 6
-                let segment = routePoints(
+
+                points.append(contentsOf: routePoints(
                     from: previous,
                     to: destination,
                     start: currentTime,
                     durationMinutes: travelMinutes,
-                    idPrefix: "demo-day-\(dayOffset + 1)-segment-\(stopOrder + 1)"
-                )
-                points.append(contentsOf: segment)
+                    namespace: 1_000 + dayOffset * 100 + stopOrder * 10
+                ))
                 currentTime = calendar.date(byAdding: .minute, value: travelMinutes, to: currentTime) ?? currentTime
 
                 let arrival = currentTime
@@ -323,25 +322,24 @@ enum FireVaultDemoShowroom {
                         isPersonal: false
                     )
                 )
-
                 points.append(contentsOf: stationaryPoints(
                     at: destination,
                     arrival: arrival,
                     departure: departure,
-                    idPrefix: "demo-day-\(dayOffset + 1)-stop-\(stopOrder + 1)"
+                    namespace: 2_000 + dayOffset * 100 + stopOrder * 10
                 ))
+
                 currentTime = departure
                 previous = destination
             }
 
-            let returnSegment = routePoints(
+            points.append(contentsOf: routePoints(
                 from: previous,
                 to: (latitude: 43.6150, longitude: -116.2023),
                 start: currentTime,
                 durationMinutes: 22,
-                idPrefix: "demo-day-\(dayOffset + 1)-return"
-            )
-            points.append(contentsOf: returnSegment)
+                namespace: 3_000 + dayOffset * 100
+            ))
             let endedAt = calendar.date(byAdding: .minute, value: 22, to: currentTime) ?? currentTime
 
             return .init(
@@ -361,17 +359,17 @@ enum FireVaultDemoShowroom {
         to end: (latitude: Double, longitude: Double),
         start startTime: Date,
         durationMinutes: Int,
-        idPrefix: String
+        namespace: Int
     ) -> [FireVaultBreadcrumbPoint] {
         let count = max(8, durationMinutes / 2)
         return (0...count).map { index in
             let fraction = Double(index) / Double(count)
             let curve = sin(fraction * .pi) * 0.0012
             return .init(
-                id: stableUUID(namespace: abs(idPrefix.hashValue % 900) + 400, value: index),
+                id: stableUUID(namespace: namespace, value: index),
                 timestamp: startTime.addingTimeInterval(Double(durationMinutes * 60) * fraction),
                 latitude: start.latitude + ((end.latitude - start.latitude) * fraction) + curve,
-                longitude: start.longitude + ((end.longitude - start.longitude) * fraction) - (curve * 0.6),
+                longitude: start.longitude + ((end.longitude - start.longitude) * fraction) - curve * 0.6,
                 horizontalAccuracy: 8
             )
         }
@@ -381,14 +379,14 @@ enum FireVaultDemoShowroom {
         at coordinate: (latitude: Double, longitude: Double),
         arrival: Date,
         departure: Date,
-        idPrefix: String
+        namespace: Int
     ) -> [FireVaultBreadcrumbPoint] {
         let duration = max(1, departure.timeIntervalSince(arrival))
         return (1...4).map { index in
             let fraction = Double(index) / 5.0
             let jitter = Double(index - 2) * 0.000006
             return .init(
-                id: stableUUID(namespace: abs(idPrefix.hashValue % 900) + 1400, value: index),
+                id: stableUUID(namespace: namespace, value: index),
                 timestamp: arrival.addingTimeInterval(duration * fraction),
                 latitude: coordinate.latitude + jitter,
                 longitude: coordinate.longitude - jitter,
@@ -408,7 +406,11 @@ enum FireVaultDemoShowroom {
     }
 
     private static func stableUUID(namespace: Int, value: Int) -> UUID {
-        let string = String(format: "%08X-0000-4000-8000-%012X", namespace & 0xFFFF_FFFF, value & 0xFFFF_FFFF)
+        let string = String(
+            format: "%08X-0000-4000-8000-%012X",
+            namespace & 0xFFFF_FFFF,
+            value & 0xFFFF_FFFF
+        )
         return UUID(uuidString: string) ?? UUID()
     }
 }
