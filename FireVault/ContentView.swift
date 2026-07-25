@@ -29,7 +29,7 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                applicationContent(availableWidth: geometry.size.width)
+                applicationContent(availableSize: geometry.size)
                     .accessibilityHidden(showsSplash)
 
                 if showsSplash {
@@ -64,8 +64,11 @@ struct ContentView: View {
         }
     }
 
-    private func applicationContent(availableWidth: CGFloat) -> some View {
-        let usesWideWorkspace = horizontalSizeClass == .regular && availableWidth >= 900
+    private func applicationContent(availableSize: CGSize) -> some View {
+        let isLandscapeWindow = availableSize.width > availableSize.height
+        let usesWideWorkspace = horizontalSizeClass == .regular
+            && isLandscapeWindow
+            && availableSize.width >= 900
         let payload = store.appPayload(
             userCoordinate: locationService.coordinate,
             liveLocationStatus: locationService.statusText
@@ -139,9 +142,9 @@ private struct FireVaultBrandHeader: View {
                     .foregroundColor(.white)
                     .tracking(1.35)
             }
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("FireVault")
+            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("FireVault")
 
             Spacer()
 
@@ -244,9 +247,9 @@ private struct FireVaultSplashView: View {
                             .foregroundColor(.white)
                             .tracking(0.4)
                     }
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("FireVault")
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("FireVault")
 
                     Text("FIELD WORKSPACE")
                         .font(.caption.bold())
