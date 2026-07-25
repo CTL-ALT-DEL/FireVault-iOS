@@ -9,7 +9,7 @@ import SwiftUI
 import UIKit
 import VisionKit
 
-private struct FireVaultResolvedOverlayField: Identifiable, Equatable {
+struct FireVaultResolvedOverlayField: Identifiable, Equatable {
     let field: FireVaultOverlayField
     let value: String
 
