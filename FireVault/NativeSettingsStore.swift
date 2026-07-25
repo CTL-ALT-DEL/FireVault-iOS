@@ -50,6 +50,8 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
     var logoPlacement = "top"
     var fontSize = "medium"
     var backgroundStyle = "frosted"
+    var glassStyle = "regular"
+    var glassThickness = "regular"
     var opacity = 85
     var showLogo = true
     var showTagline = true
@@ -76,8 +78,10 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
         if !["top", "bottom", "left", "right"].contains(copy.logoPlacement) { copy.logoPlacement = "top" }
         if !["top", "bottom"].contains(copy.alignment) { copy.alignment = "bottom" }
         if !["left", "right"].contains(copy.horizontalPosition) { copy.horizontalPosition = "left" }
-        if !["small", "medium", "large"].contains(copy.fontSize) { copy.fontSize = "medium" }
+        copy.fontSize = "medium"
         if !["frosted", "bar", "card", "minimal"].contains(copy.backgroundStyle) { copy.backgroundStyle = "frosted" }
+        if !["regular", "clear"].contains(copy.glassStyle) { copy.glassStyle = "regular" }
+        if !["regular", "thick"].contains(copy.glassThickness) { copy.glassThickness = "regular" }
         if !["red", "blue", "amber", "white"].contains(copy.accentColor) { copy.accentColor = "blue" }
         copy.tagline = String(copy.tagline.prefix(80))
         let allowedFields = Set(FireVaultOverlayField.allCases.map(\.rawValue))
@@ -95,7 +99,7 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case alignment, horizontalPosition, scale, positionX, positionY
         case logoScale, logoPositionX, logoPositionY, logoPlacement
-        case fontSize, backgroundStyle, opacity, showLogo, showTagline
+        case fontSize, backgroundStyle, glassStyle, glassThickness, opacity, showLogo, showTagline
         case accentColor, tagline, fieldOrder, hiddenFields, fieldTemplate
     }
 
@@ -110,8 +114,10 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
         logoPositionX = try values.decodeIfPresent(Double.self, forKey: .logoPositionX) ?? -0.62
         logoPositionY = try values.decodeIfPresent(Double.self, forKey: .logoPositionY) ?? -0.7
         logoPlacement = try values.decodeIfPresent(String.self, forKey: .logoPlacement) ?? "top"
-        fontSize = try values.decodeIfPresent(String.self, forKey: .fontSize) ?? "medium"
+        fontSize = "medium"
         backgroundStyle = try values.decodeIfPresent(String.self, forKey: .backgroundStyle) ?? "frosted"
+        glassStyle = try values.decodeIfPresent(String.self, forKey: .glassStyle) ?? "regular"
+        glassThickness = try values.decodeIfPresent(String.self, forKey: .glassThickness) ?? "regular"
         opacity = try values.decodeIfPresent(Int.self, forKey: .opacity) ?? 85
         showLogo = try values.decodeIfPresent(Bool.self, forKey: .showLogo) ?? true
         showTagline = try values.decodeIfPresent(Bool.self, forKey: .showTagline) ?? true
