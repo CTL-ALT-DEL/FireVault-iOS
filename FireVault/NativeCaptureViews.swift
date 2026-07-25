@@ -172,15 +172,6 @@ struct FireVaultPhotoOverlayView: View {
         return min(410, informationWidth + technicianAllowance + 28)
     }
 
-    private var brandAlignment: Alignment {
-        switch preferences.logoPlacement {
-        case "bottom": .bottom
-        case "left": .leading
-        case "right": .trailing
-        default: .top
-        }
-    }
-
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -194,8 +185,10 @@ struct FireVaultPhotoOverlayView: View {
                 if preferences.showLogo {
                     FireVaultBrandMark()
                         .scaleEffect(preferences.logoScale)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: brandAlignment)
-                        .padding(14)
+                        .position(
+                            x: geometry.size.width * (0.5 + CGFloat(preferences.logoPositionX) * 0.36),
+                            y: geometry.size.height * (0.5 + CGFloat(preferences.logoPositionY) * 0.36)
+                        )
                 }
             }
         }
@@ -273,6 +266,7 @@ struct FireVaultOverlayPreview: View {
 
     @State private var editedPreferences: FireVaultOverlayPreferences
     @GestureState private var overlayDrag: CGSize = .zero
+    @GestureState private var logoDrag: CGSize = .zero
 
     init(
         preferences: FireVaultOverlayPreferences,
@@ -319,7 +313,7 @@ struct FireVaultOverlayPreview: View {
     private func overlayEditorLayer(size: CGSize) -> some View {
         ZStack {
             FireVaultPhotoOverlayView(
-                preferences: previewPreferences(overlayTranslation: overlayDrag, size: size),
+                preferences: previewPreferences(overlayTranslation: overlayDrag, logoTranslation: logoDrag, size: size),
                 technicianName: technicianName,
                 siteName: siteName,
                 address: address,
@@ -331,6 +325,10 @@ struct FireVaultOverlayPreview: View {
             .allowsHitTesting(false)
 
             overlayHitTarget(size: size)
+
+            if editedPreferences.showLogo {
+                logoHitTarget(size: size)
+            }
         }
     }
 
@@ -347,8 +345,24 @@ struct FireVaultOverlayPreview: View {
             )
             .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
             .gesture(overlayGesture(in: size))
+            .zIndex(1)
             .accessibilityLabel("Photo information overlay")
-            .accessibilityHint("Drag to reposition")
+            .accessibilityHint("Drag and release to place")
+    }
+
+    private func logoHitTarget(size: CGSize) -> some View {
+        Rectangle()
+            .fill(.white.opacity(0.001))
+            .frame(width: 118 * editedPreferences.logoScale, height: 44 * editedPreferences.logoScale)
+            .position(
+                x: size.width * (0.5 + CGFloat(editedPreferences.logoPositionX) * 0.36) + logoDrag.width,
+                y: size.height * (0.5 + CGFloat(editedPreferences.logoPositionY) * 0.36) + logoDrag.height
+            )
+            .contentShape(Rectangle())
+            .highPriorityGesture(logoGesture(in: size))
+            .zIndex(2)
+            .accessibilityLabel("FireVault logo")
+            .accessibilityHint("Drag and release to place")
     }
 
     private var estimatedPanelWidth: CGFloat {
@@ -381,19 +395,37 @@ struct FireVaultOverlayPreview: View {
         return max(48, CGFloat(visibleLines) * 12 + 18)
     }
 
-    private func previewPreferences(overlayTranslation: CGSize, size: CGSize) -> FireVaultOverlayPreferences {
+    private func previewPreferences(
+        overlayTranslation: CGSize,
+        logoTranslation: CGSize,
+        size: CGSize
+    ) -> FireVaultOverlayPreferences {
         var value = editedPreferences
         value.positionX += Double(overlayTranslation.width / max(size.width * 0.36, 1))
         value.positionY += Double(overlayTranslation.height / max(size.height * 0.36, 1))
+        value.logoPositionX += Double(logoTranslation.width / max(size.width * 0.36, 1))
+        value.logoPositionY += Double(logoTranslation.height / max(size.height * 0.36, 1))
         return value.normalized
     }
 
     private func overlayGesture(in size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 1)
+        DragGesture(minimumDistance: 2)
             .updating($overlayDrag) { value, state, _ in state = value.translation }
             .onEnded { value in
                 editedPreferences.positionX += Double(value.translation.width / max(size.width * 0.36, 1))
                 editedPreferences.positionY += Double(value.translation.height / max(size.height * 0.36, 1))
+                editedPreferences = editedPreferences.normalized
+                stageEdits()
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
+    }
+
+    private func logoGesture(in size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 2)
+            .updating($logoDrag) { value, state, _ in state = value.translation }
+            .onEnded { value in
+                editedPreferences.logoPositionX += Double(value.translation.width / max(size.width * 0.36, 1))
+                editedPreferences.logoPositionY += Double(value.translation.height / max(size.height * 0.36, 1))
                 editedPreferences = editedPreferences.normalized
                 stageEdits()
                 UISelectionFeedbackGenerator().selectionChanged()
