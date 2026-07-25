@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  FireVault
 //
-//  Pure SwiftUI application root for Build 1.08.06.
+//  Pure SwiftUI application root for Build 1.08.07.
 //
 
 import SwiftUI
@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var demoBreadcrumbs: FireVaultBreadcrumbStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showsSplash = true
 
     init() {
@@ -26,14 +27,16 @@ struct ContentView: View {
     }
 
     var body: some View {
-        ZStack {
-            applicationContent
-                .accessibilityHidden(showsSplash)
+        GeometryReader { geometry in
+            ZStack {
+                applicationContent(availableWidth: geometry.size.width)
+                    .accessibilityHidden(showsSplash)
 
-            if showsSplash {
-                FireVaultSplashView()
-                    .transition(.opacity)
-                    .zIndex(1)
+                if showsSplash {
+                    FireVaultSplashView()
+                        .transition(.opacity)
+                        .zIndex(1)
+                }
             }
         }
         .animation(.easeOut(duration: 0.2), value: store.selectedAccountID)
@@ -61,23 +64,34 @@ struct ContentView: View {
         }
     }
 
-    @ViewBuilder
-    private var applicationContent: some View {
-        VStack(spacing: 0) {
+    private func applicationContent(availableWidth: CGFloat) -> some View {
+        let usesWideWorkspace = horizontalSizeClass == .regular && availableWidth >= 900
+        let payload = store.appPayload(
+            userCoordinate: locationService.coordinate,
+            liveLocationStatus: locationService.statusText
+        )
+
+        return VStack(spacing: 0) {
             FireVaultBrandHeader()
 
             ZStack {
                 NativeShellPalette.background.ignoresSafeArea()
 
-                if let account = store.selectedAccount {
+                if usesWideWorkspace {
+                    FireVaultIPadWorkspace(
+                        payload: payload,
+                        store: store,
+                        settings: settings,
+                        locationService: locationService,
+                        breadcrumbs: activeBreadcrumbs
+                    )
+                    .transition(.opacity)
+                } else if let account = store.selectedAccount {
                     FieldWorkspaceView(account: account, store: store)
                         .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 } else {
                     NativeAppShellView(
-                        payload: store.appPayload(
-                            userCoordinate: locationService.coordinate,
-                            liveLocationStatus: locationService.statusText
-                        ),
+                        payload: payload,
                         store: store,
                         settings: settings,
                         locationService: locationService,
