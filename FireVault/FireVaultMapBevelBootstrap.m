@@ -2,8 +2,7 @@
 //  FireVaultMapBevelBootstrap.m
 //  FireVault
 //
-//  Automatically applies a recessed 3D bezel to every MKMapView and keeps
-//  map framing synchronized when the displayed account annotations change.
+//  Automatically applies a recessed 3D bezel to every MKMapView.
 //
 
 #import <MapKit/MapKit.h>
@@ -15,14 +14,11 @@ static NSString * const FVMapOuterStrokeName = @"FireVault.Map.OuterStroke";
 static NSString * const FVMapInnerShadowName = @"FireVault.Map.InnerShadow";
 static NSString * const FVMapTopLeftShadeName = @"FireVault.Map.TopLeftShade";
 static NSString * const FVMapBottomRightHighlightName = @"FireVault.Map.BottomRightHighlight";
-static NSString * const FVObsoleteNearbySubtitle = @"Large hybrid map with the closest accounts beside it";
 static const CGFloat FVMapCornerRadius = 24.0;
-static void *FVMapAnnotationSignatureKey = &FVMapAnnotationSignatureKey;
 
 @interface MKMapView (FireVaultMapBevel)
 - (void)fv_layoutSubviews;
 - (void)fv_applyRecessedBevel;
-- (void)fv_refreshViewportForChangedAnnotations;
 @end
 
 @implementation MKMapView (FireVaultMapBevel)
@@ -39,62 +35,6 @@ static void *FVMapAnnotationSignatureKey = &FVMapAnnotationSignatureKey;
 - (void)fv_layoutSubviews {
     [self fv_layoutSubviews];
     [self fv_applyRecessedBevel];
-    [self fv_refreshViewportForChangedAnnotations];
-}
-
-- (void)fv_refreshViewportForChangedAnnotations {
-    NSMutableArray<id<MKAnnotation>> *visibleAnnotations = [NSMutableArray array];
-    NSMutableArray<NSString *> *signatureParts = [NSMutableArray array];
-
-    for (id<MKAnnotation> annotation in self.annotations) {
-        if ([annotation isKindOfClass:MKUserLocation.class]) {
-            continue;
-        }
-
-        CLLocationCoordinate2D coordinate = annotation.coordinate;
-        if (!CLLocationCoordinate2DIsValid(coordinate)) {
-            continue;
-        }
-
-        [visibleAnnotations addObject:annotation];
-        NSString *title = annotation.title ?: @"";
-        [signatureParts addObject:[NSString stringWithFormat:@"%.6f,%.6f,%@",
-                                   coordinate.latitude,
-                                   coordinate.longitude,
-                                   title]];
-    }
-
-    if (visibleAnnotations.count == 0) {
-        return;
-    }
-
-    [signatureParts sortUsingSelector:@selector(compare:)];
-    NSString *signature = [signatureParts componentsJoinedByString:@"|"];
-    NSString *previousSignature = objc_getAssociatedObject(self, FVMapAnnotationSignatureKey);
-    if ([previousSignature isEqualToString:signature]) {
-        return;
-    }
-
-    objc_setAssociatedObject(
-        self,
-        FVMapAnnotationSignatureKey,
-        signature,
-        OBJC_ASSOCIATION_COPY_NONATOMIC
-    );
-
-    NSArray<id<MKAnnotation>> *annotationsToFrame = [visibleAnnotations copy];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (annotationsToFrame.count == 1) {
-            id<MKAnnotation> annotation = annotationsToFrame.firstObject;
-            MKCoordinateRegion region = MKCoordinateRegionMake(
-                annotation.coordinate,
-                MKCoordinateSpanMake(0.006, 0.006)
-            );
-            [self setRegion:region animated:NO];
-        } else {
-            [self showAnnotations:annotationsToFrame animated:NO];
-        }
-    });
 }
 
 - (void)fv_applyRecessedBevel {
@@ -208,41 +148,6 @@ static void *FVMapAnnotationSignatureKey = &FVMapAnnotationSignatureKey;
                  controlPoint:CGPointMake(CGRectGetMaxX(rect), CGRectGetMaxY(rect))];
     [path addLineToPoint:CGPointMake(CGRectGetMaxX(rect), CGRectGetMinY(rect) + radius)];
     return path;
-}
-
-@end
-
-@interface NSBundle (FireVaultCopyOverrides)
-- (NSString *)fv_localizedStringForKey:(NSString *)key
-                                  value:(NSString *)value
-                                  table:(NSString *)tableName;
-@end
-
-@implementation NSBundle (FireVaultCopyOverrides)
-
-+ (void)load {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        Method original = class_getInstanceMethod(
-            self,
-            @selector(localizedStringForKey:value:table:)
-        );
-        Method replacement = class_getInstanceMethod(
-            self,
-            @selector(fv_localizedStringForKey:value:table:)
-        );
-        method_exchangeImplementations(original, replacement);
-    });
-}
-
-- (NSString *)fv_localizedStringForKey:(NSString *)key
-                                  value:(NSString *)value
-                                  table:(NSString *)tableName {
-    if ([key isEqualToString:FVObsoleteNearbySubtitle]) {
-        return @"";
-    }
-
-    return [self fv_localizedStringForKey:key value:value table:tableName];
 }
 
 @end
