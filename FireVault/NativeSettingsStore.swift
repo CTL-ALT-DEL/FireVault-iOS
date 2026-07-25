@@ -9,15 +9,8 @@ import Foundation
 import Combine
 
 enum FireVaultOverlayField: String, CaseIterable, Identifiable {
-    case site
-    case address
-    case accountID
-    case category
-    case technician
-    case timestamp
-
+    case site, address, accountID, category, technician, timestamp
     var id: String { rawValue }
-
     var title: String {
         switch self {
         case .site: "Site name"
@@ -28,7 +21,6 @@ enum FireVaultOverlayField: String, CaseIterable, Identifiable {
         case .timestamp: "Date and time"
         }
     }
-
     var symbol: String {
         switch self {
         case .site: "building.2"
@@ -39,18 +31,11 @@ enum FireVaultOverlayField: String, CaseIterable, Identifiable {
         case .timestamp: "calendar.badge.clock"
         }
     }
-
-    var isRequired: Bool {
-        self == .site || self == .address || self == .accountID
-    }
+    var isRequired: Bool { self == .site || self == .address || self == .accountID }
 }
 
 struct FireVaultTechnicianPreferences: Codable, Equatable {
-    var name = ""
-    var company = ""
-    var phone = ""
-    var email = ""
-    var license = ""
+    var name = ""; var company = ""; var phone = ""; var email = ""; var license = ""
 }
 
 struct FireVaultOverlayPreferences: Codable, Equatable {
@@ -97,20 +82,10 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
         copy.tagline = String(copy.tagline.prefix(80))
         let allowedFields = Set(FireVaultOverlayField.allCases.map(\.rawValue))
         var seenFields = Set<String>()
-        copy.fieldOrder = copy.fieldOrder.filter {
-            allowedFields.contains($0) && seenFields.insert($0).inserted
-        }
-        for field in FireVaultOverlayField.allCases where !seenFields.contains(field.rawValue) {
-            copy.fieldOrder.append(field.rawValue)
-        }
-        let requiredFields = Set(
-            FireVaultOverlayField.allCases.filter(\.isRequired).map(\.rawValue)
-        )
-        copy.hiddenFields = Array(
-            Set(copy.hiddenFields)
-                .intersection(allowedFields)
-                .subtracting(requiredFields)
-        )
+        copy.fieldOrder = copy.fieldOrder.filter { allowedFields.contains($0) && seenFields.insert($0).inserted }
+        for field in FireVaultOverlayField.allCases where !seenFields.contains(field.rawValue) { copy.fieldOrder.append(field.rawValue) }
+        let requiredFields = Set(FireVaultOverlayField.allCases.filter(\.isRequired).map(\.rawValue))
+        copy.hiddenFields = Array(Set(copy.hiddenFields).intersection(allowedFields).subtracting(requiredFields))
         copy.fieldTemplate = Self.requiredFieldTemplate(copy.fieldTemplate)
         return copy
     }
@@ -165,11 +140,7 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
 @MainActor
 enum FireVaultOverlayEditorBridge {
     private static var pending: FireVaultOverlayPreferences?
-
-    static func stage(_ overlay: FireVaultOverlayPreferences) {
-        pending = overlay.normalized
-    }
-
+    static func stage(_ overlay: FireVaultOverlayPreferences) { pending = overlay.normalized }
     static func merge(into overlay: FireVaultOverlayPreferences) -> FireVaultOverlayPreferences {
         guard let pending else { return overlay }
         self.pending = nil
@@ -178,7 +149,8 @@ enum FireVaultOverlayEditorBridge {
         merged.positionX = pending.positionX
         merged.positionY = pending.positionY
         merged.logoScale = pending.logoScale
-        merged.logoPlacement = pending.logoPlacement
+        merged.logoPositionX = pending.logoPositionX
+        merged.logoPositionY = pending.logoPositionY
         return merged.normalized
     }
 }
@@ -202,22 +174,10 @@ struct FireVaultGPSPreferences: Codable, Equatable {
     static func radiusWheelLabel(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(0...2))) }
 }
 
-struct FireVaultPlusCodePreferences: Codable, Equatable {
-    var enabled = true; var autoGenerate = true; var accountLength = 10; var locationLength = 11
-    var verifyAfterDays = 180; var searchable = true; var includeInReports = true
-}
-struct FireVaultReportPreferences: Codable, Equatable {
-    var title = "FireVault Service Report"; var format = "detailed"; var includeTechnician = true
-    var includeTasks = true; var includeDeficiencies = true
-}
-struct FireVaultEmailPreferences: Codable, Equatable {
-    var defaultTo = ""; var cc = ""; var defaultSubject = "FireVault Service Report"; var signature = ""
-}
-struct FireVaultStoragePreferences: Codable, Equatable {
-    var photoProvider = "local"; var documentProvider = "local"; var photoFolder = "FireVault/Photos"
-    var documentFolder = "FireVault/Documents"; var microsoftProfileLabel = ""; var microsoftEmail = ""
-    var sharePointSiteURL = ""; var libraryName = "Documents"
-}
+struct FireVaultPlusCodePreferences: Codable, Equatable { var enabled = true; var autoGenerate = true; var accountLength = 10; var locationLength = 11; var verifyAfterDays = 180; var searchable = true; var includeInReports = true }
+struct FireVaultReportPreferences: Codable, Equatable { var title = "FireVault Service Report"; var format = "detailed"; var includeTechnician = true; var includeTasks = true; var includeDeficiencies = true }
+struct FireVaultEmailPreferences: Codable, Equatable { var defaultTo = ""; var cc = ""; var defaultSubject = "FireVault Service Report"; var signature = "" }
+struct FireVaultStoragePreferences: Codable, Equatable { var photoProvider = "local"; var documentProvider = "local"; var photoFolder = "FireVault/Photos"; var documentFolder = "FireVault/Documents"; var microsoftProfileLabel = ""; var microsoftEmail = ""; var sharePointSiteURL = ""; var libraryName = "Documents" }
 struct FireVaultSyncPreferences: Codable, Equatable { var organization = ""; var workspace = "FireVault Shared Vault"; var conflictPolicy = "review" }
 struct FireVaultWebDAVPreferences: Codable, Equatable { var enabled = false; var serverURL = ""; var username = ""; var folder = "/FireVault" }
 struct FireVaultPrivacyPreferences: Codable, Equatable { var enabled = false; var autoLockMinutes = 5; var lockOnBackground = true; var hideInAppSwitcher = true }
