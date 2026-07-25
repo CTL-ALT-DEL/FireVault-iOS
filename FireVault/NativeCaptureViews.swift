@@ -9,8 +9,15 @@ import SwiftUI
 import UIKit
 import VisionKit
 
+private struct FireVaultResolvedOverlayField: Identifiable, Equatable {
+    let field: FireVaultOverlayField
+    let value: String
+
+    var id: String { field.rawValue }
+}
+
 enum FireVaultOverlayTemplateFormatter {
-    static func lines(
+    static func resolvedFields(
         preferences: FireVaultOverlayPreferences,
         siteName: String,
         address: String,
@@ -18,7 +25,7 @@ enum FireVaultOverlayTemplateFormatter {
         category: String,
         technicianName: String,
         timestamp: Date
-    ) -> [String] {
+    ) -> [FireVaultResolvedOverlayField] {
         let values: [FireVaultOverlayField: String] = [
             .site: siteName,
             .address: address,
@@ -38,8 +45,29 @@ enum FireVaultOverlayTemplateFormatter {
                   !value.isEmpty else {
                 return nil
             }
-            return value
+            return FireVaultResolvedOverlayField(field: field, value: value)
         }
+    }
+
+    static func lines(
+        preferences: FireVaultOverlayPreferences,
+        siteName: String,
+        address: String,
+        accountID: String,
+        category: String,
+        technicianName: String,
+        timestamp: Date
+    ) -> [String] {
+        resolvedFields(
+            preferences: preferences,
+            siteName: siteName,
+            address: address,
+            accountID: accountID,
+            category: category,
+            technicianName: technicianName,
+            timestamp: timestamp
+        )
+        .map(\.value)
     }
 
     static func lines(
@@ -84,15 +112,6 @@ struct FireVaultPhotoOverlayView: View {
     let category: String
     let timestamp: Date
 
-    private var accent: Color {
-        switch preferences.accentColor {
-        case "blue": NativeShellPalette.blue
-        case "amber": NativeShellPalette.amber
-        case "white": .white
-        default: NativeShellPalette.red
-        }
-    }
-
     private var titleFont: Font {
         switch preferences.fontSize {
         case "small": .caption.bold()
@@ -117,13 +136,49 @@ struct FireVaultPhotoOverlayView: View {
         }
     }
 
-    var body: some View {
-        VStack(spacing: 0) {
-            if preferences.alignment != "top" { Spacer(minLength: 0) }
-            overlayContent
-            if preferences.alignment != "bottom" { Spacer(minLength: 0) }
+    private var resolvedFields: [FireVaultResolvedOverlayField] {
+        FireVaultOverlayTemplateFormatter.resolvedFields(
+            preferences: preferences,
+            siteName: siteName,
+            address: address,
+            accountID: accountID,
+            category: category,
+            technicianName: technicianName,
+            timestamp: timestamp
+        )
+    }
+
+    private var leftFields: [FireVaultResolvedOverlayField] {
+        resolvedFields.filter { $0.field != .technician }
+    }
+
+    private var technicianField: FireVaultResolvedOverlayField? {
+        resolvedFields.first { $0.field == .technician }
+    }
+
+    private var leftBlockAlignment: Alignment {
+        switch preferences.alignment {
+        case "top": .topLeading
+        case "center": .leading
+        default: .bottomLeading
         }
-        .padding(preferences.backgroundStyle == "bar" ? 0 : 10)
+    }
+
+    var body: some View {
+        ZStack {
+            leftOverlayContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: leftBlockAlignment)
+
+            if let technicianField {
+                glowingText(
+                    technicianField.value,
+                    font: detailFont.bold(),
+                    alignment: .trailing
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
+        }
+        .padding(12)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             [
@@ -139,76 +194,57 @@ struct FireVaultPhotoOverlayView: View {
         )
     }
 
-    private var resolvedLines: [String] {
-        FireVaultOverlayTemplateFormatter.lines(
-            preferences: preferences,
-            siteName: siteName,
-            address: address,
-            accountID: accountID,
-            category: category,
-            technicianName: technicianName,
-            timestamp: timestamp
-        )
-    }
-
-    private var overlayContent: some View {
-        HStack(alignment: .center, spacing: 10) {
+    private var leftOverlayContent: some View {
+        HStack(alignment: .top, spacing: 10) {
             if preferences.showLogo {
                 Image("FireVaultLogo")
                     .resizable()
                     .scaledToFit()
                     .frame(width: logoSize, height: logoSize)
                     .clipShape(RoundedRectangle(cornerRadius: logoSize * 0.22, style: .continuous))
+                    .shadow(color: .white.opacity(0.95), radius: 2)
+                    .shadow(color: .white.opacity(0.65), radius: 5)
                     .accessibilityHidden(true)
             }
 
             VStack(alignment: .leading, spacing: 2) {
                 if preferences.showTagline, !preferences.tagline.isEmpty {
-                    Text(preferences.tagline)
-                    .font(detailFont.bold())
-                    .foregroundStyle(accent)
+                    glowingText(
+                        preferences.tagline,
+                        font: detailFont.bold(),
+                        alignment: .leading
+                    )
                     .tracking(0.7)
-                    .lineLimit(1)
                 }
 
-                ForEach(Array(resolvedLines.enumerated()), id: \.offset) { index, line in
-                    Text(line)
-                        .font(index == 0 ? titleFont : detailFont)
-                        .foregroundStyle(index == 0 ? .white : .white.opacity(0.82))
-                        .lineLimit(1)
+                ForEach(Array(leftFields.enumerated()), id: \.element.id) { index, entry in
+                    glowingText(
+                        entry.value,
+                        font: index == 0 ? titleFont : detailFont,
+                        alignment: .leading
+                    )
                 }
             }
+            .frame(maxWidth: 330, alignment: .leading)
 
-            Spacer(minLength: 4)
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .frame(
-            maxWidth: preferences.backgroundStyle == "bar" ? .infinity : 360,
-            alignment: .leading
-        )
-        .background {
-            if preferences.backgroundStyle != "minimal" {
-                Color.black.opacity(Double(preferences.opacity) / 100)
-            }
-        }
-        .clipShape(
-            RoundedRectangle(
-                cornerRadius: preferences.backgroundStyle == "card" ? 14 : 0,
-                style: .continuous
-            )
-        )
-        .overlay {
-            if preferences.backgroundStyle == "card" {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(accent.opacity(0.55), lineWidth: 1)
-            }
-        }
-        .shadow(
-            color: preferences.backgroundStyle == "minimal" ? .black.opacity(0.85) : .clear,
-            radius: 4,
-            y: 2
-        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func glowingText(
+        _ value: String,
+        font: Font,
+        alignment: TextAlignment
+    ) -> some View {
+        Text(value)
+            .font(font)
+            .foregroundStyle(.black)
+            .multilineTextAlignment(alignment)
+            .lineLimit(1)
+            .shadow(color: .white, radius: 1)
+            .shadow(color: .white.opacity(0.95), radius: 3)
+            .shadow(color: .white.opacity(0.72), radius: 6)
     }
 
     private var formattedTimestamp: String {
