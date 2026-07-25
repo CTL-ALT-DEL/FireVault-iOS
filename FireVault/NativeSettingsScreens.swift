@@ -112,17 +112,6 @@ struct NativeOverlaySettingsView: View {
             }
 
             Section("Appearance") {
-                Picker("Style", selection: glassStyleBinding) {
-                    Text("Regular Liquid Glass").tag("regular")
-                    Text("Clear Liquid Glass").tag("clear")
-                }
-
-                Picker("Thickness", selection: glassThicknessBinding) {
-                    Text("Regular").tag("regular")
-                    Text("Thick").tag("thick")
-                }
-                .pickerStyle(.segmented)
-
                 overlaySizeControl
                 logoSizeControl
 
@@ -132,9 +121,9 @@ struct NativeOverlaySettingsView: View {
                         value: Binding(
                             get: { Double(draft.overlay.opacity) },
                             set: { newValue in
-                                preservePlacedElements()
-                                draft.overlay.opacity = Int(newValue.rounded())
-                                FireVaultOverlayEditorBridge.stage(draft.overlay)
+                                updateOverlayPreservingPlacement {
+                                    $0.opacity = Int(newValue.rounded())
+                                }
                             }
                         ),
                         in: 35...100,
@@ -171,12 +160,12 @@ struct NativeOverlaySettingsView: View {
 
             Section {
                 Button("Reset Overlay and Logo Placement", systemImage: "arrow.counterclockwise") {
-                    draft.overlay.scale = 0.78
-                    draft.overlay.positionX = 0
-                    draft.overlay.positionY = 0.45
-                    draft.overlay.logoScale = 0.8
-                    draft.overlay.logoPositionX = -0.62
-                    draft.overlay.logoPositionY = -0.7
+                    draft.overlay.scale = 0.50
+                    draft.overlay.positionX = -0.78
+                    draft.overlay.positionY = 0.78
+                    draft.overlay.logoScale = 0.70
+                    draft.overlay.logoPositionX = 0.78
+                    draft.overlay.logoPositionY = -0.78
                     FireVaultOverlayEditorBridge.stage(draft.overlay)
                     UISelectionFeedbackGenerator().selectionChanged()
                 }
@@ -188,28 +177,6 @@ struct NativeOverlaySettingsView: View {
             draft.overlay.backgroundStyle = "frosted"
             settings.save(draft)
         }
-    }
-
-    private var glassStyleBinding: Binding<String> {
-        Binding(
-            get: { draft.overlay.glassStyle },
-            set: { newValue in
-                preservePlacedElements()
-                draft.overlay.glassStyle = newValue
-                FireVaultOverlayEditorBridge.stage(draft.overlay)
-            }
-        )
-    }
-
-    private var glassThicknessBinding: Binding<String> {
-        Binding(
-            get: { draft.overlay.glassThickness },
-            set: { newValue in
-                preservePlacedElements()
-                draft.overlay.glassThickness = newValue
-                FireVaultOverlayEditorBridge.stage(draft.overlay)
-            }
-        )
     }
 
     private var overlaySizeControl: some View {
@@ -225,9 +192,7 @@ struct NativeOverlaySettingsView: View {
                 value: Binding(
                     get: { draft.overlay.scale },
                     set: { newValue in
-                        preservePlacedElements()
-                        draft.overlay.scale = newValue
-                        FireVaultOverlayEditorBridge.stage(draft.overlay)
+                        updateOverlayPreservingPlacement { $0.scale = newValue }
                     }
                 ),
                 in: 0.45...1.35,
@@ -249,9 +214,7 @@ struct NativeOverlaySettingsView: View {
                 value: Binding(
                     get: { draft.overlay.logoScale },
                     set: { newValue in
-                        preservePlacedElements()
-                        draft.overlay.logoScale = newValue
-                        FireVaultOverlayEditorBridge.stage(draft.overlay)
+                        updateOverlayPreservingPlacement { $0.logoScale = newValue }
                     }
                 ),
                 in: 0.45...1.8,
@@ -259,6 +222,15 @@ struct NativeOverlaySettingsView: View {
             )
             .disabled(!draft.overlay.showLogo)
         }
+    }
+
+    private func updateOverlayPreservingPlacement(
+        _ change: (inout FireVaultOverlayPreferences) -> Void
+    ) {
+        var latest = FireVaultOverlayEditorBridge.merge(into: draft.overlay)
+        change(&latest)
+        draft.overlay = latest.normalized
+        FireVaultOverlayEditorBridge.stage(draft.overlay)
     }
 
     private func preservePlacedElements() {
