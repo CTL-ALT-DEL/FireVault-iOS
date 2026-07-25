@@ -55,12 +55,13 @@ struct FireVaultTechnicianPreferences: Codable, Equatable {
 
 struct FireVaultOverlayPreferences: Codable, Equatable {
     var alignment = "bottom"
+    var horizontalPosition = "left"
     var fontSize = "medium"
-    var backgroundStyle = "bar"
-    var opacity = 85
+    var backgroundStyle = "frosted"
+    var opacity = 82
     var showLogo = true
     var showTagline = true
-    var accentColor = "red"
+    var accentColor = "blue"
     var tagline = "FIREVAULT FIELD DOCUMENTATION"
     var fieldOrder = FireVaultOverlayField.allCases.map(\.rawValue)
     var hiddenFields = [FireVaultOverlayField.category.rawValue]
@@ -74,10 +75,11 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
     var normalized: Self {
         var copy = self
         copy.opacity = min(100, max(35, opacity))
-        if !["top", "middle", "bottom"].contains(copy.alignment) { copy.alignment = "bottom" }
+        if !["top", "bottom"].contains(copy.alignment) { copy.alignment = "bottom" }
+        if !["left", "right"].contains(copy.horizontalPosition) { copy.horizontalPosition = "left" }
         if !["small", "medium", "large"].contains(copy.fontSize) { copy.fontSize = "medium" }
-        if !["bar", "card", "minimal"].contains(copy.backgroundStyle) { copy.backgroundStyle = "bar" }
-        if !["red", "blue", "amber", "white"].contains(copy.accentColor) { copy.accentColor = "red" }
+        if !["frosted", "bar", "card", "minimal"].contains(copy.backgroundStyle) { copy.backgroundStyle = "frosted" }
+        if !["red", "blue", "amber", "white"].contains(copy.accentColor) { copy.accentColor = "blue" }
         copy.tagline = String(copy.tagline.prefix(80))
         let allowedFields = Set(FireVaultOverlayField.allCases.map(\.rawValue))
         var seenFields = Set<String>()
@@ -103,6 +105,7 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case alignment
+        case horizontalPosition
         case fontSize
         case backgroundStyle
         case opacity
@@ -118,12 +121,13 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         alignment = try values.decodeIfPresent(String.self, forKey: .alignment) ?? "bottom"
+        horizontalPosition = try values.decodeIfPresent(String.self, forKey: .horizontalPosition) ?? "left"
         fontSize = try values.decodeIfPresent(String.self, forKey: .fontSize) ?? "medium"
-        backgroundStyle = try values.decodeIfPresent(String.self, forKey: .backgroundStyle) ?? "bar"
-        opacity = try values.decodeIfPresent(Int.self, forKey: .opacity) ?? 85
+        backgroundStyle = try values.decodeIfPresent(String.self, forKey: .backgroundStyle) ?? "frosted"
+        opacity = try values.decodeIfPresent(Int.self, forKey: .opacity) ?? 82
         showLogo = try values.decodeIfPresent(Bool.self, forKey: .showLogo) ?? true
         showTagline = try values.decodeIfPresent(Bool.self, forKey: .showTagline) ?? true
-        accentColor = try values.decodeIfPresent(String.self, forKey: .accentColor) ?? "red"
+        accentColor = try values.decodeIfPresent(String.self, forKey: .accentColor) ?? "blue"
         tagline = try values.decodeIfPresent(String.self, forKey: .tagline)
             ?? "FIREVAULT FIELD DOCUMENTATION"
         fieldOrder = try values.decodeIfPresent([String].self, forKey: .fieldOrder)
@@ -307,5 +311,4 @@ final class FireVaultNativeSettingsStore: ObservableObject {
         guard let data = try? encoder.encode(preferences) else { return }
         defaults.set(data, forKey: Key.preferences)
     }
-
 }
