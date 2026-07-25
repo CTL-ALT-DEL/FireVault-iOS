@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  FireVault
 //
-//  Pure SwiftUI application root for Build 1.08.04.
+//  Pure SwiftUI application root for Build 1.08.06.
 //
 
 import SwiftUI
@@ -11,10 +11,19 @@ struct ContentView: View {
     @StateObject private var store = FireVaultStore()
     @StateObject private var settings = FireVaultNativeSettingsStore()
     @StateObject private var locationService = FireVaultLocationService()
-    @StateObject private var breadcrumbs = FireVaultBreadcrumbStore()
+    @StateObject private var liveBreadcrumbs = FireVaultBreadcrumbStore()
+    @State private var demoBreadcrumbs: FireVaultBreadcrumbStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var showsSplash = true
+
+    init() {
+        _demoBreadcrumbs = State(initialValue: FireVaultDemoShowroom.makeBreadcrumbStore())
+    }
+
+    private var activeBreadcrumbs: FireVaultBreadcrumbStore {
+        store.demoMode ? demoBreadcrumbs : liveBreadcrumbs
+    }
 
     var body: some View {
         ZStack {
@@ -30,7 +39,7 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.2), value: store.selectedAccountID)
         .preferredColorScheme(.dark)
         .task {
-            breadcrumbs.restoreActiveWorkday(accounts: store.accounts)
+            prepareActiveVault()
             guard showsSplash else { return }
             try? await Task.sleep(for: .seconds(reduceMotion ? 1.15 : 3.65))
             guard !Task.isCancelled else { return }
@@ -40,7 +49,15 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
-            breadcrumbs.restoreActiveWorkday(accounts: store.accounts)
+            prepareActiveVault()
+        }
+        .onChange(of: store.demoMode) { _, _ in
+            prepareActiveVault()
+        }
+        .onChange(of: store.accounts.count) { _, count in
+            guard store.demoMode, count <= 4 else { return }
+            FireVaultDemoShowroom.installAccountsIfNeeded(into: store, force: true)
+            demoBreadcrumbs = FireVaultDemoShowroom.makeBreadcrumbStore(forceReset: true)
         }
     }
 
@@ -64,12 +81,19 @@ struct ContentView: View {
                         store: store,
                         settings: settings,
                         locationService: locationService,
-                        breadcrumbs: breadcrumbs
+                        breadcrumbs: activeBreadcrumbs
                     )
                     .transition(.opacity)
                 }
             }
         }
+    }
+
+    private func prepareActiveVault() {
+        if store.demoMode {
+            FireVaultDemoShowroom.installAccountsIfNeeded(into: store)
+        }
+        activeBreadcrumbs.restoreActiveWorkday(accounts: store.accounts)
     }
 }
 
