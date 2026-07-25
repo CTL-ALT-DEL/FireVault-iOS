@@ -127,7 +127,11 @@ struct NativeOverlaySettingsView: View {
                     Slider(
                         value: Binding(
                             get: { Double(draft.overlay.opacity) },
-                            set: { draft.overlay.opacity = Int($0.rounded()) }
+                            set: { newValue in
+                                draft.overlay = FireVaultOverlayEditorBridge.merge(into: draft.overlay)
+                                draft.overlay.opacity = Int(newValue.rounded())
+                                FireVaultOverlayEditorBridge.stage(draft.overlay)
+                            }
                         ),
                         in: 35...100,
                         step: 5
