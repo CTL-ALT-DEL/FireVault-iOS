@@ -41,13 +41,13 @@ struct FireVaultTechnicianPreferences: Codable, Equatable {
 struct FireVaultOverlayPreferences: Codable, Equatable {
     var alignment = "bottom"
     var horizontalPosition = "left"
-    var scale = 0.78
-    var positionX = 0.0
-    var positionY = 0.45
-    var logoScale = 0.8
-    var logoPositionX = -0.62
-    var logoPositionY = -0.7
-    var logoPlacement = "top"
+    var scale = 0.50
+    var positionX = -0.78
+    var positionY = 0.78
+    var logoScale = 0.70
+    var logoPositionX = 0.78
+    var logoPositionY = -0.78
+    var logoPlacement = "freeform"
     var fontSize = "medium"
     var backgroundStyle = "frosted"
     var glassStyle = "regular"
@@ -75,13 +75,13 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
         copy.logoScale = min(1.8, max(0.45, logoScale))
         copy.logoPositionX = min(1.35, max(-1.35, logoPositionX))
         copy.logoPositionY = min(1.35, max(-1.35, logoPositionY))
-        if !["top", "bottom", "left", "right"].contains(copy.logoPlacement) { copy.logoPlacement = "top" }
+        copy.logoPlacement = "freeform"
         if !["top", "bottom"].contains(copy.alignment) { copy.alignment = "bottom" }
         if !["left", "right"].contains(copy.horizontalPosition) { copy.horizontalPosition = "left" }
         copy.fontSize = "medium"
-        if !["frosted", "bar", "card", "minimal"].contains(copy.backgroundStyle) { copy.backgroundStyle = "frosted" }
-        if !["regular", "clear"].contains(copy.glassStyle) { copy.glassStyle = "regular" }
-        if !["regular", "thick"].contains(copy.glassThickness) { copy.glassThickness = "regular" }
+        copy.backgroundStyle = "frosted"
+        copy.glassStyle = "regular"
+        copy.glassThickness = "regular"
         if !["red", "blue", "amber", "white"].contains(copy.accentColor) { copy.accentColor = "blue" }
         copy.tagline = String(copy.tagline.prefix(80))
         let allowedFields = Set(FireVaultOverlayField.allCases.map(\.rawValue))
@@ -107,17 +107,17 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         alignment = try values.decodeIfPresent(String.self, forKey: .alignment) ?? "bottom"
         horizontalPosition = try values.decodeIfPresent(String.self, forKey: .horizontalPosition) ?? "left"
-        scale = try values.decodeIfPresent(Double.self, forKey: .scale) ?? 0.78
-        positionX = try values.decodeIfPresent(Double.self, forKey: .positionX) ?? 0
-        positionY = try values.decodeIfPresent(Double.self, forKey: .positionY) ?? 0.45
-        logoScale = try values.decodeIfPresent(Double.self, forKey: .logoScale) ?? 0.8
-        logoPositionX = try values.decodeIfPresent(Double.self, forKey: .logoPositionX) ?? -0.62
-        logoPositionY = try values.decodeIfPresent(Double.self, forKey: .logoPositionY) ?? -0.7
-        logoPlacement = try values.decodeIfPresent(String.self, forKey: .logoPlacement) ?? "top"
+        scale = try values.decodeIfPresent(Double.self, forKey: .scale) ?? 0.50
+        positionX = try values.decodeIfPresent(Double.self, forKey: .positionX) ?? -0.78
+        positionY = try values.decodeIfPresent(Double.self, forKey: .positionY) ?? 0.78
+        logoScale = try values.decodeIfPresent(Double.self, forKey: .logoScale) ?? 0.70
+        logoPositionX = try values.decodeIfPresent(Double.self, forKey: .logoPositionX) ?? 0.78
+        logoPositionY = try values.decodeIfPresent(Double.self, forKey: .logoPositionY) ?? -0.78
+        logoPlacement = "freeform"
         fontSize = "medium"
-        backgroundStyle = try values.decodeIfPresent(String.self, forKey: .backgroundStyle) ?? "frosted"
-        glassStyle = try values.decodeIfPresent(String.self, forKey: .glassStyle) ?? "regular"
-        glassThickness = try values.decodeIfPresent(String.self, forKey: .glassThickness) ?? "regular"
+        backgroundStyle = "frosted"
+        glassStyle = "regular"
+        glassThickness = "regular"
         opacity = try values.decodeIfPresent(Int.self, forKey: .opacity) ?? 85
         showLogo = try values.decodeIfPresent(Bool.self, forKey: .showLogo) ?? true
         showTagline = try values.decodeIfPresent(Bool.self, forKey: .showTagline) ?? true
@@ -146,7 +146,11 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
 @MainActor
 enum FireVaultOverlayEditorBridge {
     private static var pending: FireVaultOverlayPreferences?
-    static func stage(_ overlay: FireVaultOverlayPreferences) { pending = overlay.normalized }
+
+    static func stage(_ overlay: FireVaultOverlayPreferences) {
+        pending = overlay.normalized
+    }
+
     static func merge(into overlay: FireVaultOverlayPreferences) -> FireVaultOverlayPreferences {
         guard let pending else { return overlay }
         self.pending = nil
