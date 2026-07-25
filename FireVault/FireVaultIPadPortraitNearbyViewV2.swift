@@ -235,6 +235,29 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                 .padding(12)
             }
         }
+        .overlay(alignment: .bottomLeading) {
+            if let selectedRow {
+                Button {
+                    store.openAccount(selectedRow.account.id)
+                } label: {
+                    Image(systemName: "note.text")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 48, height: 48)
+                        .background(.black.opacity(0.78), in: Circle())
+                        .overlay {
+                            Circle()
+                                .stroke(.white.opacity(0.72), lineWidth: 1.5)
+                        }
+                        .shadow(color: .black.opacity(0.55), radius: 7, y: 3)
+                }
+                .buttonStyle(.plain)
+                .padding(12)
+                .accessibilityLabel("Open \(selectedRow.account.name) account details")
+                .accessibilityHint("Opens the selected account details page")
+                .accessibilityIdentifier("nearby-map-selected-account-note-button")
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
