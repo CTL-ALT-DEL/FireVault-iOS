@@ -86,7 +86,7 @@ struct ContentView: View {
                 NativeShellPalette.background.ignoresSafeArea()
 
                 if usesWideWorkspace {
-                    FireVaultIPadWorkspaceV2(
+                    FireVaultIPadWorkspaceV3(
                         payload: payload,
                         store: store,
                         settings: settings,
@@ -98,7 +98,7 @@ struct ContentView: View {
                     FieldWorkspaceView(account: account, store: store)
                         .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 } else if usesPortraitIPadNearby {
-                    FireVaultIPadPortraitNearbyView(
+                    FireVaultIPadPortraitNearbyViewV2(
                         payload: payload,
                         store: store,
                         settings: settings,
