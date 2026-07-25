@@ -7,6 +7,7 @@
 
 #import <CoreLocation/CoreLocation.h>
 #import <Foundation/Foundation.h>
+#import <float.h>
 #import <objc/runtime.h>
 
 static const NSTimeInterval FVWaypointInterval = 120.0;
