@@ -123,25 +123,25 @@ struct FireVaultPhotoOverlayView: View {
 
     private var titleFont: Font {
         switch preferences.fontSize {
-        case "small": .caption.bold()
-        case "large": .title3.bold()
-        default: .headline
+        case "small": .system(size: 9.5, weight: .bold, design: .rounded)
+        case "large": .system(size: 13, weight: .bold, design: .rounded)
+        default: .system(size: 11, weight: .bold, design: .rounded)
         }
     }
 
     private var detailFont: Font {
         switch preferences.fontSize {
-        case "small": .caption2
-        case "large": .subheadline
-        default: .caption
+        case "small": .system(size: 8, weight: .medium, design: .rounded)
+        case "large": .system(size: 11, weight: .medium, design: .rounded)
+        default: .system(size: 9.5, weight: .medium, design: .rounded)
         }
     }
 
     private var logoSize: CGFloat {
         switch preferences.fontSize {
-        case "small": 24
-        case "large": 38
-        default: 31
+        case "small": 18
+        case "large": 27
+        default: 22
         }
     }
 
@@ -178,11 +178,22 @@ struct FireVaultPhotoOverlayView: View {
         min(0.88, max(0.38, Double(preferences.opacity) / 100))
     }
 
+    private var informationWidth: CGFloat {
+        let characterEstimate = CGFloat(siteName.count) * 6.1
+        return min(260, max(145, characterEstimate))
+    }
+
+    private var panelWidth: CGFloat {
+        let logoAllowance = preferences.showLogo ? logoSize + 8 : 0
+        let technicianAllowance: CGFloat = technicianField == nil ? 0 : 76
+        return min(390, informationWidth + logoAllowance + technicianAllowance + 34)
+    }
+
     var body: some View {
         glassPanel
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: panelAlignment)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 22)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 18)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(
                 [
@@ -199,8 +210,8 @@ struct FireVaultPhotoOverlayView: View {
     }
 
     private var glassPanel: some View {
-        HStack(alignment: .bottom, spacing: 12) {
-            HStack(alignment: .top, spacing: 9) {
+        HStack(alignment: .bottom, spacing: 8) {
+            HStack(alignment: .top, spacing: 6) {
                 if preferences.showLogo {
                     Image("FireVaultLogo")
                         .resizable()
@@ -209,17 +220,17 @@ struct FireVaultPhotoOverlayView: View {
                         .clipShape(RoundedRectangle(cornerRadius: logoSize * 0.22, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: logoSize * 0.22, style: .continuous)
-                                .stroke(.white.opacity(0.3), lineWidth: 0.7)
+                                .stroke(.white.opacity(0.28), lineWidth: 0.6)
                         }
                         .accessibilityHidden(true)
                 }
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 1.5) {
                     if preferences.showTagline, !preferences.tagline.isEmpty {
                         Text(preferences.tagline)
                             .font(detailFont.bold())
                             .foregroundStyle(accent)
-                            .tracking(0.65)
+                            .tracking(0.45)
                             .lineLimit(1)
                     }
 
@@ -228,58 +239,60 @@ struct FireVaultPhotoOverlayView: View {
                             .font(index == 0 ? titleFont : detailFont)
                             .foregroundStyle(index == 0 ? .white : .white.opacity(0.9))
                             .lineLimit(1)
+                            .fixedSize(horizontal: index == 0, vertical: false)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .frame(maxWidth: 255, alignment: .leading)
+                .frame(width: informationWidth, alignment: .leading)
             }
 
             if let technicianField {
                 Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 1, height: 42)
+                    .fill(.white.opacity(0.23))
+                    .frame(width: 1, height: 32)
 
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("TECHNICIAN")
-                        .font(.system(size: 8, weight: .bold, design: .rounded))
-                        .tracking(0.8)
-                        .foregroundStyle(.white.opacity(0.65))
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("TECH")
+                        .font(.system(size: 6.5, weight: .bold, design: .rounded))
+                        .tracking(0.65)
+                        .foregroundStyle(.white.opacity(0.62))
                     Text(technicianField.value)
                         .font(detailFont.bold())
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.trailing)
                         .lineLimit(2)
+                        .minimumScaleFactor(0.8)
                 }
-                .frame(minWidth: 78, alignment: .trailing)
+                .frame(width: 66, alignment: .trailing)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: 390, alignment: .leading)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .frame(width: panelWidth, alignment: .leading)
         .background {
             ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
                     .fill(.ultraThinMaterial)
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
                     .fill(.black.opacity(glassOpacity * 0.76))
                 LinearGradient(
                     colors: [
-                        .white.opacity(0.08),
+                        .white.opacity(0.07),
                         .clear,
-                        .black.opacity(0.12)
+                        .black.opacity(0.10)
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.white.opacity(0.4), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(.white.opacity(0.36), lineWidth: 0.8)
         }
-        .shadow(color: .black.opacity(0.38), radius: 14, y: 7)
+        .shadow(color: .black.opacity(0.32), radius: 8, y: 4)
     }
 
     private var formattedTimestamp: String {
