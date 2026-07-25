@@ -66,12 +66,12 @@ struct ContentView: View {
 
     private func applicationContent(availableSize: CGSize) -> some View {
         let isLandscapeWindow = availableSize.width > availableSize.height
-        let usesWideWorkspace = horizontalSizeClass == .regular
+        let usesRegularIPad = horizontalSizeClass == .regular && availableSize.width >= 600
+        let usesWideWorkspace = usesRegularIPad
             && isLandscapeWindow
             && availableSize.width >= 900
-        let usesPortraitIPadNearby = horizontalSizeClass == .regular
+        let usesPortraitIPadNearby = usesRegularIPad
             && !isLandscapeWindow
-            && availableSize.width >= 600
             && store.selectedTab == .nearby
             && store.selectedAccount == nil
         let payload = store.appPayload(
@@ -85,7 +85,15 @@ struct ContentView: View {
             ZStack {
                 NativeShellPalette.background.ignoresSafeArea()
 
-                if usesWideWorkspace {
+                if let account = store.selectedAccount, usesRegularIPad {
+                    FireVaultAdaptiveAccountDetailsView(
+                        account: account,
+                        store: store,
+                        returnTab: store.selectedTab,
+                        returnTitle: store.selectedTab == .nearby ? "Nearby" : "Account List"
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                } else if usesWideWorkspace {
                     FireVaultIPadWorkspaceV3(
                         payload: payload,
                         store: store,
