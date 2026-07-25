@@ -2,11 +2,11 @@
 //  FireVaultIPadWorkspace.swift
 //  FireVault
 //
-//  Wide-window iPad workspace introduced in Build 1.08.07.
+//  Landscape-first iPad workspace introduced in Build 1.08.07.
 //
 
-import SwiftUI
 import MapKit
+import SwiftUI
 
 struct FireVaultIPadWorkspace: View {
     let payload: FireVaultAppPayload
@@ -68,7 +68,7 @@ struct FireVaultIPadWorkspace: View {
 
                 Text(FireVaultVersionInfo().displayText)
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary.opacity(0.72))
             }
             .padding(16)
         }
@@ -126,7 +126,12 @@ struct FireVaultIPadWorkspace: View {
         switch store.selectedTab {
         case .nearby:
             if let account = store.selectedAccount {
-                FieldWorkspaceView(account: account, store: store)
+                FireVaultIPadAccountWorkspace(
+                    account: account,
+                    store: store,
+                    closeTab: .nearby,
+                    showsCloseButton: true
+                )
             } else {
                 FireVaultIPadNearbyWorkspace(
                     payload: payload,
@@ -177,8 +182,8 @@ private struct FireVaultIPadNearbyWorkspace: View {
 
     private var overviewRegion: MKCoordinateRegion {
         var coordinates = nearbyRows.compactMap(\.account.coordinate)
-        if !payload.demoMode, let userCoordinate = locationService.coordinate {
-            coordinates.append(userCoordinate)
+        if !payload.demoMode, let current = locationService.coordinate {
+            coordinates.append(current)
         }
 
         guard let first = coordinates.first else {
@@ -190,39 +195,47 @@ private struct FireVaultIPadNearbyWorkspace: View {
 
         let latitudes = coordinates.map(\.latitude)
         let longitudes = coordinates.map(\.longitude)
-        let minLatitude = latitudes.min() ?? first.latitude
-        let maxLatitude = latitudes.max() ?? first.latitude
-        let minLongitude = longitudes.min() ?? first.longitude
-        let maxLongitude = longitudes.max() ?? first.longitude
+        let minimumLatitude = latitudes.min() ?? first.latitude
+        let maximumLatitude = latitudes.max() ?? first.latitude
+        let minimumLongitude = longitudes.min() ?? first.longitude
+        let maximumLongitude = longitudes.max() ?? first.longitude
 
         return .init(
             center: .init(
-                latitude: (minLatitude + maxLatitude) / 2,
-                longitude: (minLongitude + maxLongitude) / 2
+                latitude: (minimumLatitude + maximumLatitude) / 2,
+                longitude: (minimumLongitude + maximumLongitude) / 2
             ),
             span: .init(
-                latitudeDelta: max(0.02, (maxLatitude - minLatitude) * 1.45),
-                longitudeDelta: max(0.02, (maxLongitude - minLongitude) * 1.45)
+                latitudeDelta: max(0.018, (maximumLatitude - minimumLatitude) * 1.5),
+                longitudeDelta: max(0.018, (maximumLongitude - minimumLongitude) * 1.5)
             )
         )
     }
 
     var body: some View {
-        VStack(spacing: 14) {
-            header
+        GeometryReader { geometry in
+            let panelWidth = max(330, min(390, geometry.size.width * 0.32))
+            let availableMapWidth = max(420, geometry.size.width - panelWidth - 46)
+            let availableMapHeight = max(420, geometry.size.height - 86)
+            let mapSide = min(availableMapWidth, availableMapHeight)
 
-            HStack(spacing: 14) {
-                mapPanel
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .layoutPriority(2)
+            VStack(spacing: 12) {
+                header
 
-                accountPanel
-                    .frame(width: 360)
+                HStack(alignment: .top, spacing: 14) {
+                    mapPanel
+                        .frame(width: mapSide, height: mapSide)
+                        .layoutPriority(2)
+
+                    accountPanel
+                        .frame(width: panelWidth, height: mapSide)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 16)
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 14)
         }
-        .padding(.top, 12)
         .background(NativeShellPalette.background)
         .task {
             resetMapSelection()
@@ -234,7 +247,7 @@ private struct FireVaultIPadNearbyWorkspace: View {
             resetMapSelection()
         }
         .fullScreenCover(isPresented: $showsBreadcrumbs) {
-            FireVaultBreadcrumbsView(
+            FireVaultIPadBreadcrumbsView(
                 breadcrumbs: breadcrumbs,
                 store: store,
                 technicianName: settings.preferences.technician.name,
@@ -252,7 +265,7 @@ private struct FireVaultIPadNearbyWorkspace: View {
                     .tracking(1.3)
                     .foregroundStyle(payload.demoMode ? NativeShellPalette.amber : NativeShellPalette.green)
 
-                Text("Map and closest accounts stay visible together")
+                Text("Large hybrid map with the closest accounts beside it")
                     .font(.title3.bold())
                     .foregroundStyle(.white)
             }
@@ -284,7 +297,6 @@ private struct FireVaultIPadNearbyWorkspace: View {
             .accessibilityLabel("Nearby radius")
             .accessibilityValue(settings.gps.radiusStatus)
         }
-        .padding(.horizontal, 16)
     }
 
     private var radiusBinding: Binding<Double> {
@@ -310,8 +322,8 @@ private struct FireVaultIPadNearbyWorkspace: View {
                 .background(NativeShellPalette.surface)
             } else {
                 Map(position: $cameraPosition) {
-                    if !payload.demoMode, let userCoordinate = locationService.coordinate {
-                        Annotation("Your Location", coordinate: userCoordinate) {
+                    if !payload.demoMode, let current = locationService.coordinate {
+                        Annotation("Your Location", coordinate: current) {
                             ZStack {
                                 Circle()
                                     .fill(NativeShellPalette.blue.opacity(0.22))
@@ -353,7 +365,7 @@ private struct FireVaultIPadNearbyWorkspace: View {
                         }
                     }
                 }
-                .mapStyle(.standard(elevation: .realistic))
+                .mapStyle(.hybrid(elevation: .realistic))
             }
 
             if let selectedRow {
@@ -384,10 +396,10 @@ private struct FireVaultIPadNearbyWorkspace: View {
                 }
                 .padding(14)
                 .frame(maxWidth: 330, alignment: .leading)
-                .background(.black.opacity(0.86), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                .background(.black.opacity(0.84), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 17, style: .continuous)
-                        .stroke(.white.opacity(0.14), lineWidth: 1)
+                        .stroke(.white.opacity(0.16), lineWidth: 1)
                 }
                 .padding(14)
             }
@@ -395,9 +407,9 @@ private struct FireVaultIPadNearbyWorkspace: View {
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(.white.opacity(0.10), lineWidth: 1)
+                .stroke(.white.opacity(0.12), lineWidth: 1)
         }
-        .accessibilityIdentifier("ipad-nearby-map")
+        .accessibilityIdentifier("ipad-nearby-square-map")
     }
 
     private var accountPanel: some View {
@@ -444,7 +456,7 @@ private struct FireVaultIPadNearbyWorkspace: View {
             }
         }
         .padding(14)
-        .background(NativeShellPalette.surface.opacity(0.76), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(NativeShellPalette.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(.white.opacity(0.08), lineWidth: 1)
@@ -525,10 +537,12 @@ private struct FireVaultIPadNearbyWorkspace: View {
 
         guard let coordinate = row.account.coordinate else { return }
         withAnimation(.easeInOut(duration: 0.3)) {
-            cameraPosition = .region(
-                .init(
-                    center: coordinate,
-                    span: .init(latitudeDelta: 0.012, longitudeDelta: 0.012)
+            cameraPosition = .camera(
+                MapCamera(
+                    centerCoordinate: coordinate,
+                    distance: 950,
+                    heading: 0,
+                    pitch: 52
                 )
             )
         }
@@ -536,7 +550,16 @@ private struct FireVaultIPadNearbyWorkspace: View {
 
     private func resetMapSelection() {
         selectedID = nearbyRows.first?.id
-        cameraPosition = .region(overviewRegion)
+        let latitudeDistance = overviewRegion.span.latitudeDelta * 111_000
+        let longitudeDistance = overviewRegion.span.longitudeDelta * 85_000
+        cameraPosition = .camera(
+            MapCamera(
+                centerCoordinate: overviewRegion.center,
+                distance: max(1_600, max(latitudeDistance, longitudeDistance) * 1.8),
+                heading: 0,
+                pitch: 42
+            )
+        )
     }
 }
 
@@ -583,7 +606,7 @@ private struct FireVaultIPadAccountsWorkspace: View {
     var body: some View {
         HStack(spacing: 0) {
             directory
-                .frame(width: 360)
+                .frame(width: 340)
 
             Rectangle()
                 .fill(.white.opacity(0.08))
@@ -621,7 +644,6 @@ private struct FireVaultIPadAccountsWorkspace: View {
                     Image(systemName: "arrow.up.arrow.down")
                 }
                 .buttonStyle(.glass)
-                .accessibilityLabel("Sort accounts")
 
                 Button {
                     store.addAccount()
@@ -629,7 +651,6 @@ private struct FireVaultIPadAccountsWorkspace: View {
                     Image(systemName: "plus")
                 }
                 .buttonStyle(.glassProminent)
-                .accessibilityLabel("Add account")
             }
             .padding(16)
 
@@ -647,7 +668,6 @@ private struct FireVaultIPadAccountsWorkspace: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Clear account search")
                 }
             }
             .padding(.horizontal, 12)
@@ -702,7 +722,7 @@ private struct FireVaultIPadAccountsWorkspace: View {
                     if !account.accountId.isEmpty {
                         Text(account.accountId)
                             .font(.caption2.monospaced())
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary.opacity(0.72))
                     }
                 }
 
@@ -710,7 +730,7 @@ private struct FireVaultIPadAccountsWorkspace: View {
 
                 Image(systemName: selected ? "checkmark.circle.fill" : "chevron.right")
                     .font(.caption.bold())
-                    .foregroundStyle(selected ? NativeShellPalette.blue : .tertiary)
+                    .foregroundStyle(selected ? NativeShellPalette.blue : .secondary)
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -725,28 +745,337 @@ private struct FireVaultIPadAccountsWorkspace: View {
                         lineWidth: selected ? 1.5 : 1
                     )
             }
-            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(account.name), \(account.address)")
-        .accessibilityValue(selected ? "Selected" : "Not selected")
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     @ViewBuilder
     private var accountDetail: some View {
         if let account = store.selectedAccount {
-            FieldWorkspaceView(account: account, store: store)
+            FireVaultIPadAccountWorkspace(
+                account: account,
+                store: store,
+                closeTab: .accounts,
+                showsCloseButton: false
+            )
         } else {
             ZStack {
                 NativeShellPalette.background.ignoresSafeArea()
-
                 ContentUnavailableView(
                     "Select an Account",
                     systemImage: "rectangle.split.2x1",
-                    description: Text("Choose an account from the directory to keep the list visible while working with its notes, files, equipment, and saved locations.")
+                    description: Text("Choose an account to show its map, saved pin locations, notes, files, and equipment beside the directory.")
                 )
                 .frame(maxWidth: 520)
+            }
+        }
+    }
+}
+
+private struct FireVaultIPadAccountWorkspace: View {
+    let account: FireVaultWorkspaceAccount
+    @ObservedObject var store: FireVaultStore
+    let closeTab: FireVaultShellTab
+    let showsCloseButton: Bool
+
+    private var validLocations: [FireVaultWorkspaceLocation] {
+        account.locations.filter { $0.coordinate != nil }
+    }
+
+    private var mapRegion: MKCoordinateRegion {
+        let coordinates = [account.coordinate].compactMap { $0 } + validLocations.compactMap(\.coordinate)
+        guard let first = coordinates.first else {
+            return .init(
+                center: .init(latitude: 39.5, longitude: -98.35),
+                span: .init(latitudeDelta: 35, longitudeDelta: 35)
+            )
+        }
+
+        let latitudes = coordinates.map(\.latitude)
+        let longitudes = coordinates.map(\.longitude)
+        let minimumLatitude = latitudes.min() ?? first.latitude
+        let maximumLatitude = latitudes.max() ?? first.latitude
+        let minimumLongitude = longitudes.min() ?? first.longitude
+        let maximumLongitude = longitudes.max() ?? first.longitude
+
+        return .init(
+            center: .init(
+                latitude: (minimumLatitude + maximumLatitude) / 2,
+                longitude: (minimumLongitude + maximumLongitude) / 2
+            ),
+            span: .init(
+                latitudeDelta: max(0.005, (maximumLatitude - minimumLatitude) * 1.8),
+                longitudeDelta: max(0.005, (maximumLongitude - minimumLongitude) * 1.8)
+            )
+        )
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let mapColumn = max(330, min(460, geometry.size.width * 0.46))
+            let mapSide = min(mapColumn - 28, max(300, geometry.size.height * 0.57))
+
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        if showsCloseButton {
+                            Button("Back", systemImage: "chevron.left") {
+                                store.closeAccount(to: closeTab)
+                            }
+                            .buttonStyle(.glass)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            store.toggleFavorite(account.id)
+                        } label: {
+                            Image(systemName: account.favorite ? "star.fill" : "star")
+                                .foregroundStyle(account.favorite ? NativeShellPalette.amber : .white)
+                        }
+                        .buttonStyle(.glass)
+                    }
+
+                    locationMap
+                        .frame(width: mapSide, height: mapSide)
+                        .frame(maxWidth: .infinity)
+
+                    HStack {
+                        Text("SAVED PIN LOCATIONS")
+                            .font(.caption.bold())
+                            .tracking(1.1)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Add", systemImage: "plus") {
+                            store.addLocation(to: account.id)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+
+                    if account.locations.isEmpty {
+                        ContentUnavailableView(
+                            "No Saved Locations",
+                            systemImage: "mappin.slash",
+                            description: Text("Add parking, entrance, panel, riser, or other exact field points.")
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 8) {
+                                ForEach(account.locations) { location in
+                                    locationRow(location)
+                                }
+                            }
+                        }
+                        .scrollIndicators(.hidden)
+                    }
+                }
+                .padding(14)
+                .frame(width: mapColumn, maxHeight: .infinity, alignment: .top)
+                .background(NativeShellPalette.navigationBackground.opacity(0.72))
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        accountIdentity
+                        quickActions
+                        equipmentSection
+                        notesSection
+                        documentsSection
+                        recentSection
+                    }
+                    .padding(.trailing, 16)
+                    .padding(.vertical, 16)
+                    .padding(.bottom, 30)
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+        .background(NativeShellPalette.background)
+        .accessibilityIdentifier("ipad-account-workspace")
+    }
+
+    private var locationMap: some View {
+        Map(initialPosition: .region(mapRegion), interactionModes: [.pan, .zoom, .rotate]) {
+            if let coordinate = account.coordinate {
+                Marker(account.name, systemImage: "shield.fill", coordinate: coordinate)
+                    .tint(NativeShellPalette.red)
+            }
+
+            ForEach(validLocations) { location in
+                if let coordinate = location.coordinate {
+                    Marker(location.label, systemImage: "mappin", coordinate: coordinate)
+                        .tint(NativeShellPalette.purple)
+                }
+            }
+        }
+        .mapStyle(.hybrid(elevation: .realistic))
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(.white.opacity(0.14), lineWidth: 1)
+        }
+        .accessibilityIdentifier("ipad-account-hybrid-location-map")
+    }
+
+    private func locationRow(_ location: FireVaultWorkspaceLocation) -> some View {
+        Button {
+            guard let coordinate = location.coordinate else { return }
+            let item = MKMapItem(
+                location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude),
+                address: nil
+            )
+            item.name = location.label
+            item.openInMaps(
+                launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving]
+            )
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "mappin.circle.fill")
+                    .foregroundStyle(NativeShellPalette.purple)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(location.label)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.white)
+                    Text([location.subtitle, location.plusCode].filter { !$0.isEmpty }.joined(separator: " • "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                Spacer()
+
+                if location.coordinate != nil {
+                    Image(systemName: "arrow.triangle.turn.up.right.diamond")
+                        .foregroundStyle(NativeShellPalette.blue)
+                }
+            }
+            .padding(11)
+            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(location.coordinate == nil)
+    }
+
+    private var accountIdentity: some View {
+        NativeShellCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    if !account.category.isEmpty {
+                        Text(account.category.uppercased())
+                            .font(.caption2.bold())
+                            .foregroundStyle(NativeShellPalette.blue)
+                    }
+                    if !account.accountId.isEmpty {
+                        Text(account.accountId)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text(account.name)
+                    .font(.largeTitle.bold())
+                    .foregroundStyle(.white)
+
+                Label(account.address, systemImage: "mappin.and.ellipse")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var quickActions: some View {
+        HStack(spacing: 10) {
+            Button("Note", systemImage: "square.and.pencil") {
+                store.addNote(to: account.id)
+            }
+            .buttonStyle(.borderedProminent)
+
+            Button("Scan", systemImage: "doc.viewfinder") {
+                store.addDocument(to: account.id, scan: true)
+            }
+            .buttonStyle(.bordered)
+
+            Button("Photo", systemImage: "camera.fill") {
+                store.closeAccount(to: .photo)
+            }
+            .buttonStyle(.bordered)
+
+            Button("Route", systemImage: "arrow.triangle.turn.up.right.diamond.fill") {
+                store.openRoute(for: account)
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder
+    private var equipmentSection: some View {
+        if !account.equipment.isEmpty {
+            accountSection(title: "EQUIPMENT", symbol: "wrench.and.screwdriver") {
+                ForEach(account.equipment.prefix(8)) { equipment in
+                    LabeledContent(equipment.title, value: equipment.subtitle)
+                        .font(.subheadline)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var notesSection: some View {
+        if !account.notes.isEmpty {
+            accountSection(title: "FIELD NOTES", symbol: "note.text") {
+                ForEach(account.notes.prefix(6)) { note in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(note.title)
+                            .font(.subheadline.bold())
+                            .foregroundStyle(NativeShellPalette.amber)
+                        Text(note.text)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var documentsSection: some View {
+        if !account.documents.isEmpty {
+            accountSection(title: "FILES & SCANS", symbol: "doc.viewfinder") {
+                ForEach(account.documents.prefix(6)) { document in
+                    LabeledContent(document.title, value: document.subtitle)
+                        .font(.subheadline)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var recentSection: some View {
+        if !account.recent.isEmpty {
+            accountSection(title: "RECENT ACTIVITY", symbol: "clock.arrow.circlepath") {
+                ForEach(account.recent.prefix(6)) { item in
+                    LabeledContent(item.title, value: item.date)
+                        .font(.subheadline)
+                }
+            }
+        }
+    }
+
+    private func accountSection<Content: View>(
+        title: String,
+        symbol: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        NativeShellCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Label(title, systemImage: symbol)
+                    .font(.caption.bold())
+                    .tracking(1.1)
+                    .foregroundStyle(NativeShellPalette.blue)
+                content()
             }
         }
     }
@@ -768,8 +1097,6 @@ private struct FireVaultIPadLegacyDetailHost: View {
                 locationService: locationService,
                 breadcrumbs: breadcrumbs
             )
-            // The iPad sidebar owns navigation. Extending the legacy detail below
-            // the visible viewport places its phone tab bar outside the clipping area.
             .frame(
                 width: geometry.size.width,
                 height: geometry.size.height + 76,
