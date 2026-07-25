@@ -108,23 +108,13 @@ struct NativeOverlaySettingsView: View {
             } header: {
                 Text("Preview")
             } footer: {
-                Text("Drag the dark glass data overlay directly. The FireVault brand stays fixed at the selected edge.")
+                Text("Touch and drag the logo or dark glass overlay directly. Releasing your finger locks that item in its new position and releases control for the other item.")
             }
 
             Section("Appearance") {
                 LabeledContent("Style", value: "Dark Frosted Glass")
                 overlaySizeControl
                 logoSizeControl
-
-                Picker("Logo position", selection: $draft.overlay.logoPlacement) {
-                    Label("Top", systemImage: "rectangle.topthird.inset.filled").tag("top")
-                    Label("Bottom", systemImage: "rectangle.bottomthird.inset.filled").tag("bottom")
-                    Label("Left", systemImage: "rectangle.leftthird.inset.filled").tag("left")
-                    Label("Right", systemImage: "rectangle.rightthird.inset.filled").tag("right")
-                }
-                .pickerStyle(.segmented)
-                .disabled(!draft.overlay.showLogo)
-                .accessibilityIdentifier("overlay-logo-position")
 
                 Picker("Text size", selection: $draft.overlay.fontSize) {
                     Text("Small").tag("small")
@@ -172,12 +162,13 @@ struct NativeOverlaySettingsView: View {
             }
 
             Section {
-                Button("Reset Overlay Appearance", systemImage: "arrow.counterclockwise") {
+                Button("Reset Overlay and Logo Placement", systemImage: "arrow.counterclockwise") {
                     draft.overlay.scale = 0.78
                     draft.overlay.positionX = 0
                     draft.overlay.positionY = 0.45
                     draft.overlay.logoScale = 0.8
-                    draft.overlay.logoPlacement = "top"
+                    draft.overlay.logoPositionX = -0.62
+                    draft.overlay.logoPositionY = -0.7
                     FireVaultOverlayEditorBridge.stage(draft.overlay)
                     UISelectionFeedbackGenerator().selectionChanged()
                 }
