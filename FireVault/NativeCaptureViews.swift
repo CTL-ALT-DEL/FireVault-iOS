@@ -107,8 +107,8 @@ struct FireVaultBrandMark: View {
         }
         .padding(.horizontal, 3)
         .padding(.vertical, 3)
-        .shadow(color: Color(red: 1.0, green: 0.88, blue: 0.45).opacity(0.82), radius: 3)
-        .shadow(color: Color(red: 1.0, green: 0.88, blue: 0.45).opacity(0.46), radius: 8)
+        .shadow(color: .gray.opacity(0.78), radius: 2, x: 1, y: 2)
+        .shadow(color: .black.opacity(0.34), radius: 4, x: 1, y: 3)
     }
 }
 
@@ -174,7 +174,7 @@ struct FireVaultPhotoOverlayView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
+            ZStack(alignment: .topLeading) {
                 glassPanel
                     .scaleEffect(preferences.scale)
                     .position(
@@ -184,11 +184,9 @@ struct FireVaultPhotoOverlayView: View {
 
                 if preferences.showLogo {
                     FireVaultBrandMark()
-                        .scaleEffect(preferences.logoScale)
-                        .position(
-                            x: geometry.size.width * (0.5 + CGFloat(preferences.logoPositionX) * 0.36),
-                            y: geometry.size.height * (0.5 + CGFloat(preferences.logoPositionY) * 0.36)
-                        )
+                        .scaleEffect(preferences.logoScale, anchor: .topLeading)
+                        .padding(.leading, 14)
+                        .padding(.top, 14)
                 }
             }
         }
@@ -266,7 +264,6 @@ struct FireVaultOverlayPreview: View {
 
     @State private var editedPreferences: FireVaultOverlayPreferences
     @GestureState private var overlayDrag: CGSize = .zero
-    @GestureState private var logoDrag: CGSize = .zero
 
     init(
         preferences: FireVaultOverlayPreferences,
@@ -326,7 +323,7 @@ struct FireVaultOverlayPreview: View {
                 }
             }
 
-            Text("Touch and drag the glass panel or FireVault logo directly. Empty photo areas do not move either item.")
+            Text("Drag the glass panel directly to position it. The FireVault logo remains fixed in the upper-left corner.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .onChange(of: preferences) { _, newValue in editedPreferences = newValue }
@@ -336,9 +333,9 @@ struct FireVaultOverlayPreview: View {
 
     @ViewBuilder
     private func overlayEditorLayer(size: CGSize) -> some View {
-        ZStack {
+        ZStack(alignment: .topLeading) {
             FireVaultPhotoOverlayView(
-                preferences: previewPreferences(overlayTranslation: overlayDrag, logoTranslation: .zero, size: size, hideLogo: true),
+                preferences: previewPreferences(overlayTranslation: overlayDrag, size: size, hideLogo: true),
                 technicianName: technicianName,
                 siteName: siteName,
                 address: address,
@@ -353,13 +350,10 @@ struct FireVaultOverlayPreview: View {
 
             if editedPreferences.showLogo {
                 FireVaultBrandMark()
-                    .scaleEffect(editedPreferences.logoScale)
-                    .position(
-                        x: size.width * (0.5 + CGFloat(editedPreferences.logoPositionX) * 0.36) + logoDrag.width,
-                        y: size.height * (0.5 + CGFloat(editedPreferences.logoPositionY) * 0.36) + logoDrag.height
-                    )
-                    .contentShape(Rectangle())
-                    .highPriorityGesture(logoGesture(in: size))
+                    .scaleEffect(editedPreferences.logoScale, anchor: .topLeading)
+                    .padding(.leading, 14)
+                    .padding(.top, 14)
+                    .allowsHitTesting(false)
                     .zIndex(2)
             }
         }
@@ -413,12 +407,10 @@ struct FireVaultOverlayPreview: View {
         return max(48, CGFloat(visibleLines) * 12 + 18)
     }
 
-    private func previewPreferences(overlayTranslation: CGSize, logoTranslation: CGSize, size: CGSize, hideLogo: Bool) -> FireVaultOverlayPreferences {
+    private func previewPreferences(overlayTranslation: CGSize, size: CGSize, hideLogo: Bool) -> FireVaultOverlayPreferences {
         var value = editedPreferences
         value.positionX += Double(overlayTranslation.width / max(size.width * 0.36, 1))
         value.positionY += Double(overlayTranslation.height / max(size.height * 0.36, 1))
-        value.logoPositionX += Double(logoTranslation.width / max(size.width * 0.36, 1))
-        value.logoPositionY += Double(logoTranslation.height / max(size.height * 0.36, 1))
         if hideLogo { value.showLogo = false }
         return value.normalized
     }
@@ -429,18 +421,6 @@ struct FireVaultOverlayPreview: View {
             .onEnded { value in
                 editedPreferences.positionX += Double(value.translation.width / max(size.width * 0.36, 1))
                 editedPreferences.positionY += Double(value.translation.height / max(size.height * 0.36, 1))
-                editedPreferences = editedPreferences.normalized
-                stageEdits()
-                UISelectionFeedbackGenerator().selectionChanged()
-            }
-    }
-
-    private func logoGesture(in size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 1)
-            .updating($logoDrag) { value, state, _ in state = value.translation }
-            .onEnded { value in
-                editedPreferences.logoPositionX += Double(value.translation.width / max(size.width * 0.36, 1))
-                editedPreferences.logoPositionY += Double(value.translation.height / max(size.height * 0.36, 1))
                 editedPreferences = editedPreferences.normalized
                 stageEdits()
                 UISelectionFeedbackGenerator().selectionChanged()
