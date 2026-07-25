@@ -56,9 +56,12 @@ struct FireVaultTechnicianPreferences: Codable, Equatable {
 struct FireVaultOverlayPreferences: Codable, Equatable {
     var alignment = "bottom"
     var horizontalPosition = "left"
+    var scale = 0.78
+    var positionX = 0.0
+    var positionY = 0.0
     var fontSize = "medium"
     var backgroundStyle = "frosted"
-    var opacity = 82
+    var opacity = 85
     var showLogo = true
     var showTagline = true
     var accentColor = "blue"
@@ -75,6 +78,9 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
     var normalized: Self {
         var copy = self
         copy.opacity = min(100, max(35, opacity))
+        copy.scale = min(1.25, max(0.55, scale))
+        copy.positionX = min(1, max(-1, positionX))
+        copy.positionY = min(1, max(-1, positionY))
         if !["top", "bottom"].contains(copy.alignment) { copy.alignment = "bottom" }
         if !["left", "right"].contains(copy.horizontalPosition) { copy.horizontalPosition = "left" }
         if !["small", "medium", "large"].contains(copy.fontSize) { copy.fontSize = "medium" }
@@ -106,6 +112,9 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case alignment
         case horizontalPosition
+        case scale
+        case positionX
+        case positionY
         case fontSize
         case backgroundStyle
         case opacity
@@ -122,9 +131,12 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         alignment = try values.decodeIfPresent(String.self, forKey: .alignment) ?? "bottom"
         horizontalPosition = try values.decodeIfPresent(String.self, forKey: .horizontalPosition) ?? "left"
+        scale = try values.decodeIfPresent(Double.self, forKey: .scale) ?? 0.78
+        positionX = try values.decodeIfPresent(Double.self, forKey: .positionX) ?? 0
+        positionY = try values.decodeIfPresent(Double.self, forKey: .positionY) ?? 0
         fontSize = try values.decodeIfPresent(String.self, forKey: .fontSize) ?? "medium"
         backgroundStyle = try values.decodeIfPresent(String.self, forKey: .backgroundStyle) ?? "frosted"
-        opacity = try values.decodeIfPresent(Int.self, forKey: .opacity) ?? 82
+        opacity = try values.decodeIfPresent(Int.self, forKey: .opacity) ?? 85
         showLogo = try values.decodeIfPresent(Bool.self, forKey: .showLogo) ?? true
         showTagline = try values.decodeIfPresent(Bool.self, forKey: .showTagline) ?? true
         accentColor = try values.decodeIfPresent(String.self, forKey: .accentColor) ?? "blue"
