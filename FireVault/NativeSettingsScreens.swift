@@ -108,6 +108,7 @@ struct NativeOverlaySettingsView: View {
                 .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
                 .accessibilityIdentifier("overlay-sample-preview")
             }
+
             Section {
                 TextField("Tagline", text: $draft.overlay.tagline)
                     .focused($focused)
@@ -116,14 +117,19 @@ struct NativeOverlaySettingsView: View {
             } footer: {
                 Text("Edit the heading shown above the account information.")
             }
+
             Section("Branding") {
                 Toggle("Show FireVault logo", isOn: $draft.overlay.showLogo)
                 Toggle("Show tagline", isOn: $draft.overlay.showTagline)
                 Picker("Accent", selection: $draft.overlay.accentColor) {
-                    Text("Red").tag("red"); Text("Blue").tag("blue"); Text("Amber").tag("amber"); Text("White").tag("white")
+                    Text("Red").tag("red")
+                    Text("Blue").tag("blue")
+                    Text("Amber").tag("amber")
+                    Text("White").tag("white")
                 }
                 .accessibilityIdentifier("overlay-accent-picker")
             }
+
             Section {
                 ForEach(orderedFields) { field in
                     fieldControl(field)
@@ -136,22 +142,46 @@ struct NativeOverlaySettingsView: View {
                     + "Account ID automatically disappears when the selected account has no ID."
                 )
             }
-            Section("Layout") {
-                Picker("Position", selection: $draft.overlay.alignment) {
-                    Text("Top").tag("top"); Text("Center").tag("middle"); Text("Bottom").tag("bottom")
+
+            Section {
+                Picker("Horizontal", selection: $draft.overlay.horizontalPosition) {
+                    Label("Left", systemImage: "rectangle.leadinghalf.inset.filled").tag("left")
+                    Label("Right", systemImage: "rectangle.trailinghalf.inset.filled").tag("right")
                 }
-                Picker("Style", selection: $draft.overlay.backgroundStyle) {
-                    Text("Full bar").tag("bar"); Text("Card").tag("card"); Text("Minimal").tag("minimal")
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("overlay-horizontal-position")
+
+                Picker("Vertical", selection: $draft.overlay.alignment) {
+                    Label("Top", systemImage: "rectangle.tophalf.inset.filled").tag("top")
+                    Label("Bottom", systemImage: "rectangle.bottomhalf.inset.filled").tag("bottom")
                 }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("overlay-vertical-position")
+            } header: {
+                Text("Overlay Position")
+            } footer: {
+                Text("The dark glass panel floats inside the selected corner with space from the photo edges.")
+            }
+
+            Section("Appearance") {
+                LabeledContent("Style", value: "Dark Frosted Glass")
+
                 Picker("Text size", selection: $draft.overlay.fontSize) {
-                    Text("Small").tag("small"); Text("Medium").tag("medium"); Text("Large").tag("large")
+                    Text("Small").tag("small")
+                    Text("Medium").tag("medium")
+                    Text("Large").tag("large")
                 }
+
                 VStack(alignment: .leading) {
-                    Text("Opacity: \(draft.overlay.opacity)%")
-                    Slider(value: Binding(
-                        get: { Double(draft.overlay.opacity) },
-                        set: { draft.overlay.opacity = Int($0.rounded()) }
-                    ), in: 35...100, step: 5)
+                    Text("Glass darkness: \(draft.overlay.opacity)%")
+                    Slider(
+                        value: Binding(
+                            get: { Double(draft.overlay.opacity) },
+                            set: { draft.overlay.opacity = Int($0.rounded()) }
+                        ),
+                        in: 35...100,
+                        step: 5
+                    )
                 }
             }
         }
@@ -160,6 +190,7 @@ struct NativeOverlaySettingsView: View {
             title: "Photo Overlay",
             focused: $focused
         ) {
+            draft.overlay.backgroundStyle = "frosted"
             settings.save(draft)
         }
     }
