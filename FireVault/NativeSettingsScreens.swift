@@ -108,19 +108,23 @@ struct NativeOverlaySettingsView: View {
             } header: {
                 Text("Preview")
             } footer: {
-                Text("Touch and drag the logo or dark glass overlay directly. Releasing your finger locks that item in its new position and releases control for the other item.")
+                Text("Touch and drag the logo or glass overlay directly. Releasing your finger locks that item in its new position.")
             }
 
             Section("Appearance") {
-                LabeledContent("Style", value: "Dark Frosted Glass")
+                Picker("Style", selection: glassStyleBinding) {
+                    Text("Regular Liquid Glass").tag("regular")
+                    Text("Clear Liquid Glass").tag("clear")
+                }
+
+                Picker("Thickness", selection: glassThicknessBinding) {
+                    Text("Regular").tag("regular")
+                    Text("Thick").tag("thick")
+                }
+                .pickerStyle(.segmented)
+
                 overlaySizeControl
                 logoSizeControl
-
-                Picker("Text size", selection: $draft.overlay.fontSize) {
-                    Text("Small").tag("small")
-                    Text("Medium").tag("medium")
-                    Text("Large").tag("large")
-                }
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Glass darkness: \(draft.overlay.opacity)%")
@@ -128,7 +132,7 @@ struct NativeOverlaySettingsView: View {
                         value: Binding(
                             get: { Double(draft.overlay.opacity) },
                             set: { newValue in
-                                draft.overlay = FireVaultOverlayEditorBridge.merge(into: draft.overlay)
+                                preservePlacedElements()
                                 draft.overlay.opacity = Int(newValue.rounded())
                                 FireVaultOverlayEditorBridge.stage(draft.overlay)
                             }
@@ -180,9 +184,32 @@ struct NativeOverlaySettingsView: View {
         }
         .contentMargins(.bottom, 100, for: .scrollContent)
         .nativeSettingsForm(title: "Photo Overlay", focused: $focused) {
+            preservePlacedElements()
             draft.overlay.backgroundStyle = "frosted"
             settings.save(draft)
         }
+    }
+
+    private var glassStyleBinding: Binding<String> {
+        Binding(
+            get: { draft.overlay.glassStyle },
+            set: { newValue in
+                preservePlacedElements()
+                draft.overlay.glassStyle = newValue
+                FireVaultOverlayEditorBridge.stage(draft.overlay)
+            }
+        )
+    }
+
+    private var glassThicknessBinding: Binding<String> {
+        Binding(
+            get: { draft.overlay.glassThickness },
+            set: { newValue in
+                preservePlacedElements()
+                draft.overlay.glassThickness = newValue
+                FireVaultOverlayEditorBridge.stage(draft.overlay)
+            }
+        )
     }
 
     private var overlaySizeControl: some View {
@@ -194,10 +221,18 @@ struct NativeOverlaySettingsView: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            Slider(value: $draft.overlay.scale, in: 0.45...1.35, step: 0.05)
-                .onChange(of: draft.overlay.scale) { _, _ in
-                    FireVaultOverlayEditorBridge.stage(draft.overlay)
-                }
+            Slider(
+                value: Binding(
+                    get: { draft.overlay.scale },
+                    set: { newValue in
+                        preservePlacedElements()
+                        draft.overlay.scale = newValue
+                        FireVaultOverlayEditorBridge.stage(draft.overlay)
+                    }
+                ),
+                in: 0.45...1.35,
+                step: 0.05
+            )
         }
     }
 
@@ -210,12 +245,24 @@ struct NativeOverlaySettingsView: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            Slider(value: $draft.overlay.logoScale, in: 0.45...1.8, step: 0.05)
-                .disabled(!draft.overlay.showLogo)
-                .onChange(of: draft.overlay.logoScale) { _, _ in
-                    FireVaultOverlayEditorBridge.stage(draft.overlay)
-                }
+            Slider(
+                value: Binding(
+                    get: { draft.overlay.logoScale },
+                    set: { newValue in
+                        preservePlacedElements()
+                        draft.overlay.logoScale = newValue
+                        FireVaultOverlayEditorBridge.stage(draft.overlay)
+                    }
+                ),
+                in: 0.45...1.8,
+                step: 0.05
+            )
+            .disabled(!draft.overlay.showLogo)
         }
+    }
+
+    private func preservePlacedElements() {
+        draft.overlay = FireVaultOverlayEditorBridge.merge(into: draft.overlay)
     }
 
     private var orderedFields: [FireVaultOverlayField] {
