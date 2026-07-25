@@ -106,9 +106,43 @@ struct NativeOverlaySettingsView: View {
                 .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
                 .accessibilityIdentifier("overlay-sample-preview")
             } header: {
-                Text("Drag & Resize")
+                Text("Preview")
             } footer: {
-                Text("Drag the dark glass data overlay anywhere on the photo. Drag the FireVault brand separately. Each item keeps its own size and position.")
+                Text("Drag the dark glass data overlay directly. The FireVault brand stays fixed at the selected edge.")
+            }
+
+            Section("Appearance") {
+                LabeledContent("Style", value: "Dark Frosted Glass")
+                overlaySizeControl
+                logoSizeControl
+
+                Picker("Logo position", selection: $draft.overlay.logoPlacement) {
+                    Label("Top", systemImage: "rectangle.topthird.inset.filled").tag("top")
+                    Label("Bottom", systemImage: "rectangle.bottomthird.inset.filled").tag("bottom")
+                    Label("Left", systemImage: "rectangle.leftthird.inset.filled").tag("left")
+                    Label("Right", systemImage: "rectangle.rightthird.inset.filled").tag("right")
+                }
+                .pickerStyle(.segmented)
+                .disabled(!draft.overlay.showLogo)
+                .accessibilityIdentifier("overlay-logo-position")
+
+                Picker("Text size", selection: $draft.overlay.fontSize) {
+                    Text("Small").tag("small")
+                    Text("Medium").tag("medium")
+                    Text("Large").tag("large")
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Glass darkness: \(draft.overlay.opacity)%")
+                    Slider(
+                        value: Binding(
+                            get: { Double(draft.overlay.opacity) },
+                            set: { draft.overlay.opacity = Int($0.rounded()) }
+                        ),
+                        in: 35...100,
+                        step: 5
+                    )
+                }
             }
 
             Section {
@@ -124,7 +158,7 @@ struct NativeOverlaySettingsView: View {
             } header: {
                 Text("Branding")
             } footer: {
-                Text("The FireVault brand includes the app icon plus FIRE in red and VAULT in white. It is not attached to the data overlay.")
+                Text("The FireVault brand includes the app icon plus FIRE in red and VAULT in white.")
             }
 
             Section {
@@ -137,34 +171,13 @@ struct NativeOverlaySettingsView: View {
                 Text("Site, address, and account ID are required. The overlay automatically grows horizontally for longer visible data.")
             }
 
-            Section("Appearance") {
-                LabeledContent("Style", value: "Dark Frosted Glass")
-                Picker("Text size", selection: $draft.overlay.fontSize) {
-                    Text("Small").tag("small")
-                    Text("Medium").tag("medium")
-                    Text("Large").tag("large")
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Glass darkness: \(draft.overlay.opacity)%")
-                    Slider(
-                        value: Binding(
-                            get: { Double(draft.overlay.opacity) },
-                            set: { draft.overlay.opacity = Int($0.rounded()) }
-                        ),
-                        in: 35...100,
-                        step: 5
-                    )
-                }
-            }
-
             Section {
-                Button("Reset Overlay and Logo Placement", systemImage: "arrow.counterclockwise") {
+                Button("Reset Overlay Appearance", systemImage: "arrow.counterclockwise") {
                     draft.overlay.scale = 0.78
                     draft.overlay.positionX = 0
                     draft.overlay.positionY = 0.45
                     draft.overlay.logoScale = 0.8
-                    draft.overlay.logoPositionX = -0.62
-                    draft.overlay.logoPositionY = -0.7
+                    draft.overlay.logoPlacement = "top"
                     FireVaultOverlayEditorBridge.stage(draft.overlay)
                     UISelectionFeedbackGenerator().selectionChanged()
                 }
@@ -174,6 +187,39 @@ struct NativeOverlaySettingsView: View {
         .nativeSettingsForm(title: "Photo Overlay", focused: $focused) {
             draft.overlay.backgroundStyle = "frosted"
             settings.save(draft)
+        }
+    }
+
+    private var overlaySizeControl: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Overlay size")
+                Spacer()
+                Text("\(Int((draft.overlay.scale * 100).rounded()))%")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: $draft.overlay.scale, in: 0.45...1.35, step: 0.05)
+                .onChange(of: draft.overlay.scale) { _, _ in
+                    FireVaultOverlayEditorBridge.stage(draft.overlay)
+                }
+        }
+    }
+
+    private var logoSizeControl: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Logo size")
+                Spacer()
+                Text("\(Int((draft.overlay.logoScale * 100).rounded()))%")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: $draft.overlay.logoScale, in: 0.45...1.8, step: 0.05)
+                .disabled(!draft.overlay.showLogo)
+                .onChange(of: draft.overlay.logoScale) { _, _ in
+                    FireVaultOverlayEditorBridge.stage(draft.overlay)
+                }
         }
     }
 
