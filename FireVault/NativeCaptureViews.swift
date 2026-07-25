@@ -172,9 +172,18 @@ struct FireVaultPhotoOverlayView: View {
         return min(410, informationWidth + technicianAllowance + 28)
     }
 
+    private var brandAlignment: Alignment {
+        switch preferences.logoPlacement {
+        case "bottom": .bottom
+        case "left": .leading
+        case "right": .trailing
+        default: .top
+        }
+    }
+
     var body: some View {
         GeometryReader { geometry in
-            ZStack(alignment: .topLeading) {
+            ZStack {
                 glassPanel
                     .scaleEffect(preferences.scale)
                     .position(
@@ -184,9 +193,9 @@ struct FireVaultPhotoOverlayView: View {
 
                 if preferences.showLogo {
                     FireVaultBrandMark()
-                        .scaleEffect(preferences.logoScale, anchor: .topLeading)
-                        .padding(.leading, 14)
-                        .padding(.top, 14)
+                        .scaleEffect(preferences.logoScale)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: brandAlignment)
+                        .padding(14)
                 }
             }
         }
@@ -283,49 +292,24 @@ struct FireVaultOverlayPreview: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
-            GeometryReader { geometry in
-                let designWidth: CGFloat = 430
-                let designHeight: CGFloat = 322.5
-                let previewScale = geometry.size.width / designWidth
+        GeometryReader { geometry in
+            let designWidth: CGFloat = 430
+            let designHeight: CGFloat = 322.5
+            let previewScale = geometry.size.width / designWidth
 
-                ZStack {
-                    Image("NotifierPanelSample")
-                        .resizable().scaledToFill()
-                        .frame(width: designWidth, height: designHeight).clipped()
+            ZStack {
+                Image("NotifierPanelSample")
+                    .resizable().scaledToFill()
+                    .frame(width: designWidth, height: designHeight).clipped()
 
-                    overlayEditorLayer(size: CGSize(width: designWidth, height: designHeight))
-                }
-                .frame(width: designWidth, height: designHeight)
-                .scaleEffect(previewScale, anchor: .topLeading)
+                overlayEditorLayer(size: CGSize(width: designWidth, height: designHeight))
             }
-            .aspectRatio(4.0 / 3.0, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.12), lineWidth: 1) }
-
-            HStack(spacing: 10) {
-                Image(systemName: "arrow.down.right.and.arrow.up.left").foregroundStyle(NativeShellPalette.blue)
-                Text("Overlay").font(.caption.bold())
-                Slider(value: $editedPreferences.scale, in: 0.45...1.35, step: 0.05)
-                    .onChange(of: editedPreferences.scale) { _, _ in stageEdits() }
-                Text("\(Int((editedPreferences.scale * 100).rounded()))%")
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 38, alignment: .trailing)
-            }
-
-            if editedPreferences.showLogo {
-                HStack(spacing: 10) {
-                    Image(systemName: "f.square").foregroundStyle(NativeShellPalette.red)
-                    Text("Logo").font(.caption.bold())
-                    Slider(value: $editedPreferences.logoScale, in: 0.45...1.8, step: 0.05)
-                        .onChange(of: editedPreferences.logoScale) { _, _ in stageEdits() }
-                    Text("\(Int((editedPreferences.logoScale * 100).rounded()))%")
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 38, alignment: .trailing)
-                }
-            }
-
-            Text("Drag the glass panel directly to position it. The FireVault logo remains fixed in the upper-left corner.")
-                .font(.caption2).foregroundStyle(.secondary)
+            .frame(width: designWidth, height: designHeight)
+            .scaleEffect(previewScale, anchor: .topLeading)
         }
+        .aspectRatio(4.0 / 3.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.12), lineWidth: 1) }
         .onChange(of: preferences) { _, newValue in editedPreferences = newValue }
         .onAppear { stageEdits() }
         .accessibilityIdentifier("overlay-interactive-preview")
@@ -333,9 +317,9 @@ struct FireVaultOverlayPreview: View {
 
     @ViewBuilder
     private func overlayEditorLayer(size: CGSize) -> some View {
-        ZStack(alignment: .topLeading) {
+        ZStack {
             FireVaultPhotoOverlayView(
-                preferences: previewPreferences(overlayTranslation: overlayDrag, size: size, hideLogo: true),
+                preferences: previewPreferences(overlayTranslation: overlayDrag, size: size),
                 technicianName: technicianName,
                 siteName: siteName,
                 address: address,
@@ -347,15 +331,6 @@ struct FireVaultOverlayPreview: View {
             .allowsHitTesting(false)
 
             overlayHitTarget(size: size)
-
-            if editedPreferences.showLogo {
-                FireVaultBrandMark()
-                    .scaleEffect(editedPreferences.logoScale, anchor: .topLeading)
-                    .padding(.leading, 14)
-                    .padding(.top, 14)
-                    .allowsHitTesting(false)
-                    .zIndex(2)
-            }
         }
     }
 
@@ -372,7 +347,6 @@ struct FireVaultOverlayPreview: View {
             )
             .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
             .gesture(overlayGesture(in: size))
-            .zIndex(1)
             .accessibilityLabel("Photo information overlay")
             .accessibilityHint("Drag to reposition")
     }
@@ -407,11 +381,10 @@ struct FireVaultOverlayPreview: View {
         return max(48, CGFloat(visibleLines) * 12 + 18)
     }
 
-    private func previewPreferences(overlayTranslation: CGSize, size: CGSize, hideLogo: Bool) -> FireVaultOverlayPreferences {
+    private func previewPreferences(overlayTranslation: CGSize, size: CGSize) -> FireVaultOverlayPreferences {
         var value = editedPreferences
         value.positionX += Double(overlayTranslation.width / max(size.width * 0.36, 1))
         value.positionY += Double(overlayTranslation.height / max(size.height * 0.36, 1))
-        if hideLogo { value.showLogo = false }
         return value.normalized
     }
 
