@@ -105,11 +105,10 @@ struct FireVaultBrandMark: View {
             .font(.system(size: 15, weight: .bold, design: .rounded))
             .tracking(0.9)
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
-        .background(.black.opacity(0.58), in: Capsule())
-        .overlay { Capsule().stroke(.white.opacity(0.28), lineWidth: 0.8) }
-        .shadow(color: .black.opacity(0.38), radius: 6, y: 3)
+        .padding(.horizontal, 3)
+        .padding(.vertical, 3)
+        .shadow(color: Color(red: 1.0, green: 0.88, blue: 0.45).opacity(0.82), radius: 3)
+        .shadow(color: Color(red: 1.0, green: 0.88, blue: 0.45).opacity(0.46), radius: 8)
     }
 }
 
@@ -327,7 +326,7 @@ struct FireVaultOverlayPreview: View {
                 }
             }
 
-            Text("Drag the glass overlay and the FireVault logo independently anywhere on the photo.")
+            Text("Touch and drag the glass panel or FireVault logo directly. Empty photo areas do not move either item.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .onChange(of: preferences) { _, newValue in editedPreferences = newValue }
@@ -348,8 +347,9 @@ struct FireVaultOverlayPreview: View {
                 timestamp: .now
             )
             .frame(width: size.width, height: size.height)
-            .contentShape(Rectangle())
-            .gesture(overlayGesture(in: size))
+            .allowsHitTesting(false)
+
+            overlayHitTarget(size: size)
 
             if editedPreferences.showLogo {
                 FireVaultBrandMark()
@@ -359,9 +359,58 @@ struct FireVaultOverlayPreview: View {
                         y: size.height * (0.5 + CGFloat(editedPreferences.logoPositionY) * 0.36) + logoDrag.height
                     )
                     .contentShape(Rectangle())
-                    .gesture(logoGesture(in: size))
+                    .highPriorityGesture(logoGesture(in: size))
+                    .zIndex(2)
             }
         }
+    }
+
+    private func overlayHitTarget(size: CGSize) -> some View {
+        RoundedRectangle(cornerRadius: 13, style: .continuous)
+            .fill(.white.opacity(0.001))
+            .frame(
+                width: estimatedPanelWidth * editedPreferences.scale,
+                height: estimatedPanelHeight * editedPreferences.scale
+            )
+            .position(
+                x: size.width * (0.5 + CGFloat(editedPreferences.positionX) * 0.36) + overlayDrag.width,
+                y: size.height * (0.5 + CGFloat(editedPreferences.positionY) * 0.36) + overlayDrag.height
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .gesture(overlayGesture(in: size))
+            .zIndex(1)
+            .accessibilityLabel("Photo information overlay")
+            .accessibilityHint("Drag to reposition")
+    }
+
+    private var estimatedPanelWidth: CGFloat {
+        let fields = FireVaultOverlayTemplateFormatter.resolvedFields(
+            preferences: editedPreferences,
+            siteName: siteName,
+            address: address,
+            accountID: accountID,
+            category: category,
+            technicianName: technicianName,
+            timestamp: .now
+        )
+        let longest = max(siteName.count, fields.filter { $0.field != .technician }.map(\.value.count).max() ?? 0)
+        let informationWidth = min(300, max(145, CGFloat(longest) * 5.9))
+        let hasTechnician = fields.contains { $0.field == .technician }
+        return min(410, informationWidth + (hasTechnician ? 76 : 0) + 28)
+    }
+
+    private var estimatedPanelHeight: CGFloat {
+        let fields = FireVaultOverlayTemplateFormatter.resolvedFields(
+            preferences: editedPreferences,
+            siteName: siteName,
+            address: address,
+            accountID: accountID,
+            category: category,
+            technicianName: technicianName,
+            timestamp: .now
+        )
+        let visibleLines = fields.filter { $0.field != .technician }.count + (editedPreferences.showTagline ? 1 : 0)
+        return max(48, CGFloat(visibleLines) * 12 + 18)
     }
 
     private func previewPreferences(overlayTranslation: CGSize, logoTranslation: CGSize, size: CGSize, hideLogo: Bool) -> FireVaultOverlayPreferences {
