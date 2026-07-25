@@ -130,21 +130,8 @@ struct FireVaultPhotoOverlayView: View {
         }
     }
 
-    private var titleFont: Font {
-        switch preferences.fontSize {
-        case "small": .system(size: 9.5, weight: .bold, design: .rounded)
-        case "large": .system(size: 13, weight: .bold, design: .rounded)
-        default: .system(size: 11, weight: .bold, design: .rounded)
-        }
-    }
-
-    private var detailFont: Font {
-        switch preferences.fontSize {
-        case "small": .system(size: 8, weight: .medium, design: .rounded)
-        case "large": .system(size: 11, weight: .medium, design: .rounded)
-        default: .system(size: 9.5, weight: .medium, design: .rounded)
-        }
-    }
+    private var titleFont: Font { .system(size: 11, weight: .bold, design: .rounded) }
+    private var detailFont: Font { .system(size: 9.5, weight: .medium, design: .rounded) }
 
     private var resolvedFields: [FireVaultResolvedOverlayField] {
         FireVaultOverlayTemplateFormatter.resolvedFields(
@@ -161,6 +148,18 @@ struct FireVaultPhotoOverlayView: View {
     private var informationFields: [FireVaultResolvedOverlayField] { resolvedFields.filter { $0.field != .technician } }
     private var technicianField: FireVaultResolvedOverlayField? { resolvedFields.first { $0.field == .technician } }
     private var glassOpacity: Double { min(0.88, max(0.38, Double(preferences.opacity) / 100)) }
+    private var isClearGlass: Bool { preferences.glassStyle == "clear" }
+    private var isThickGlass: Bool { preferences.glassThickness == "thick" }
+    private var glassCornerRadius: CGFloat { isThickGlass ? 15 : 13 }
+    private var glassTintOpacity: Double {
+        let styleMultiplier = isClearGlass ? 0.28 : 0.64
+        let thicknessBoost = isThickGlass ? 0.13 : 0
+        return min(0.82, glassOpacity * styleMultiplier + thicknessBoost)
+    }
+    private var glassStrokeOpacity: Double { isClearGlass ? (isThickGlass ? 0.48 : 0.34) : (isThickGlass ? 0.52 : 0.36) }
+    private var glassLineWidth: CGFloat { isThickGlass ? 1.35 : 0.8 }
+    private var glassShadowRadius: CGFloat { isThickGlass ? 12 : 8 }
+    private var glassShadowOpacity: Double { isClearGlass ? 0.22 : 0.32 }
 
     private var informationWidth: CGFloat {
         let longest = max(siteName.count, informationFields.map(\.value.count).max() ?? 0)
@@ -235,20 +234,43 @@ struct FireVaultPhotoOverlayView: View {
                 .frame(width: 66, alignment: .trailing)
             }
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
+        .padding(.horizontal, isThickGlass ? 11 : 9)
+        .padding(.vertical, isThickGlass ? 9 : 7)
         .frame(width: panelWidth, alignment: .leading)
         .background {
             ZStack {
-                RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.ultraThinMaterial)
-                RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.black.opacity(glassOpacity * 0.76))
-                LinearGradient(colors: [.white.opacity(0.07), .clear, .black.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                if isThickGlass {
+                    RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
+                        .fill(.regularMaterial)
+                } else if isClearGlass {
+                    RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
+                        .fill(.thinMaterial)
+                } else {
+                    RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                }
+
+                RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
+                    .fill(.black.opacity(glassTintOpacity))
+
+                LinearGradient(
+                    colors: [
+                        .white.opacity(isClearGlass ? 0.12 : 0.07),
+                        .clear,
+                        .black.opacity(isClearGlass ? 0.04 : 0.10)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous))
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 13, style: .continuous).stroke(.white.opacity(0.36), lineWidth: 0.8) }
-        .shadow(color: .black.opacity(0.32), radius: 8, y: 4)
+        .clipShape(RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
+                .stroke(.white.opacity(glassStrokeOpacity), lineWidth: glassLineWidth)
+        }
+        .shadow(color: .black.opacity(glassShadowOpacity), radius: glassShadowRadius, y: isThickGlass ? 6 : 4)
     }
 
     private var formattedTimestamp: String {
@@ -442,7 +464,8 @@ struct FireVaultOverlayPreview: View {
             timestamp: .now
         )
         let visibleLines = fields.filter { $0.field != .technician }.count + (editedPreferences.showTagline ? 1 : 0)
-        return max(48, CGFloat(visibleLines) * 12 + 18)
+        let baseHeight = max(48, CGFloat(visibleLines) * 12 + 18)
+        return editedPreferences.glassThickness == "thick" ? baseHeight + 4 : baseHeight
     }
 
     private func previewPreferences(size: CGSize) -> FireVaultOverlayPreferences {
