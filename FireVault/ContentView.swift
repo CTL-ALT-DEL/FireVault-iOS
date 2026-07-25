@@ -69,6 +69,11 @@ struct ContentView: View {
         let usesWideWorkspace = horizontalSizeClass == .regular
             && isLandscapeWindow
             && availableSize.width >= 900
+        let usesPortraitIPadNearby = horizontalSizeClass == .regular
+            && !isLandscapeWindow
+            && availableSize.width >= 600
+            && store.selectedTab == .nearby
+            && store.selectedAccount == nil
         let payload = store.appPayload(
             userCoordinate: locationService.coordinate,
             liveLocationStatus: locationService.statusText
@@ -81,7 +86,7 @@ struct ContentView: View {
                 NativeShellPalette.background.ignoresSafeArea()
 
                 if usesWideWorkspace {
-                    FireVaultIPadWorkspace(
+                    FireVaultIPadWorkspaceV2(
                         payload: payload,
                         store: store,
                         settings: settings,
@@ -92,6 +97,15 @@ struct ContentView: View {
                 } else if let account = store.selectedAccount {
                     FieldWorkspaceView(account: account, store: store)
                         .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                } else if usesPortraitIPadNearby {
+                    FireVaultIPadPortraitNearbyView(
+                        payload: payload,
+                        store: store,
+                        settings: settings,
+                        locationService: locationService,
+                        breadcrumbs: activeBreadcrumbs
+                    )
+                    .transition(.opacity)
                 } else {
                     NativeAppShellView(
                         payload: payload,
