@@ -217,17 +217,9 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.78))
                         .lineLimit(2)
-                    HStack {
-                        Text(selectedRow.distanceLabel)
-                            .font(.caption.bold().monospacedDigit())
-                            .foregroundStyle(NativeShellPalette.green)
-                        Spacer()
-                        Button("Open", systemImage: "arrow.up.right.square") {
-                            store.openAccount(selectedRow.account.id)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                    }
+                    Text(selectedRow.distanceLabel)
+                        .font(.caption.bold().monospacedDigit())
+                        .foregroundStyle(NativeShellPalette.green)
                 }
                 .padding(12)
                 .frame(maxWidth: 330, alignment: .leading)
@@ -235,27 +227,39 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                 .padding(12)
             }
         }
-        .overlay(alignment: .bottomLeading) {
+        .overlay(alignment: .bottomTrailing) {
             if let selectedRow {
-                Button {
-                    store.openAccount(selectedRow.account.id)
-                } label: {
-                    Image(systemName: "note.text")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 48, height: 48)
-                        .background(.black.opacity(0.78), in: Circle())
-                        .overlay {
-                            Circle()
-                                .stroke(.white.opacity(0.72), lineWidth: 1.5)
+                HStack(spacing: 9) {
+                    Button {
+                        store.call(selectedRow.account.phone)
+                    } label: {
+                        Image(systemName: "phone.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .frame(width: 46, height: 46)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(NativeShellPalette.green)
+                    .disabled(!selectedRow.account.phone.contains(where: \.isNumber))
+                    .accessibilityLabel("Call \(selectedRow.account.name)")
+
+                    Button {
+                        if let account = store.accounts.first(where: { $0.id == selectedRow.account.id }) {
+                            store.openRoute(for: account)
                         }
-                        .shadow(color: .black.opacity(0.55), radius: 7, y: 3)
+                    } label: {
+                        Image(systemName: "arrow.triangle.turn.up.right.diamond.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .frame(width: 46, height: 46)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(NativeShellPalette.blue)
+                    .disabled(selectedRow.account.coordinate == nil)
+                    .accessibilityLabel("Route to \(selectedRow.account.name)")
                 }
-                .buttonStyle(.plain)
                 .padding(12)
-                .accessibilityLabel("Open \(selectedRow.account.name) account details")
-                .accessibilityHint("Opens the selected account details page")
-                .accessibilityIdentifier("nearby-map-selected-account-note-button")
+                .background(.black.opacity(0.68), in: Capsule())
+                .padding(12)
+                .accessibilityIdentifier("nearby-map-phone-route-actions")
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
