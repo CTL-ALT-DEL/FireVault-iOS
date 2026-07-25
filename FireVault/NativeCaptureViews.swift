@@ -12,7 +12,6 @@ import VisionKit
 struct FireVaultResolvedOverlayField: Identifiable, Equatable {
     let field: FireVaultOverlayField
     let value: String
-
     var id: String { field.rawValue }
 }
 
@@ -32,19 +31,13 @@ enum FireVaultOverlayTemplateFormatter {
             .accountID: accountID.isEmpty ? "" : "Account ID: \(accountID)",
             .category: category.isEmpty ? "" : "Category: \(category)",
             .technician: technicianName,
-            .timestamp: timestamp.formatted(
-                .dateTime.month(.abbreviated).day().year().hour().minute()
-            )
+            .timestamp: timestamp.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
         ]
         let hidden = Set(preferences.hiddenFields)
-
         return preferences.fieldOrder.compactMap { fieldID in
             guard let field = FireVaultOverlayField(rawValue: fieldID),
                   field.isRequired || !hidden.contains(fieldID),
-                  let value = values[field],
-                  !value.isEmpty else {
-                return nil
-            }
+                  let value = values[field], !value.isEmpty else { return nil }
             return FireVaultResolvedOverlayField(field: field, value: value)
         }
     }
@@ -66,8 +59,7 @@ enum FireVaultOverlayTemplateFormatter {
             category: category,
             technicianName: technicianName,
             timestamp: timestamp
-        )
-        .map(\.value)
+        ).map(\.value)
     }
 
     static func lines(
@@ -86,20 +78,14 @@ enum FireVaultOverlayTemplateFormatter {
             "{date}": timestamp.formatted(.dateTime.month(.abbreviated).day().year()),
             "{time}": timestamp.formatted(date: .omitted, time: .shortened)
         ]
-
-        return template
-            .components(separatedBy: .newlines)
-            .compactMap { sourceLine in
-                if accountID.isEmpty, sourceLine.contains("{accountID}") {
-                    return nil
-                }
-
-                let resolved = replacements.reduce(sourceLine) { partial, replacement in
-                    partial.replacingOccurrences(of: replacement.key, with: replacement.value)
-                }
-                let trimmed = resolved.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmed.isEmpty ? nil : trimmed
+        return template.components(separatedBy: .newlines).compactMap { sourceLine in
+            if accountID.isEmpty, sourceLine.contains("{accountID}") { return nil }
+            let resolved = replacements.reduce(sourceLine) { partial, replacement in
+                partial.replacingOccurrences(of: replacement.key, with: replacement.value)
             }
+            let trimmed = resolved.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
     }
 }
 
@@ -157,13 +143,8 @@ struct FireVaultPhotoOverlayView: View {
         )
     }
 
-    private var informationFields: [FireVaultResolvedOverlayField] {
-        resolvedFields.filter { $0.field != .technician }
-    }
-
-    private var technicianField: FireVaultResolvedOverlayField? {
-        resolvedFields.first { $0.field == .technician }
-    }
+    private var informationFields: [FireVaultResolvedOverlayField] { resolvedFields.filter { $0.field != .technician } }
+    private var technicianField: FireVaultResolvedOverlayField? { resolvedFields.first { $0.field == .technician } }
 
     private var panelAlignment: Alignment {
         switch (preferences.alignment, preferences.horizontalPosition) {
@@ -174,39 +155,31 @@ struct FireVaultPhotoOverlayView: View {
         }
     }
 
-    private var glassOpacity: Double {
-        min(0.88, max(0.38, Double(preferences.opacity) / 100))
-    }
-
+    private var glassOpacity: Double { min(0.88, max(0.38, Double(preferences.opacity) / 100)) }
     private var informationWidth: CGFloat {
-        let characterEstimate = CGFloat(siteName.count) * 6.1
-        return min(260, max(145, characterEstimate))
+        let longest = max(siteName.count, informationFields.map(\.value.count).max() ?? 0)
+        return min(285, max(145, CGFloat(longest) * 5.9))
     }
-
     private var panelWidth: CGFloat {
         let logoAllowance = preferences.showLogo ? logoSize + 8 : 0
         let technicianAllowance: CGFloat = technicianField == nil ? 0 : 76
-        return min(390, informationWidth + logoAllowance + technicianAllowance + 34)
+        return min(410, informationWidth + logoAllowance + technicianAllowance + 34)
     }
 
     var body: some View {
-        glassPanel
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: panelAlignment)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 18)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(
-                [
-                    "FireVault photo overlay",
-                    siteName,
-                    address,
-                    accountID.isEmpty ? nil : "Account ID \(accountID)",
-                    technicianName,
-                    formattedTimestamp
-                ]
-                .compactMap { $0 }
-                .joined(separator: ", ")
-            )
+        GeometryReader { geometry in
+            glassPanel
+                .scaleEffect(preferences.scale, anchor: panelAlignment == .topTrailing || panelAlignment == .bottomTrailing ? .trailing : .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: panelAlignment)
+                .offset(
+                    x: CGFloat(preferences.positionX) * geometry.size.width * 0.32,
+                    y: CGFloat(preferences.positionY) * geometry.size.height * 0.32
+                )
+                .padding(.horizontal, 14)
+                .padding(.vertical, 18)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(["FireVault photo overlay", siteName, address, technicianName, formattedTimestamp].joined(separator: ", "))
     }
 
     private var glassPanel: some View {
@@ -214,26 +187,17 @@ struct FireVaultPhotoOverlayView: View {
             HStack(alignment: .top, spacing: 6) {
                 if preferences.showLogo {
                     Image("FireVaultLogo")
-                        .resizable()
-                        .scaledToFit()
+                        .resizable().scaledToFit()
                         .frame(width: logoSize, height: logoSize)
                         .clipShape(RoundedRectangle(cornerRadius: logoSize * 0.22, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: logoSize * 0.22, style: .continuous)
-                                .stroke(.white.opacity(0.28), lineWidth: 0.6)
-                        }
+                        .overlay { RoundedRectangle(cornerRadius: logoSize * 0.22).stroke(.white.opacity(0.28), lineWidth: 0.6) }
                         .accessibilityHidden(true)
                 }
-
                 VStack(alignment: .leading, spacing: 1.5) {
                     if preferences.showTagline, !preferences.tagline.isEmpty {
                         Text(preferences.tagline)
-                            .font(detailFont.bold())
-                            .foregroundStyle(accent)
-                            .tracking(0.45)
-                            .lineLimit(1)
+                            .font(detailFont.bold()).foregroundStyle(accent).tracking(0.45).lineLimit(1)
                     }
-
                     ForEach(Array(informationFields.enumerated()), id: \.element.id) { index, entry in
                         Text(entry.value)
                             .font(index == 0 ? titleFont : detailFont)
@@ -245,65 +209,34 @@ struct FireVaultPhotoOverlayView: View {
                 }
                 .frame(width: informationWidth, alignment: .leading)
             }
-
             if let technicianField {
-                Rectangle()
-                    .fill(.white.opacity(0.23))
-                    .frame(width: 1, height: 32)
-
+                Rectangle().fill(.white.opacity(0.23)).frame(width: 1, height: 32)
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text("TECH")
-                        .font(.system(size: 6.5, weight: .bold, design: .rounded))
-                        .tracking(0.65)
-                        .foregroundStyle(.white.opacity(0.62))
+                    Text("TECH").font(.system(size: 6.5, weight: .bold, design: .rounded)).tracking(0.65).foregroundStyle(.white.opacity(0.62))
                     Text(technicianField.value)
-                        .font(detailFont.bold())
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.trailing)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.8)
+                        .font(detailFont.bold()).foregroundStyle(.white)
+                        .multilineTextAlignment(.trailing).lineLimit(2).minimumScaleFactor(0.8)
                 }
                 .frame(width: 66, alignment: .trailing)
             }
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 9).padding(.vertical, 7)
         .frame(width: panelWidth, alignment: .leading)
         .background {
             ZStack {
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(.black.opacity(glassOpacity * 0.76))
-                LinearGradient(
-                    colors: [
-                        .white.opacity(0.07),
-                        .clear,
-                        .black.opacity(0.10)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.black.opacity(glassOpacity * 0.76))
+                LinearGradient(colors: [.white.opacity(0.07), .clear, .black.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(.white.opacity(0.36), lineWidth: 0.8)
-        }
+        .overlay { RoundedRectangle(cornerRadius: 13, style: .continuous).stroke(.white.opacity(0.36), lineWidth: 0.8) }
         .shadow(color: .black.opacity(0.32), radius: 8, y: 4)
     }
 
     private var formattedTimestamp: String {
-        timestamp.formatted(
-            .dateTime
-                .month(.abbreviated)
-                .day()
-                .year()
-                .hour()
-                .minute()
-        )
+        timestamp.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
     }
 }
 
@@ -315,39 +248,103 @@ struct FireVaultOverlayPreview: View {
     let accountID: String
     let category: String
 
+    @State private var editedPreferences: FireVaultOverlayPreferences
+    @GestureState private var dragTranslation: CGSize = .zero
+
+    init(
+        preferences: FireVaultOverlayPreferences,
+        technicianName: String,
+        siteName: String,
+        address: String,
+        accountID: String,
+        category: String
+    ) {
+        self.preferences = preferences
+        self.technicianName = technicianName
+        self.siteName = siteName
+        self.address = address
+        self.accountID = accountID
+        self.category = category
+        _editedPreferences = State(initialValue: preferences)
+    }
+
     var body: some View {
-        GeometryReader { geometry in
-            let designWidth: CGFloat = 430
-            let designHeight: CGFloat = 322.5
-            let previewScale = geometry.size.width / designWidth
+        VStack(spacing: 10) {
+            GeometryReader { geometry in
+                let designWidth: CGFloat = 430
+                let designHeight: CGFloat = 322.5
+                let previewScale = geometry.size.width / designWidth
 
-            ZStack {
-                Image("NotifierPanelSample")
-                    .resizable()
-                    .scaledToFill()
+                ZStack {
+                    Image("NotifierPanelSample")
+                        .resizable().scaledToFill()
+                        .frame(width: designWidth, height: designHeight).clipped()
+
+                    FireVaultPhotoOverlayView(
+                        preferences: previewPreferences(in: geometry.size),
+                        technicianName: technicianName,
+                        siteName: siteName,
+                        address: address,
+                        accountID: accountID,
+                        category: category,
+                        timestamp: .now
+                    )
                     .frame(width: designWidth, height: designHeight)
-                    .clipped()
-
-                FireVaultPhotoOverlayView(
-                    preferences: preferences,
-                    technicianName: technicianName,
-                    siteName: siteName,
-                    address: address,
-                    accountID: accountID,
-                    category: category,
-                    timestamp: .now
-                )
+                    .contentShape(Rectangle())
+                    .gesture(dragGesture(in: geometry.size))
+                }
                 .frame(width: designWidth, height: designHeight)
+                .scaleEffect(previewScale, anchor: .topLeading)
             }
-            .frame(width: designWidth, height: designHeight)
-            .scaleEffect(previewScale, anchor: .topLeading)
+            .aspectRatio(4.0 / 3.0, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.12), lineWidth: 1) }
+
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    .foregroundStyle(NativeShellPalette.blue)
+                Text("Overlay Size")
+                    .font(.caption.bold())
+                Slider(value: $editedPreferences.scale, in: 0.55...1.25, step: 0.05)
+                    .onChange(of: editedPreferences.scale) { _, _ in stageEdits() }
+                Text("\(Int((editedPreferences.scale * 100).rounded()))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 38, alignment: .trailing)
+            }
+
+            Text("Drag the overlay on the photo to place it exactly where you want it.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
-        .aspectRatio(4.0 / 3.0, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.white.opacity(0.12), lineWidth: 1)
+        .onChange(of: preferences) { _, newValue in
+            editedPreferences = newValue
         }
+        .onAppear { stageEdits() }
+        .accessibilityIdentifier("overlay-interactive-preview")
+    }
+
+    private func previewPreferences(in size: CGSize) -> FireVaultOverlayPreferences {
+        var value = editedPreferences
+        value.positionX += Double(dragTranslation.width / max(size.width * 0.32, 1))
+        value.positionY += Double(dragTranslation.height / max(size.height * 0.32, 1))
+        return value.normalized
+    }
+
+    private func dragGesture(in size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 2)
+            .updating($dragTranslation) { value, state, _ in state = value.translation }
+            .onEnded { value in
+                editedPreferences.positionX += Double(value.translation.width / max(size.width * 0.32, 1))
+                editedPreferences.positionY += Double(value.translation.height / max(size.height * 0.32, 1))
+                editedPreferences = editedPreferences.normalized
+                stageEdits()
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
+    }
+
+    private func stageEdits() {
+        FireVaultOverlayEditorBridge.stage(editedPreferences)
     }
 }
 
@@ -362,18 +359,9 @@ enum FireVaultPhotoOverlayRenderer {
     ) -> UIImage {
         let pixelWidth = max(image.size.width, 1)
         let outputScale = max(pixelWidth / 430, 1)
-        let logicalSize = CGSize(
-            width: image.size.width / outputScale,
-            height: image.size.height / outputScale
-        )
-
+        let logicalSize = CGSize(width: image.size.width / outputScale, height: image.size.height / outputScale)
         let content = ZStack {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: logicalSize.width, height: logicalSize.height)
-                .clipped()
-
+            Image(uiImage: image).resizable().scaledToFill().frame(width: logicalSize.width, height: logicalSize.height).clipped()
             FireVaultPhotoOverlayView(
                 preferences: preferences,
                 technicianName: technicianName,
@@ -386,7 +374,6 @@ enum FireVaultPhotoOverlayRenderer {
             .frame(width: logicalSize.width, height: logicalSize.height)
         }
         .frame(width: logicalSize.width, height: logicalSize.height)
-
         let renderer = ImageRenderer(content: content)
         renderer.proposedSize = ProposedViewSize(logicalSize)
         renderer.scale = outputScale
@@ -398,11 +385,7 @@ enum FireVaultPhotoOverlayRenderer {
 struct NativeCameraCaptureView: UIViewControllerRepresentable {
     let onCapture: (UIImage) -> Void
     let onCancel: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onCapture: onCapture, onCancel: onCancel)
-    }
-
+    func makeCoordinator() -> Coordinator { Coordinator(onCapture: onCapture, onCancel: onCancel) }
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let controller = UIImagePickerController()
         controller.sourceType = .camera
@@ -411,32 +394,16 @@ struct NativeCameraCaptureView: UIViewControllerRepresentable {
         controller.delegate = context.coordinator
         return controller
     }
-
     func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
-
     final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
         let onCapture: (UIImage) -> Void
         let onCancel: () -> Void
-
-        init(onCapture: @escaping (UIImage) -> Void, onCancel: @escaping () -> Void) {
-            self.onCapture = onCapture
-            self.onCancel = onCancel
-        }
-
-        func imagePickerController(
-            _ picker: UIImagePickerController,
-            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-        ) {
-            guard let image = info[.originalImage] as? UIImage else {
-                onCancel()
-                return
-            }
+        init(onCapture: @escaping (UIImage) -> Void, onCancel: @escaping () -> Void) { self.onCapture = onCapture; self.onCancel = onCancel }
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            guard let image = info[.originalImage] as? UIImage else { onCancel(); return }
             onCapture(image)
         }
-
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            onCancel()
-        }
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { onCancel() }
     }
 }
 
@@ -444,55 +411,22 @@ struct NativeDocumentScannerView: UIViewControllerRepresentable {
     let onScan: ([UIImage]) -> Void
     let onCancel: () -> Void
     let onFailure: (String) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onScan: onScan, onCancel: onCancel, onFailure: onFailure)
-    }
-
+    func makeCoordinator() -> Coordinator { Coordinator(onScan: onScan, onCancel: onCancel, onFailure: onFailure) }
     func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
-        let controller = VNDocumentCameraViewController()
-        controller.delegate = context.coordinator
-        return controller
+        let controller = VNDocumentCameraViewController(); controller.delegate = context.coordinator; return controller
     }
-
-    func updateUIViewController(
-        _ uiViewController: VNDocumentCameraViewController,
-        context: Context
-    ) {}
-
+    func updateUIViewController(_ uiViewController: VNDocumentCameraViewController, context: Context) {}
     final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
         let onScan: ([UIImage]) -> Void
         let onCancel: () -> Void
         let onFailure: (String) -> Void
-
-        init(
-            onScan: @escaping ([UIImage]) -> Void,
-            onCancel: @escaping () -> Void,
-            onFailure: @escaping (String) -> Void
-        ) {
-            self.onScan = onScan
-            self.onCancel = onCancel
-            self.onFailure = onFailure
+        init(onScan: @escaping ([UIImage]) -> Void, onCancel: @escaping () -> Void, onFailure: @escaping (String) -> Void) {
+            self.onScan = onScan; self.onCancel = onCancel; self.onFailure = onFailure
         }
-
-        func documentCameraViewController(
-            _ controller: VNDocumentCameraViewController,
-            didFinishWith scan: VNDocumentCameraScan
-        ) {
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
             onScan((0..<scan.pageCount).map(scan.imageOfPage))
         }
-
-        func documentCameraViewControllerDidCancel(
-            _ controller: VNDocumentCameraViewController
-        ) {
-            onCancel()
-        }
-
-        func documentCameraViewController(
-            _ controller: VNDocumentCameraViewController,
-            didFailWithError error: Error
-        ) {
-            onFailure(error.localizedDescription)
-        }
+        func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) { onCancel() }
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) { onFailure(error.localizedDescription) }
     }
 }
