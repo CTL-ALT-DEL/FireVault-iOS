@@ -2,7 +2,7 @@
 //  FireVaultTripLogPortraitView.swift
 //  FireVault
 //
-//  Clean portrait Trip Log workspace with a square map and simplified controls.
+//  Clean portrait Trip Log workspace with a fixed map and scrollable stop history.
 //
 
 import MapKit
@@ -30,20 +30,30 @@ struct FireVaultTripLogPortraitView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+            GeometryReader { geometry in
+                VStack(alignment: .leading, spacing: 12) {
                     if let day = selectedDay {
+                        let availableWidth = max(0, geometry.size.width - 28)
+                        let mapHeight = min(availableWidth, max(220, geometry.size.height * 0.40))
+
                         squareMap(day)
+                            .frame(height: mapHeight)
+
                         controlDock(day)
                         summary(day)
-                        timeline(day)
+
+                        ScrollView {
+                            timeline(day)
+                                .padding(.bottom, 24)
+                        }
+                        .scrollIndicators(.visible)
                     } else {
                         emptyState
                     }
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 8)
-                .padding(.bottom, 28)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .background(NativeShellPalette.background)
             .navigationTitle("Trip Log")
@@ -97,7 +107,9 @@ struct FireVaultTripLogPortraitView: View {
     @ViewBuilder
     private func squareMap(_ day: FireVaultBreadcrumbDay) -> some View {
         GeometryReader { geometry in
-            let side = geometry.size.width
+            let width = geometry.size.width
+            let height = geometry.size.height
+
             Group {
                 if day.points.isEmpty {
                     ZStack {
@@ -114,7 +126,7 @@ struct FireVaultTripLogPortraitView: View {
                         .padding(24)
                     }
                 } else {
-                    Map(initialPosition: .automatic, interactionModes: [.pan, .zoom, .rotate]) {
+                    Map(initialPosition: .automatic, interactionModes: []) {
                         MapPolyline(coordinates: day.points.map(\.coordinate))
                             .stroke(
                                 NativeShellPalette.red,
@@ -151,7 +163,7 @@ struct FireVaultTripLogPortraitView: View {
                     .mapStyle(.standard(elevation: .realistic))
                 }
             }
-            .frame(width: side, height: side)
+            .frame(width: width, height: height)
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -162,8 +174,7 @@ struct FireVaultTripLogPortraitView: View {
                     .padding(12)
             }
         }
-        .aspectRatio(1, contentMode: .fit)
-        .accessibilityIdentifier("trip-log-portrait-square-map")
+        .accessibilityIdentifier("trip-log-portrait-static-map")
     }
 
     private func compactMapDate(_ day: FireVaultBreadcrumbDay) -> some View {
@@ -341,6 +352,7 @@ struct FireVaultTripLogPortraitView: View {
         .accessibilityHint("Previews and exports the selected Trip Log report")
     }
 
+    @ViewBuilder
     private func tripActionButton(
         title: String,
         symbol: String,
@@ -348,14 +360,25 @@ struct FireVaultTripLogPortraitView: View {
         prominent: Bool,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: symbol)
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .frame(height: 48)
+        if prominent {
+            Button(action: action) {
+                Label(title, systemImage: symbol)
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(tint)
+        } else {
+            Button(action: action) {
+                Label(title, systemImage: symbol)
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+            }
+            .buttonStyle(.bordered)
+            .tint(tint)
         }
-        .buttonStyle(prominent ? .borderedProminent : .bordered)
-        .tint(tint)
     }
 
     private func summary(_ day: FireVaultBreadcrumbDay) -> some View {
@@ -389,7 +412,7 @@ struct FireVaultTripLogPortraitView: View {
 
     private func timeline(_ day: FireVaultBreadcrumbDay) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("DAILY LOG")
+            Text("LOGGED STOPS")
                 .font(.caption.bold())
                 .tracking(1.1)
                 .foregroundStyle(.secondary)
@@ -482,7 +505,7 @@ struct FireVaultTripLogPortraitView: View {
             systemImage: "point.topleft.down.to.point.bottomright.curvepath",
             description: Text("Start a Trip Log to record today’s route and account stops.")
         )
-        .frame(minHeight: 360)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func stopTint(_ stop: FireVaultBreadcrumbStop) -> Color {
@@ -497,7 +520,6 @@ private struct FireVaultTripLogPortraitStopSelection: Identifiable {
     var id: UUID { stopID }
 }
 
-/// Uses the existing stop editor through a small bridge while keeping the portrait layout isolated.
 private struct FireVaultTripLogPortraitStopEditorBridge: View {
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @ObservedObject var store: FireVaultStore
