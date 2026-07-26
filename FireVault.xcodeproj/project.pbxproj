@@ -423,13 +423,13 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 68;
+				CURRENT_PROJECT_VERSION = 69;
 				DEVELOPMENT_TEAM = 44K72272WR;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FireVault/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "FireVault uses the camera to photograph and scan fire alarm equipment and site documents.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "FireVault uses your location to identify nearby accounts and record a workday route when you start Breadcrumbs.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "FireVault uses your location to identify nearby accounts and record a workday route when you start Trip Log.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "FireVault imports site and equipment photos that you select from your photo library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -441,7 +441,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.08.09;
+				MARKETING_VERSION = 1.08.10;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidbannerman.FireVault;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -460,13 +460,13 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 68;
+				CURRENT_PROJECT_VERSION = 69;
 				DEVELOPMENT_TEAM = 44K72272WR;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FireVault/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "FireVault uses the camera to photograph and scan fire alarm equipment and site documents.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "FireVault uses your location to identify nearby accounts and record a workday route when you start Breadcrumbs.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "FireVault uses your location to identify nearby accounts and record a workday route when you start Trip Log.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "FireVault imports site and equipment photos that you select from your photo library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -478,7 +478,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.08.09;
+				MARKETING_VERSION = 1.08.10;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidbannerman.FireVault;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

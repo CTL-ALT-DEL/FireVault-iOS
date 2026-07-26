@@ -270,6 +270,69 @@ struct FireVaultBreadcrumbReport: Equatable {
         return lines.joined(separator: "\n")
     }
 
+    // Retained for existing exports and regression tests. The interactive report
+    // screen uses the richer daily/weekly renderer below.
+    var csvData: Data {
+        func quoted(_ value: String) -> String {
+            "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+        }
+
+        var rows = [[
+            "Sequence",
+            "Date",
+            "Arrival",
+            "Departure",
+            "Duration Minutes",
+            "Classification",
+            "Account Name",
+            "Address",
+            "Account ID",
+            "Technician Note",
+            "Latitude",
+            "Longitude"
+        ]]
+
+        for visit in visits {
+            rows.append([
+                "\(visit.sequence)",
+                visit.arrival.formatted(.iso8601.year().month().day().dateSeparator(.dash)),
+                visit.arrival.formatted(.iso8601.time(includingFractionalSeconds: false)),
+                visit.departure?.formatted(.iso8601.time(includingFractionalSeconds: false)) ?? "",
+                "\(Int(visit.duration / 60))",
+                visit.classification.rawValue,
+                visit.accountName,
+                visit.accountAddress,
+                visit.accountID,
+                visit.technicianNote,
+                visit.latitude.map { String(format: "%.6f", $0) } ?? "",
+                visit.longitude.map { String(format: "%.6f", $0) } ?? ""
+            ])
+        }
+
+        let source = rows
+            .map { $0.map(quoted).joined(separator: ",") }
+            .joined(separator: "\r\n")
+            + "\r\n"
+        return Data(source.utf8)
+    }
+
+    var pdfData: Data {
+        let bounds = CGRect(x: 0, y: 0, width: 612, height: 792)
+        return UIGraphicsPDFRenderer(bounds: bounds).pdfData { context in
+            context.beginPage()
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineBreakMode = .byWordWrapping
+            (plainText as NSString).draw(
+                in: bounds.insetBy(dx: 42, dy: 42),
+                withAttributes: [
+                    .font: UIFont.systemFont(ofSize: 11),
+                    .foregroundColor: UIColor.label,
+                    .paragraphStyle: paragraph
+                ]
+            )
+        }
+    }
+
     static func region(for coordinates: [CLLocationCoordinate2D]) -> MKCoordinateRegion {
         guard let first = coordinates.first else {
             return .init(
@@ -1005,7 +1068,7 @@ struct FireVaultBreadcrumbReportView: View {
                         } else {
                             Image(systemName: "doc.richtext.fill")
                         }
-                        Text(isGeneratingPDF ? "Building PDF…" : "Export Beautiful PDF")
+                        Text(isGeneratingPDF ? "Building PDF…" : "Export PDF")
                             .fontWeight(.bold)
                     }
                     .frame(maxWidth: .infinity)
