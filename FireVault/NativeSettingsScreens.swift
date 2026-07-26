@@ -133,10 +133,20 @@ struct NativeOverlaySettingsView: View {
             }
 
             Section {
-                Toggle("Show FireVault brand", isOn: $draft.overlay.showLogo)
-                Toggle("Show tagline", isOn: $draft.overlay.showTagline)
-                TextField("Tagline", text: $draft.overlay.tagline).focused($focused)
-                Picker("Accent", selection: $draft.overlay.accentColor) {
+                Toggle(
+                    "Show FireVault brand",
+                    isOn: overlayBinding(\.showLogo)
+                )
+                Toggle(
+                    "Show tagline",
+                    isOn: overlayBinding(\.showTagline)
+                )
+                TextField(
+                    "Tagline",
+                    text: overlayBinding(\.tagline)
+                )
+                .focused($focused)
+                Picker("Accent", selection: overlayBinding(\.accentColor)) {
                     Text("Red").tag("red")
                     Text("Blue").tag("blue")
                     Text("Amber").tag("amber")
@@ -233,6 +243,19 @@ struct NativeOverlaySettingsView: View {
         FireVaultOverlayEditorBridge.stage(draft.overlay)
     }
 
+    private func overlayBinding<Value>(
+        _ keyPath: WritableKeyPath<FireVaultOverlayPreferences, Value>
+    ) -> Binding<Value> {
+        Binding(
+            get: { draft.overlay[keyPath: keyPath] },
+            set: { newValue in
+                updateOverlayPreservingPlacement {
+                    $0[keyPath: keyPath] = newValue
+                }
+            }
+        )
+    }
+
     private func preservePlacedElements() {
         draft.overlay = FireVaultOverlayEditorBridge.merge(into: draft.overlay)
     }
@@ -287,10 +310,12 @@ struct NativeOverlaySettingsView: View {
         Binding(
             get: { !draft.overlay.hiddenFields.contains(field.rawValue) },
             set: { isVisible in
-                if isVisible {
-                    draft.overlay.hiddenFields.removeAll { $0 == field.rawValue }
-                } else if !draft.overlay.hiddenFields.contains(field.rawValue) {
-                    draft.overlay.hiddenFields.append(field.rawValue)
+                updateOverlayPreservingPlacement { overlay in
+                    if isVisible {
+                        overlay.hiddenFields.removeAll { $0 == field.rawValue }
+                    } else if !overlay.hiddenFields.contains(field.rawValue) {
+                        overlay.hiddenFields.append(field.rawValue)
+                    }
                 }
             }
         )
@@ -301,7 +326,9 @@ struct NativeOverlaySettingsView: View {
         guard draft.overlay.fieldOrder.indices.contains(index),
               draft.overlay.fieldOrder.indices.contains(destination) else { return }
         withAnimation(.snappy(duration: 0.22)) {
-            draft.overlay.fieldOrder.swapAt(index, destination)
+            updateOverlayPreservingPlacement {
+                $0.fieldOrder.swapAt(index, destination)
+            }
         }
         UISelectionFeedbackGenerator().selectionChanged()
     }

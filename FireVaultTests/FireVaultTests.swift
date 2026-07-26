@@ -469,6 +469,39 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(normalized.opacity, 35)
     }
 
+    func testPhotoOverlayPreviewGeometryUsesSameDesignCoordinatesOnIPhoneAndIPad() {
+        let designPoint = CGPoint(x: 344, y: 80)
+        let designTranslation = CGSize(width: 43, height: 32.25)
+
+        for previewSize in [
+            CGSize(width: 350, height: 262.5),
+            CGSize(width: 700, height: 525)
+        ] {
+            let geometry = FireVaultOverlayPreviewGeometry(previewSize: previewSize)
+            let previewPoint = CGPoint(
+                x: geometry.designOrigin.x + designPoint.x * geometry.scale,
+                y: geometry.designOrigin.y + designPoint.y * geometry.scale
+            )
+            let previewTranslation = CGSize(
+                width: designTranslation.width * geometry.scale,
+                height: designTranslation.height * geometry.scale
+            )
+
+            XCTAssertEqual(geometry.designPoint(from: previewPoint).x, designPoint.x, accuracy: 0.001)
+            XCTAssertEqual(geometry.designPoint(from: previewPoint).y, designPoint.y, accuracy: 0.001)
+            XCTAssertEqual(
+                geometry.designTranslation(from: previewTranslation).width,
+                designTranslation.width,
+                accuracy: 0.001
+            )
+            XCTAssertEqual(
+                geometry.designTranslation(from: previewTranslation).height,
+                designTranslation.height,
+                accuracy: 0.001
+            )
+        }
+    }
+
     func testPhotoOverlayPreferencesPreserveRequiredAccountFields() {
         var preferences = FireVaultOverlayPreferences()
         preferences.fieldTemplate = "{technician}"
