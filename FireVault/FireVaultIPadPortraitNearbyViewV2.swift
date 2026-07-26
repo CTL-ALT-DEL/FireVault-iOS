@@ -227,7 +227,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                         }
                         .padding(.vertical, 31)
                         .background(.black.opacity(0.72), in: Capsule())
-                        .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .top)))
+                        .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: UnitPoint.top)))
                         .accessibilityLabel("Map zoom")
                 }
             }
@@ -347,14 +347,13 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                         ForEach(Array(nearbyRows.enumerated()), id: \.element.id) { index, row in
                             accountRow(row, index: index)
                                 .id(row.id)
-                                .scrollTargetAnchor(.top)
                         }
                     }
                     .scrollTargetLayout()
                     .padding(.bottom, 12)
                 }
                 .scrollIndicators(.hidden)
-                .scrollPosition(id: $scrollingID, anchor: .top)
+                .scrollPosition(id: $scrollingID, anchor: UnitPoint.top)
                 .scrollTargetBehavior(.viewAligned)
             }
         }
