@@ -11,7 +11,7 @@ import SwiftUI
 struct FireVaultApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            FireVaultAuthGate()
         }
     }
 }
