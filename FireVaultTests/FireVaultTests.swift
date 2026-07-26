@@ -421,8 +421,8 @@ final class FireVaultTests: XCTestCase {
 
         XCTAssertEqual(normalized.alignment, "bottom")
         XCTAssertEqual(normalized.fontSize, "medium")
-        XCTAssertEqual(normalized.backgroundStyle, "bar")
-        XCTAssertEqual(normalized.accentColor, "red")
+        XCTAssertEqual(normalized.backgroundStyle, "frosted")
+        XCTAssertEqual(normalized.accentColor, "blue")
         XCTAssertEqual(normalized.opacity, 35)
     }
 
