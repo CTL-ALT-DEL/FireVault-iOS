@@ -65,6 +65,49 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(updates.displayStatus(nativeVersion: "1.08.05"), "Build 1.08.05")
     }
 
+    func testLegacyReportPreferencesGainSafeAutomationDefaults() throws {
+        let legacy = """
+        {
+          "title": "Existing Report",
+          "format": "compact",
+          "includeTechnician": false,
+          "includeTasks": true,
+          "includeDeficiencies": false
+        }
+        """
+        let preferences = try JSONDecoder().decode(
+            FireVaultReportPreferences.self,
+            from: try XCTUnwrap(legacy.data(using: .utf8))
+        )
+
+        XCTAssertEqual(preferences.title, "Existing Report")
+        XCTAssertEqual(preferences.format, "compact")
+        XCTAssertFalse(preferences.dailyEmailEnabled)
+        XCTAssertFalse(preferences.weeklyEmailEnabled)
+        XCTAssertEqual(preferences.dailyEmailHour, 18)
+        XCTAssertEqual(preferences.weeklyEmailWeekday, 6)
+        XCTAssertFalse(preferences.reportTimeZone.isEmpty)
+    }
+
+    func testReportAutomationScheduleNormalizesInvalidValues() {
+        var preferences = FireVaultReportPreferences()
+        preferences.dailyEmailHour = 29
+        preferences.dailyEmailMinute = -4
+        preferences.weeklyEmailWeekday = 12
+        preferences.weeklyEmailHour = -2
+        preferences.weeklyEmailMinute = 90
+        preferences.reportTimeZone = "Not/A-Time-Zone"
+
+        let normalized = preferences.normalized
+
+        XCTAssertEqual(normalized.dailyEmailHour, 23)
+        XCTAssertEqual(normalized.dailyEmailMinute, 0)
+        XCTAssertEqual(normalized.weeklyEmailWeekday, 7)
+        XCTAssertEqual(normalized.weeklyEmailHour, 0)
+        XCTAssertEqual(normalized.weeklyEmailMinute, 59)
+        XCTAssertNotNil(TimeZone(identifier: normalized.reportTimeZone))
+    }
+
     func testNearbyListProvidesRunwayForFinalAccountToReachTop() {
         XCTAssertEqual(FireVaultNearbyListLayout.bottomRunway(for: 420), 348)
         XCTAssertEqual(FireVaultNearbyListLayout.bottomRunway(for: 60), 0)

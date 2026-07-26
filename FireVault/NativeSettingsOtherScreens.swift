@@ -34,6 +34,7 @@ struct NativePlusCodeSettingsView: View {
 struct NativeReportSettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var draft: FireVaultNativePreferences
+    @State private var deliveryStatus = ""
     @FocusState private var focused: Bool
     init(settings: FireVaultNativeSettingsStore) { self.settings = settings; _draft = State(initialValue: settings.preferences) }
     var body: some View {
@@ -49,6 +50,51 @@ struct NativeReportSettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            Section {
+                TextField("Email reports to", text: $draft.email.defaultTo)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .focused($focused)
+                TextField("CC (optional)", text: $draft.email.cc)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .focused($focused)
+
+                Toggle("Email daily report", isOn: $draft.reports.dailyEmailEnabled)
+                if draft.reports.dailyEmailEnabled {
+                    DatePicker(
+                        "Daily delivery time",
+                        selection: dailyDeliveryTime,
+                        displayedComponents: .hourAndMinute
+                    )
+                }
+
+                Toggle("Email weekly report", isOn: $draft.reports.weeklyEmailEnabled)
+                if draft.reports.weeklyEmailEnabled {
+                    Picker("Weekly delivery day", selection: $draft.reports.weeklyEmailWeekday) {
+                        ForEach(Array(Calendar.current.weekdaySymbols.enumerated()), id: \.offset) { index, day in
+                            Text(day).tag(index + 1)
+                        }
+                    }
+                    DatePicker(
+                        "Weekly delivery time",
+                        selection: weeklyDeliveryTime,
+                        displayedComponents: .hourAndMinute
+                    )
+                }
+
+                LabeledContent("Time zone", value: timeZoneLabel)
+
+                if !deliveryStatus.isEmpty {
+                    Label(deliveryStatus, systemImage: "checkmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.green)
+                }
+            } header: {
+                Text("Automatic Email Delivery")
+            } footer: {
+                Text("Reports are generated and emailed securely through Supabase and Resend even when FireVault is closed. Multiple addresses may be separated with commas.")
+            }
             Section("Service Report Defaults") {
                 TextField("Report title", text: $draft.reports.title).focused($focused)
             }
@@ -57,7 +103,46 @@ struct NativeReportSettingsView: View {
                 Toggle("Deficiencies", isOn: $draft.reports.includeDeficiencies)
             }
         }
-        .nativeSettingsForm(title: "Trip Log Reports", focused: $focused) { settings.save(draft) }
+        .nativeSettingsForm(title: "Trip Log Reports", focused: $focused) {
+            draft.reports.reportTimeZone = TimeZone.current.identifier
+            settings.save(draft)
+            Task {
+                do {
+                    try await FireVaultTripLogAutomationService.shared.syncPreferences(settings.preferences)
+                    deliveryStatus = "Automation settings saved"
+                } catch {
+                    deliveryStatus = "Saved on this device; cloud sync will retry"
+                }
+            }
+        }
+    }
+
+    private var dailyDeliveryTime: Binding<Date> {
+        deliveryTime(hour: $draft.reports.dailyEmailHour, minute: $draft.reports.dailyEmailMinute)
+    }
+
+    private var weeklyDeliveryTime: Binding<Date> {
+        deliveryTime(hour: $draft.reports.weeklyEmailHour, minute: $draft.reports.weeklyEmailMinute)
+    }
+
+    private func deliveryTime(hour: Binding<Int>, minute: Binding<Int>) -> Binding<Date> {
+        Binding {
+            Calendar.current.date(
+                bySettingHour: hour.wrappedValue,
+                minute: minute.wrappedValue,
+                second: 0,
+                of: Date()
+            ) ?? Date()
+        } set: { date in
+            let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+            hour.wrappedValue = components.hour ?? 18
+            minute.wrappedValue = components.minute ?? 0
+        }
+    }
+
+    private var timeZoneLabel: String {
+        TimeZone.current.localizedName(for: .standard, locale: .current)
+            ?? TimeZone.current.identifier
     }
 }
 

@@ -356,6 +356,14 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         sessionIsPrepared = false
         statusText = "Workday complete"
         persist()
+        let completedDay = days[index]
+        let preferences = FireVaultNativeSettingsStore().preferences
+        Task {
+            await FireVaultTripLogAutomationService.shared.syncCompletedDay(
+                completedDay,
+                preferences: preferences
+            )
+        }
     }
 
     func deleteDay(_ id: UUID) {

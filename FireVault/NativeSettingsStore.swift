@@ -188,7 +188,64 @@ struct FireVaultGPSPreferences: Codable, Equatable {
 }
 
 struct FireVaultPlusCodePreferences: Codable, Equatable { var enabled = true; var autoGenerate = true; var accountLength = 10; var locationLength = 11; var verifyAfterDays = 180; var searchable = true; var includeInReports = true }
-struct FireVaultReportPreferences: Codable, Equatable { var title = "FireVault Service Report"; var format = "detailed"; var includeTechnician = true; var includeTasks = true; var includeDeficiencies = true }
+struct FireVaultReportPreferences: Codable, Equatable {
+    var title = "FireVault Service Report"
+    var format = "detailed"
+    var includeTechnician = true
+    var includeTasks = true
+    var includeDeficiencies = true
+    var dailyEmailEnabled = false
+    var dailyEmailHour = 18
+    var dailyEmailMinute = 0
+    var weeklyEmailEnabled = false
+    var weeklyEmailWeekday = 6
+    var weeklyEmailHour = 18
+    var weeklyEmailMinute = 15
+    var reportTimeZone = TimeZone.current.identifier
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case title, format, includeTechnician, includeTasks, includeDeficiencies
+        case dailyEmailEnabled, dailyEmailHour, dailyEmailMinute
+        case weeklyEmailEnabled, weeklyEmailWeekday, weeklyEmailHour, weeklyEmailMinute
+        case reportTimeZone
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        title = try values.decodeIfPresent(String.self, forKey: .title) ?? "FireVault Service Report"
+        format = try values.decodeIfPresent(String.self, forKey: .format) ?? "detailed"
+        includeTechnician = try values.decodeIfPresent(Bool.self, forKey: .includeTechnician) ?? true
+        includeTasks = try values.decodeIfPresent(Bool.self, forKey: .includeTasks) ?? true
+        includeDeficiencies = try values.decodeIfPresent(Bool.self, forKey: .includeDeficiencies) ?? true
+        dailyEmailEnabled = try values.decodeIfPresent(Bool.self, forKey: .dailyEmailEnabled) ?? false
+        dailyEmailHour = try values.decodeIfPresent(Int.self, forKey: .dailyEmailHour) ?? 18
+        dailyEmailMinute = try values.decodeIfPresent(Int.self, forKey: .dailyEmailMinute) ?? 0
+        weeklyEmailEnabled = try values.decodeIfPresent(Bool.self, forKey: .weeklyEmailEnabled) ?? false
+        weeklyEmailWeekday = try values.decodeIfPresent(Int.self, forKey: .weeklyEmailWeekday) ?? 6
+        weeklyEmailHour = try values.decodeIfPresent(Int.self, forKey: .weeklyEmailHour) ?? 18
+        weeklyEmailMinute = try values.decodeIfPresent(Int.self, forKey: .weeklyEmailMinute) ?? 15
+        reportTimeZone = try values.decodeIfPresent(String.self, forKey: .reportTimeZone)
+            ?? TimeZone.current.identifier
+    }
+
+    var normalized: Self {
+        var copy = self
+        copy.dailyEmailHour = min(23, max(0, dailyEmailHour))
+        copy.dailyEmailMinute = min(59, max(0, dailyEmailMinute))
+        copy.weeklyEmailWeekday = min(7, max(1, weeklyEmailWeekday))
+        copy.weeklyEmailHour = min(23, max(0, weeklyEmailHour))
+        copy.weeklyEmailMinute = min(59, max(0, weeklyEmailMinute))
+        if TimeZone(identifier: copy.reportTimeZone) == nil {
+            copy.reportTimeZone = TimeZone.current.identifier
+        }
+        if !["detailed", "compact"].contains(copy.format) {
+            copy.format = "detailed"
+        }
+        return copy
+    }
+}
 struct FireVaultEmailPreferences: Codable, Equatable { var defaultTo = ""; var cc = ""; var defaultSubject = "FireVault Service Report"; var signature = "" }
 struct FireVaultStoragePreferences: Codable, Equatable { var photoProvider = "local"; var documentProvider = "local"; var photoFolder = "FireVault/Photos"; var documentFolder = "FireVault/Documents"; var microsoftProfileLabel = ""; var microsoftEmail = ""; var sharePointSiteURL = ""; var libraryName = "Documents" }
 struct FireVaultSyncPreferences: Codable, Equatable { var organization = ""; var workspace = "FireVault Shared Vault"; var conflictPolicy = "review" }
@@ -211,6 +268,7 @@ struct FireVaultNativePreferences: Codable, Equatable {
         var copy = self
         copy.gps = gps.normalized
         copy.overlay = overlay.normalized
+        copy.reports = reports.normalized
         copy.categories = categories.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         return copy
     }
