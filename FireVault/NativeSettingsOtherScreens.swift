@@ -38,17 +38,26 @@ struct NativeReportSettingsView: View {
     init(settings: FireVaultNativeSettingsStore) { self.settings = settings; _draft = State(initialValue: settings.preferences) }
     var body: some View {
         Form {
-            Section("Defaults") {
-                TextField("Report title", text: $draft.reports.title).focused($focused)
-                Picker("Format", selection: $draft.reports.format) { Text("Detailed").tag("detailed"); Text("Compact").tag("compact") }
+            Section("Trip Log Reports") {
+                Toggle("Include GPS coordinates", isOn: $draft.gps.includeCoordinatesInReports)
+                Toggle("Include technician profile", isOn: $draft.reports.includeTechnician)
+                Picker("Trip Log report format", selection: $draft.reports.format) {
+                    Text("Detailed").tag("detailed")
+                    Text("Compact").tag("compact")
+                }
+                Text("Trip Log reports include the recorded route, detected stops, account visits, elapsed time, and distance for the selected workday.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
-            Section("Included Content") {
-                Toggle("Technician profile", isOn: $draft.reports.includeTechnician)
+            Section("Service Report Defaults") {
+                TextField("Report title", text: $draft.reports.title).focused($focused)
+            }
+            Section("Included Service Content") {
                 Toggle("Tasks", isOn: $draft.reports.includeTasks)
                 Toggle("Deficiencies", isOn: $draft.reports.includeDeficiencies)
             }
         }
-        .nativeSettingsForm(title: "Report Settings", focused: $focused) { settings.save(draft) }
+        .nativeSettingsForm(title: "Trip Log Reports", focused: $focused) { settings.save(draft) }
     }
 }
 
@@ -265,6 +274,12 @@ struct NativeManualView: View {
                 Label("Search Accounts by name, address, or ID.", systemImage: "magnifyingglass")
                 Label("Open an account for notes, files, equipment, and locations.", systemImage: "building.2")
                 Label("Use Settings for native preferences and CSV import.", systemImage: "gearshape")
+            }
+            Section("Trip Log") {
+                Label("Start Trip Log at the beginning of the workday to record your route and detected stops.", systemImage: "play.circle")
+                Label("Pause or resume Trip Log when route recording should temporarily stop.", systemImage: "pause.circle")
+                Label("Review each detected stop before exporting the final Trip Log report.", systemImage: "checklist")
+                Label("Trip Log Reports can be configured in Settings under Reports.", systemImage: "doc.text")
             }
         }
         .navigationTitle("Help & User Manual")
