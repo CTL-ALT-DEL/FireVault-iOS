@@ -33,10 +33,17 @@ final class FireVaultPrivacyLockController: ObservableObject {
     func lockIfNeeded(_ preferences: FireVaultPrivacyPreferences) {
         guard preferences.enabled else {
             isUnlocked = true
+            backgroundedAt = nil
             return
         }
         guard preferences.lockOnBackground else { return }
-        let elapsed = Date().timeIntervalSince(backgroundedAt ?? .distantPast)
+        guard let backgroundedAt else {
+            // Face ID temporarily makes the scene inactive. Only a real
+            // background transition should start an auto-lock interval.
+            return
+        }
+        self.backgroundedAt = nil
+        let elapsed = Date().timeIntervalSince(backgroundedAt)
         if preferences.autoLockMinutes == 0
             || elapsed >= Double(preferences.autoLockMinutes * 60) {
             isUnlocked = false
