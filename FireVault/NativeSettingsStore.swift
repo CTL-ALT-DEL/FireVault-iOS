@@ -173,10 +173,13 @@ struct FireVaultGPSPreferences: Codable, Equatable {
     var gpsToolsEnabled = true
     var includeCoordinatesInReports = true
     var addressAssistanceEnabled = true
+    var hapticsEnabled: Bool? = true
+    var hapticsAreEnabled: Bool { hapticsEnabled ?? true }
     var normalized: Self {
         var copy = self
         let clamped = min(Self.allowedRadius.upperBound, max(Self.allowedRadius.lowerBound, nearbyRadiusMiles))
         copy.nearbyRadiusMiles = Self.radiusOptions.min { abs($0 - clamped) < abs($1 - clamped) } ?? 1
+        if copy.hapticsEnabled == nil { copy.hapticsEnabled = true }
         return copy
     }
     var radiusStatus: String { "\(nearbyRadiusMiles.formatted(.number.precision(.fractionLength(0...2)))) mi" }
