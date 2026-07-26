@@ -16,6 +16,8 @@
 "Breadcrumbs Report" = "Track Log Report";
 "Breadcrumb Report" = "Track Log Report";
 "Breadcrumbs Daily Report" = "Track Log Daily Report";
+"BREADCRUMBS DAILY REPORT" = "TRACK LOG DAILY REPORT";
+"FIREVAULT BREADCRUMBS DAILY REPORT" = "FIREVAULT TRACK LOG DAILY REPORT";
 "Breadcrumbs route" = "Track Log route";
 "Breadcrumb route" = "Track Log route";
 "Start Breadcrumbs" = "Start Track Log";
@@ -31,3 +33,5 @@
 "Breadcrumbs map" = "Track Log map";
 "Breadcrumbs data" = "Track Log data";
 "Breadcrumbs permission" = "Track Log permission";
+"FireVault Breadcrumbs" = "FireVault Track Log";
+"FireVault Breadcrumbs — %@" = "FireVault Track Log — %@";
