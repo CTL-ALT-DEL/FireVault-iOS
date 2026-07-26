@@ -16,7 +16,10 @@ struct FireVaultResolvedOverlayField: Identifiable, Equatable {
 }
 
 struct FireVaultOverlayPreviewGeometry {
-    static let designSize = CGSize(width: 430, height: 322.5)
+    /// UIImagePickerController's native still-photo canvas is 3:4 in portrait.
+    /// Keep the logical width at 430 so the preview uses the same typography
+    /// scale as FireVaultPhotoOverlayRenderer.
+    static let designSize = CGSize(width: 430, height: 430.0 * 4.0 / 3.0)
 
     let previewSize: CGSize
 
@@ -359,31 +362,39 @@ struct FireVaultOverlayPreview: View {
             let designSize = FireVaultOverlayPreviewGeometry.designSize
 
             ZStack {
-                Image("NotifierPanelSample")
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: designSize.width, height: designSize.height)
-                    .clipped()
+                ZStack {
+                    Image("NotifierPanelSample")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: designSize.width, height: designSize.height)
+                        .clipped()
 
-                FireVaultPhotoOverlayView(
-                    preferences: previewPreferences(size: designSize),
-                    technicianName: technicianName,
-                    siteName: siteName,
-                    address: address,
-                    accountID: accountID,
-                    category: category,
-                    timestamp: .now
-                )
+                    FireVaultPhotoOverlayView(
+                        preferences: previewPreferences(size: designSize),
+                        technicianName: technicianName,
+                        siteName: siteName,
+                        address: address,
+                        accountID: accountID,
+                        category: category,
+                        timestamp: .now
+                    )
+                    .frame(width: designSize.width, height: designSize.height)
+                    .allowsHitTesting(false)
+                }
                 .frame(width: designSize.width, height: designSize.height)
+                .scaleEffect(metrics.scale)
                 .allowsHitTesting(false)
+
+                // Capture the gesture in the visible preview coordinate space.
+                // Attaching it to the scaled design canvas caused SwiftUI Forms
+                // to report inconsistent touch coordinates on compact iPhones.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(canvasDragGesture(metrics: metrics))
             }
-            .frame(width: designSize.width, height: designSize.height)
-            .scaleEffect(metrics.scale)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            .contentShape(Rectangle())
-            .highPriorityGesture(canvasDragGesture(metrics: metrics))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .aspectRatio(4.0 / 3.0, contentMode: .fit)
+        .aspectRatio(3.0 / 4.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.12), lineWidth: 1) }
         .onChange(of: preferences) { _, newValue in

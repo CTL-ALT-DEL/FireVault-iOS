@@ -495,12 +495,12 @@ final class FireVaultTests: XCTestCase {
     }
 
     func testPhotoOverlayPreviewGeometryUsesSameDesignCoordinatesOnIPhoneAndIPad() {
-        let designPoint = CGPoint(x: 344, y: 80)
-        let designTranslation = CGSize(width: 43, height: 32.25)
+        let designPoint = CGPoint(x: 344, y: 120)
+        let designTranslation = CGSize(width: 43, height: 57.333)
 
         for previewSize in [
-            CGSize(width: 350, height: 262.5),
-            CGSize(width: 700, height: 525)
+            CGSize(width: 350, height: 350 * 4 / 3),
+            CGSize(width: 700, height: 700 * 4 / 3)
         ] {
             let geometry = FireVaultOverlayPreviewGeometry(previewSize: previewSize)
             let previewPoint = CGPoint(
@@ -525,6 +525,13 @@ final class FireVaultTests: XCTestCase {
                 accuracy: 0.001
             )
         }
+    }
+
+    func testPhotoOverlayPreviewUsesNativePortraitCameraRatio() {
+        let size = FireVaultOverlayPreviewGeometry.designSize
+
+        XCTAssertEqual(size.width / size.height, 3.0 / 4.0, accuracy: 0.000_001)
+        XCTAssertEqual(size.width, 430, accuracy: 0.000_001)
     }
 
     func testPhotoOverlayPreferencesPreserveRequiredAccountFields() {
