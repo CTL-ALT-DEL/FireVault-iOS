@@ -254,8 +254,6 @@ private struct NativeNearbyView: View {
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var scrollAccountID: String?
     @State private var accountScrollWasActive = false
-    @State private var suppressNextIdleFocus = false
-    @State private var delayedMapFocusTask: Task<Void, Never>?
     @State private var mapLayer: FireVaultMapLayer = .standard
     @State private var mapIs3D = false
     @State private var showsBreadcrumbs = false
@@ -361,9 +359,6 @@ private struct NativeNearbyView: View {
             if phase == .complete {
                 showMappingDetails = false
             }
-        }
-        .onDisappear {
-            delayedMapFocusTask?.cancel()
         }
         .alert("Map Imported Addresses?", isPresented: $showGeocodingConsent) {
             Button("Cancel", role: .cancel) {}
@@ -665,7 +660,6 @@ private struct NativeNearbyView: View {
         updated.nearbyRadiusMiles = radius
         settings.saveGPS(updated)
 
-        delayedMapFocusTask?.cancel()
         accountScrollWasActive = false
         selectedID = nil
         scrollAccountID = nearbyRows.first?.id
@@ -750,15 +744,18 @@ private struct NativeNearbyView: View {
                     .onScrollPhaseChange { _, newPhase in
                         if newPhase.isScrolling {
                             accountScrollWasActive = true
-                            delayedMapFocusTask?.cancel()
                         } else if newPhase == .idle, accountScrollWasActive {
                             accountScrollWasActive = false
-                            if suppressNextIdleFocus {
-                                suppressNextIdleFocus = false
-                            } else {
-                                scheduleTopAccountFocus()
-                            }
+                            focusScrolledAccount()
                         }
+                    }
+                    .onChange(of: scrollAccountID) { _, newID in
+                        guard accountScrollWasActive,
+                              let newID,
+                              let row = nearbyRows.first(where: { $0.id == newID }) else {
+                            return
+                        }
+                        selectAccount(row, scrollToCard: false, haptic: true)
                     }
                     .accessibilityIdentifier("nearby-account-scroll")
                 }
@@ -772,7 +769,7 @@ private struct NativeNearbyView: View {
         index: Int
     ) -> some View {
         Button {
-            selectAccount(row, scrollToCard: false)
+            selectAccount(row, scrollToCard: true, haptic: true)
         } label: {
             HStack(alignment: .top, spacing: 10) {
                 Text("\(index + 1)")
@@ -852,7 +849,6 @@ private struct NativeNearbyView: View {
         .saturation(selectedID == nil || selectedID == row.id ? 1 : 0.72)
         .animation(.easeOut(duration: 0.24), value: selectedID)
         .onLongPressGesture(minimumDuration: 0.55, maximumDistance: 24) {
-            delayedMapFocusTask?.cancel()
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             store.openAccount(row.account.id)
         }
@@ -875,33 +871,33 @@ private struct NativeNearbyView: View {
         .accessibilityIdentifier("nearby-account-\(row.id)")
     }
 
-    private func scheduleTopAccountFocus() {
-        delayedMapFocusTask?.cancel()
-        guard let requestedID = scrollAccountID else { return }
-
-        delayedMapFocusTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled,
-                  !accountScrollWasActive,
-                  scrollAccountID == requestedID,
-                  let row = nearbyRows.first(where: { $0.id == requestedID }) else {
-                return
-            }
-            selectAccount(row, scrollToCard: false)
+    private func focusScrolledAccount() {
+        guard let scrollAccountID,
+              selectedID != scrollAccountID,
+              let row = nearbyRows.first(where: { $0.id == scrollAccountID }) else {
+            return
         }
+        selectAccount(row, scrollToCard: false, haptic: true)
     }
 
     private func selectAccount(
         _ row: FireVaultNativeNearbyAccount,
-        scrollToCard: Bool
+        scrollToCard: Bool,
+        haptic: Bool = false
     ) {
         guard let coordinate = row.account.coordinate else { return }
+        let selectionChanged = selectedID != row.id
         selectedID = row.id
         store.selectCaptureAccount(row.account.id)
         if scrollToCard {
-            withAnimation(.snappy(duration: 0.28)) {
-                scrollAccountID = row.id
-            }
+            // Update the scroll anchor without animating through intermediate
+            // cards, which previously let the old top card reclaim selection.
+            scrollAccountID = row.id
+        }
+        if selectionChanged, haptic, settings.gps.hapticsAreEnabled {
+            let feedback = UISelectionFeedbackGenerator()
+            feedback.prepare()
+            feedback.selectionChanged()
         }
         withAnimation(.easeInOut(duration: 0.3)) {
             cameraPosition = accountCameraPosition(coordinate)
@@ -985,17 +981,11 @@ private struct NativeNearbyView: View {
     }
 
     private func resetNearby() {
-        delayedMapFocusTask?.cancel()
         accountScrollWasActive = false
         selectedID = nil
 
         if let closestID = nearbyRows.first?.id {
-            if scrollAccountID != closestID {
-                suppressNextIdleFocus = true
-                withAnimation(.smooth(duration: 0.35)) {
-                    scrollAccountID = closestID
-                }
-            }
+            scrollAccountID = closestID
         } else {
             scrollAccountID = nil
         }
@@ -1139,8 +1129,9 @@ private struct NativePhotoView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 18) {
+                VStack(spacing: 14) {
                     destinationAccountCard
+                    captureControls
 
                     if let selectedImage {
                         imagePreview(selectedImage)
@@ -1167,19 +1158,10 @@ private struct NativePhotoView: View {
                                 .accessibilityIdentifier("native-media-save-status")
                         }
                     } else {
-                        ContentUnavailableView(
-                            "Capture Field Media",
-                            systemImage: "camera.fill",
-                            description: Text(
-                                "Take a photo, scan a multi-page document, or choose an existing image."
-                            )
-                        )
-                        .frame(minHeight: 300)
+                        captureReadyCard
                     }
-
-                    captureControls
                 }
-                .padding(20)
+                .padding(16)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(NativeShellPalette.background)
@@ -1251,7 +1233,7 @@ private struct NativePhotoView: View {
             .resizable()
             .scaledToFit()
         .aspectRatio(aspectRatio, contentMode: .fit)
-        .frame(maxHeight: 470)
+        .frame(maxHeight: 420)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -1272,11 +1254,11 @@ private struct NativePhotoView: View {
     }
 
     private var destinationAccountCard: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Image(systemName: "building.2.fill")
-                .font(.title3)
+                .font(.subheadline.bold())
                 .foregroundStyle(NativeShellPalette.blue)
-                .frame(width: 42, height: 42)
+                .frame(width: 36, height: 36)
                 .background(NativeShellPalette.blue.opacity(0.14), in: Circle())
 
             VStack(alignment: .leading, spacing: 3) {
@@ -1287,13 +1269,13 @@ private struct NativePhotoView: View {
 
                 if let destinationAccount {
                     Text(destinationAccount.name)
-                        .font(.headline)
+                        .font(.subheadline.bold())
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Text(destinationAccount.address)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                         .lineLimit(2)
+                    Text(destinationAccount.address)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                     if !destinationAccount.accountId.isEmpty {
                         Text("Account ID: \(destinationAccount.accountId)")
                             .font(.caption2.weight(.semibold))
@@ -1301,7 +1283,7 @@ private struct NativePhotoView: View {
                     }
                 } else {
                     Text("Choose an account before capturing")
-                        .font(.headline)
+                        .font(.subheadline.bold())
                         .foregroundStyle(.primary)
                 }
             }
@@ -1312,9 +1294,10 @@ private struct NativePhotoView: View {
                 pendingCaptureIntent = nil
                 showsAccountPicker = true
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
         }
-        .padding(14)
+        .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 18))
         .overlay {
@@ -1357,41 +1340,104 @@ private struct NativePhotoView: View {
     }
 
     private var captureControls: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                Button {
-                    beginCapture(.camera)
-                } label: {
-                    Label("Take Photo", systemImage: "camera.fill")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(NativeShellPalette.red)
-                .accessibilityIdentifier("native-take-photo")
+        HStack(spacing: 10) {
+            captureButton(
+                title: "PHOTO",
+                subtitle: "Camera",
+                symbol: "camera.fill",
+                tint: NativeShellPalette.red,
+                intent: .camera
+            )
+            .accessibilityIdentifier("native-take-photo")
 
-                Button {
-                    beginCapture(.scanner)
-                } label: {
-                    Label("Scan", systemImage: "doc.viewfinder")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(NativeShellPalette.blue)
-                .accessibilityIdentifier("native-scan-document")
-            }
+            captureButton(
+                title: "SCAN",
+                subtitle: "Document",
+                symbol: "doc.viewfinder",
+                tint: NativeShellPalette.blue,
+                intent: .scanner
+            )
+            .accessibilityIdentifier("native-scan-document")
 
-            Button {
-                beginCapture(.photoLibrary)
-            } label: {
-                Label("Choose from Photo Library", systemImage: "photo.on.rectangle")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
+            captureButton(
+                title: "IMPORT",
+                subtitle: "Library",
+                symbol: "photo.on.rectangle",
+                tint: NativeShellPalette.green,
+                intent: .photoLibrary
+            )
             .accessibilityIdentifier("native-choose-photo")
         }
+    }
+
+    private func captureButton(
+        title: String,
+        subtitle: String,
+        symbol: String,
+        tint: Color,
+        intent: CaptureIntent
+    ) -> some View {
+        Button {
+            beginCapture(intent)
+        } label: {
+            VStack(spacing: 7) {
+                Image(systemName: symbol)
+                    .font(.system(size: 24, weight: .semibold))
+                VStack(spacing: 1) {
+                    Text(title)
+                        .font(.caption.bold())
+                        .tracking(0.7)
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 82)
+            .background(
+                LinearGradient(
+                    colors: [tint.opacity(0.92), tint.opacity(0.55)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.white.opacity(0.16), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .shadow(color: tint.opacity(0.18), radius: 8, y: 4)
+    }
+
+    private var captureReadyCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "camera.aperture")
+                .font(.system(size: 32, weight: .semibold))
+                .foregroundStyle(NativeShellPalette.blue)
+                .frame(width: 58, height: 58)
+                .background(NativeShellPalette.blue.opacity(0.12), in: Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Ready for Field Media")
+                    .font(.headline)
+                Text("Photos receive your saved overlay. Scan supports multi-page documents.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 20))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private func beginCapture(_ intent: CaptureIntent) {

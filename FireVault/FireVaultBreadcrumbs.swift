@@ -701,57 +701,145 @@ struct FireVaultBreadcrumbCompactBar: View {
     let open: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             Button(action: open) {
-                HStack(spacing: 9) {
-                    Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
-                        .foregroundStyle(
-                            breadcrumbs.isRecording
-                                ? NativeShellPalette.green
-                                : NativeShellPalette.blue
-                        )
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("BREADCRUMBS")
-                            .font(.caption2.bold())
-                            .tracking(1)
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(statusTint.opacity(0.18))
+                            .frame(width: 44, height: 44)
+                        Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
+                            .font(.system(size: 19, weight: .bold))
+                            .foregroundStyle(statusTint)
+
+                        Circle()
+                            .fill(statusTint)
+                            .frame(width: 8, height: 8)
+                            .overlay { Circle().stroke(.black.opacity(0.55), lineWidth: 1.5) }
+                            .offset(x: 16, y: -16)
+                            .shadow(color: statusTint.opacity(0.8), radius: breadcrumbs.isRecording ? 5 : 0)
+                    }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 7) {
+                            Text("TRIP LOG")
+                                .font(.caption.bold())
+                                .tracking(1.25)
+                                .foregroundStyle(.white)
+                            Text(statusLabel)
+                                .font(.caption2.bold())
+                                .foregroundStyle(statusTint)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(statusTint.opacity(0.14), in: Capsule())
+                        }
                         Text(compactStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.68))
                             .lineLimit(1)
                     }
-                    Spacer()
+
+                    Spacer(minLength: 4)
+
+                    if let day = breadcrumbs.today {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("\(day.stops.count)")
+                                .font(.headline.bold().monospacedDigit())
+                                .foregroundStyle(.white)
+                            Text("STOPS")
+                                .font(.system(size: 8, weight: .bold))
+                                .tracking(0.8)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     Image(systemName: "chevron.right")
                         .font(.caption.bold())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.white.opacity(0.48))
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             if breadcrumbs.activeDay == nil {
-                Button("Start") {
+                Button {
                     breadcrumbs.startWorkday(accounts: accounts)
                     open()
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: "play.fill")
+                            .font(.subheadline.bold())
+                        Text("START")
+                            .font(.caption2.bold())
+                            .tracking(0.6)
+                    }
+                    .foregroundStyle(.white)
+                    .frame(width: 54, height: 48)
+                    .background(NativeShellPalette.green, in: RoundedRectangle(cornerRadius: 14))
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Start Trip Log")
             } else if !breadcrumbs.isRecording {
-                Button("Resume") {
+                Button {
                     breadcrumbs.resumeWorkday(accounts: accounts)
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: "play.fill")
+                            .font(.subheadline.bold())
+                        Text("RESUME")
+                            .font(.system(size: 8, weight: .bold))
+                            .tracking(0.35)
+                    }
+                    .foregroundStyle(.black)
+                    .frame(width: 58, height: 48)
+                    .background(NativeShellPalette.amber, in: RoundedRectangle(cornerRadius: 14))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Resume Trip Log")
             }
         }
         .padding(.horizontal, 12)
-        .frame(minHeight: 44)
-        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 15))
-        .overlay {
-            RoundedRectangle(cornerRadius: 15)
-                .stroke(.white.opacity(0.08), lineWidth: 1)
+        .padding(.vertical, 9)
+        .frame(minHeight: 66)
+        .background {
+            LinearGradient(
+                colors: [
+                    NativeShellPalette.blue.opacity(0.20),
+                    NativeShellPalette.surface,
+                    statusTint.opacity(0.10)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [.white.opacity(0.18), statusTint.opacity(0.38)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        }
+        .shadow(color: statusTint.opacity(0.12), radius: 10, y: 4)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("breadcrumbs-compact-bar")
+    }
+
+    private var statusTint: Color {
+        if breadcrumbs.isRecording { return NativeShellPalette.green }
+        if breadcrumbs.activeDay?.isPaused == true { return NativeShellPalette.amber }
+        return NativeShellPalette.blue
+    }
+
+    private var statusLabel: String {
+        if breadcrumbs.isRecording { return "LIVE" }
+        if breadcrumbs.activeDay?.isPaused == true { return "PAUSED" }
+        if breadcrumbs.today != nil { return "COMPLETE" }
+        return "READY"
     }
 
     private var compactStatus: String {

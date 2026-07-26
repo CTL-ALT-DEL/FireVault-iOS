@@ -58,6 +58,47 @@ struct FireVaultOverlayPreviewGeometry {
     }
 }
 
+struct FireVaultOverlayPanelSizing {
+    struct Metrics: Equatable {
+        let informationWidth: CGFloat
+        let panelWidth: CGFloat
+    }
+
+    static func metrics(
+        siteName: String,
+        maximumFieldLength: Int,
+        hasTechnician: Bool,
+        canvasWidth: CGFloat,
+        scale: Double
+    ) -> Metrics {
+        let technicianAllowance: CGFloat = hasTechnician ? 76 : 0
+        let maximumPanelWidth = max(
+            180,
+            min(560, (canvasWidth - 20) / max(scale, 0.45))
+        )
+        let desiredInformationWidth = max(
+            145,
+            CGFloat(siteName.count) * 6.7,
+            CGFloat(maximumFieldLength) * 5.9
+        )
+        let availableInformationWidth = max(
+            145,
+            maximumPanelWidth - technicianAllowance - 28
+        )
+        let informationWidth = min(
+            availableInformationWidth,
+            desiredInformationWidth
+        )
+        return Metrics(
+            informationWidth: informationWidth,
+            panelWidth: min(
+                maximumPanelWidth,
+                informationWidth + technicianAllowance + 28
+            )
+        )
+    }
+}
+
 private struct FireVaultOverlayDragSurface: UIViewRepresentable {
     let canBegin: (CGPoint) -> Bool
     let onBegan: (CGPoint) -> Void
@@ -266,20 +307,20 @@ struct FireVaultPhotoOverlayView: View {
     private var glassShadowRadius: CGFloat { isThickGlass ? 12 : 8 }
     private var glassShadowOpacity: Double { isClearGlass ? 0.22 : 0.32 }
 
-    private var informationWidth: CGFloat {
-        let longest = max(siteName.count, informationFields.map(\.value.count).max() ?? 0)
-        return min(300, max(145, CGFloat(longest) * 5.9))
-    }
-
-    private var panelWidth: CGFloat {
-        let technicianAllowance: CGFloat = technicianField == nil ? 0 : 76
-        return min(410, informationWidth + technicianAllowance + 28)
+    private func panelMetrics(canvasWidth: CGFloat) -> FireVaultOverlayPanelSizing.Metrics {
+        FireVaultOverlayPanelSizing.metrics(
+            siteName: siteName,
+            maximumFieldLength: informationFields.map(\.value.count).max() ?? 0,
+            hasTechnician: technicianField != nil,
+            canvasWidth: canvasWidth,
+            scale: preferences.scale
+        )
     }
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                glassPanel
+                glassPanel(metrics: panelMetrics(canvasWidth: geometry.size.width))
                     .scaleEffect(preferences.scale)
                     .position(
                         x: geometry.size.width * (0.5 + CGFloat(preferences.positionX) * 0.36),
@@ -300,8 +341,8 @@ struct FireVaultPhotoOverlayView: View {
         .accessibilityLabel(["FireVault photo overlay", siteName, address, technicianName, formattedTimestamp].joined(separator: ", "))
     }
 
-    private var glassPanel: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+    private func glassPanel(metrics: FireVaultOverlayPanelSizing.Metrics) -> some View {
+        return HStack(alignment: .bottom, spacing: 8) {
             VStack(alignment: .leading, spacing: 1.5) {
                 if preferences.showTagline, !preferences.tagline.isEmpty {
                     Text(preferences.tagline)
@@ -316,11 +357,11 @@ struct FireVaultPhotoOverlayView: View {
                         .font(index == 0 ? titleFont : detailFont)
                         .foregroundStyle(index == 0 ? .white : .white.opacity(0.9))
                         .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .minimumScaleFactor(index == 0 ? 0.66 : 0.78)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .frame(width: informationWidth, alignment: .leading)
+            .frame(width: metrics.informationWidth, alignment: .leading)
 
             if let technicianField {
                 Rectangle().fill(.white.opacity(0.23)).frame(width: 1, height: 32)
@@ -341,7 +382,7 @@ struct FireVaultPhotoOverlayView: View {
         }
         .padding(.horizontal, isThickGlass ? 11 : 9)
         .padding(.vertical, isThickGlass ? 9 : 7)
-        .frame(width: panelWidth, alignment: .leading)
+        .frame(width: metrics.panelWidth, alignment: .leading)
         .background {
             ZStack {
                 if isThickGlass {
@@ -523,10 +564,11 @@ struct FireVaultOverlayPreview: View {
     }
 
     private func dragTarget(at location: CGPoint, size: CGSize) -> DragTarget? {
+        let resolvedPanelWidth = estimatedPanelWidth(in: size)
         let overlayRect = CGRect(
-            x: overlayCenter(in: size).x - estimatedPanelWidth * editedPreferences.scale / 2,
+            x: overlayCenter(in: size).x - resolvedPanelWidth * editedPreferences.scale / 2,
             y: overlayCenter(in: size).y - estimatedPanelHeight * editedPreferences.scale / 2,
-            width: estimatedPanelWidth * editedPreferences.scale,
+            width: resolvedPanelWidth * editedPreferences.scale,
             height: estimatedPanelHeight * editedPreferences.scale
         )
 
@@ -570,7 +612,7 @@ struct FireVaultOverlayPreview: View {
         )
     }
 
-    private var estimatedPanelWidth: CGFloat {
+    private func estimatedPanelWidth(in size: CGSize) -> CGFloat {
         let fields = FireVaultOverlayTemplateFormatter.resolvedFields(
             preferences: editedPreferences,
             siteName: siteName,
@@ -580,10 +622,16 @@ struct FireVaultOverlayPreview: View {
             technicianName: technicianName,
             timestamp: .now
         )
-        let longest = max(siteName.count, fields.filter { $0.field != .technician }.map(\.value.count).max() ?? 0)
-        let informationWidth = min(300, max(145, CGFloat(longest) * 5.9))
-        let hasTechnician = fields.contains { $0.field == .technician }
-        return min(410, informationWidth + (hasTechnician ? 76 : 0) + 28)
+        return FireVaultOverlayPanelSizing.metrics(
+            siteName: siteName,
+            maximumFieldLength: fields
+                .filter { $0.field != .technician }
+                .map(\.value.count)
+                .max() ?? 0,
+            hasTechnician: fields.contains { $0.field == .technician },
+            canvasWidth: size.width,
+            scale: editedPreferences.scale
+        ).panelWidth
     }
 
     private var estimatedPanelHeight: CGFloat {
@@ -889,7 +937,7 @@ struct FireVaultOverlayPlacementEditor: View {
 
     private func placementTarget(at point: CGPoint, size: CGSize) -> PlacementTarget? {
         let overlaySize = CGSize(
-            width: estimatedPanelWidth * editedPreferences.scale,
+            width: estimatedPanelWidth(in: size) * editedPreferences.scale,
             height: estimatedPanelHeight * editedPreferences.scale
         )
         let overlayRect = CGRect(
@@ -964,17 +1012,18 @@ struct FireVaultOverlayPlacementEditor: View {
         )
     }
 
-    private var estimatedPanelWidth: CGFloat {
+    private func estimatedPanelWidth(in size: CGSize) -> CGFloat {
         let fields = resolvedFields
-        let longest = max(
-            siteName.count,
-            fields.filter { $0.field != .technician }.map(\.value.count).max() ?? 0
-        )
-        let informationWidth = min(300, max(145, CGFloat(longest) * 5.9))
-        return min(
-            410,
-            informationWidth + (fields.contains { $0.field == .technician } ? 76 : 0) + 28
-        )
+        return FireVaultOverlayPanelSizing.metrics(
+            siteName: siteName,
+            maximumFieldLength: fields
+                .filter { $0.field != .technician }
+                .map(\.value.count)
+                .max() ?? 0,
+            hasTechnician: fields.contains { $0.field == .technician },
+            canvasWidth: size.width,
+            scale: editedPreferences.scale
+        ).panelWidth
     }
 
     private var estimatedPanelHeight: CGFloat {

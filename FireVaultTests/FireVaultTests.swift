@@ -541,6 +541,27 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(size.height, 430, accuracy: 0.000_001)
     }
 
+    func testPhotoOverlayPanelExpandsForLongCustomerNameWithinCanvas() {
+        let short = FireVaultOverlayPanelSizing.metrics(
+            siteName: "City Hall",
+            maximumFieldLength: 18,
+            hasTechnician: true,
+            canvasWidth: 573.333,
+            scale: 1
+        )
+        let long = FireVaultOverlayPanelSizing.metrics(
+            siteName: "North Riverside Fire and Life Safety Operations Center",
+            maximumFieldLength: 54,
+            hasTechnician: true,
+            canvasWidth: 573.333,
+            scale: 1
+        )
+
+        XCTAssertGreaterThan(long.panelWidth, short.panelWidth)
+        XCTAssertLessThanOrEqual(long.panelWidth, 553.334)
+        XCTAssertGreaterThan(long.informationWidth, short.informationWidth)
+    }
+
     func testPhotoOverlayPreferencesPreserveRequiredAccountFields() {
         var preferences = FireVaultOverlayPreferences()
         preferences.fieldTemplate = "{technician}"

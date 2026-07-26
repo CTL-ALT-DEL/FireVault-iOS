@@ -215,6 +215,8 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
 
     @State private var selectedID: String?
+    @State private var scrollingID: String?
+    @State private var accountScrollIsActive = false
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var showsBreadcrumbs = false
     @State private var mapLayer: FireVaultIPadNearbyMapLayer = .standard
@@ -267,6 +269,14 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
         .task { resetMapSelection() }
         .onChange(of: settings.gps.nearbyRadiusMiles) { _, _ in resetMapSelection() }
         .onChange(of: store.nearbyResetRequestID) { _, _ in resetMapSelection() }
+        .onChange(of: scrollingID) { _, newID in
+            guard accountScrollIsActive,
+                  let newID,
+                  let row = nearbyRows.first(where: { $0.id == newID }) else {
+                return
+            }
+            select(row, haptic: true, updateScrollPosition: false)
+        }
         .fullScreenCover(isPresented: $showsBreadcrumbs) {
             FireVaultIPadBreadcrumbsView(
                 breadcrumbs: breadcrumbs,
@@ -491,11 +501,19 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                     LazyVStack(spacing: 9) {
                         ForEach(Array(nearbyRows.enumerated()), id: \.element.id) { index, row in
                             nearbyCard(row, index: index)
+                                .id(row.id)
                         }
                     }
+                    .scrollTargetLayout()
                     .padding(.bottom, 12)
                 }
                 .scrollIndicators(.hidden)
+                .scrollPosition(id: $scrollingID, anchor: .top)
+                .scrollTargetBehavior(.viewAligned)
+                .contentMargins(.bottom, 280, for: .scrollContent)
+                .onScrollPhaseChange { _, phase in
+                    accountScrollIsActive = phase.isScrolling
+                }
             }
         }
         .padding(14)
@@ -509,7 +527,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
     private func nearbyCard(_ row: FireVaultNativeNearbyAccount, index: Int) -> some View {
         HStack(spacing: 8) {
             Button {
-                select(row)
+                select(row, haptic: true, updateScrollPosition: true)
             } label: {
                 HStack(alignment: .top, spacing: 10) {
                     Text("\(index + 1)")
@@ -567,9 +585,21 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
         }
     }
 
-    private func select(_ row: FireVaultNativeNearbyAccount) {
+    private func select(
+        _ row: FireVaultNativeNearbyAccount,
+        haptic: Bool = false,
+        updateScrollPosition: Bool = false
+    ) {
+        let selectionChanged = selectedID != row.id
         selectedID = row.id
+        if updateScrollPosition { scrollingID = row.id }
         store.selectCaptureAccount(row.account.id)
+
+        if selectionChanged, haptic, settings.gps.hapticsAreEnabled {
+            let feedback = UISelectionFeedbackGenerator()
+            feedback.prepare()
+            feedback.selectionChanged()
+        }
 
         guard let coordinate = row.account.coordinate else { return }
         withAnimation(.easeInOut(duration: 0.3)) {
@@ -586,6 +616,8 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
 
     private func resetMapSelection() {
         selectedID = nearbyRows.first?.id
+        scrollingID = selectedID
+        accountScrollIsActive = false
         let latitudeDistance = overviewRegion.span.latitudeDelta * 111_000
         let longitudeDistance = overviewRegion.span.longitudeDelta * 85_000
         cameraPosition = .camera(
