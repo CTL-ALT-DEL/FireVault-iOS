@@ -8,6 +8,33 @@
 import MapKit
 import SwiftUI
 
+private enum FireVaultAccountDetailSection: String, CaseIterable, Identifiable {
+    case notes = "NOTES"
+    case documents = "FILES & SCANS"
+    case equipment = "EQUIPMENT"
+    case locations = "LOCATIONS"
+
+    var id: String { rawValue }
+
+    var symbol: String {
+        switch self {
+        case .notes: "note.text"
+        case .documents: "doc.viewfinder"
+        case .equipment: "wrench.and.screwdriver.fill"
+        case .locations: "mappin.and.ellipse"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .notes: NativeShellPalette.amber
+        case .documents: NativeShellPalette.blue
+        case .equipment: NativeShellPalette.green
+        case .locations: NativeShellPalette.purple
+        }
+    }
+}
+
 struct FireVaultAdaptiveAccountDetailsView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
@@ -16,6 +43,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
 
     @State private var addressCamera: MapCameraPosition = .automatic
     @State private var pinsCamera: MapCameraPosition = .automatic
+    @State private var selectedSection: FireVaultAccountDetailSection = .notes
 
     private var mappedPins: [FireVaultWorkspaceLocation] {
         account.locations.filter { $0.coordinate != nil }
@@ -46,8 +74,8 @@ struct FireVaultAdaptiveAccountDetailsView: View {
 
             GeometryReader { geometry in
                 let availableWidth = max(0, geometry.size.width - 36)
-                let availableMapHeight = max(220, geometry.size.height * 0.48)
-                let mapSide = min((availableWidth - 12) / 2, availableMapHeight)
+                let mapHeightLimit = max(210, geometry.size.height * 0.46)
+                let mapSide = min((availableWidth - 12) / 2, mapHeightLimit)
 
                 ScrollView {
                     VStack(spacing: 12) {
@@ -68,11 +96,12 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                         }
                         .frame(maxWidth: .infinity)
 
-                        compactActions
+                        sectionSelector
+                        selectedSectionContent
                         compactAccountSummary
                     }
                     .padding(.horizontal, 18)
-                    .padding(.bottom, 24)
+                    .padding(.bottom, 28)
                 }
                 .scrollIndicators(.hidden)
             }
@@ -81,6 +110,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
         .task(id: account.id) {
             addressCamera = .region(addressRegion)
             pinsCamera = .region(pinRegion)
+            selectedSection = .notes
         }
         .accessibilityIdentifier("adaptive-account-dual-map-details")
     }
@@ -167,6 +197,10 @@ struct FireVaultAdaptiveAccountDetailsView: View {
 
     private var pinMap: some View {
         Map(position: $pinsCamera, interactionModes: [.pan, .zoom, .rotate]) {
+            if mappedPins.isEmpty, let coordinate = account.coordinate {
+                Marker(account.name, systemImage: "building.2.fill", coordinate: coordinate)
+                    .tint(NativeShellPalette.red)
+            }
             ForEach(mappedPins) { location in
                 if let coordinate = location.coordinate {
                     Marker(location.label, systemImage: "mappin", coordinate: coordinate)
@@ -178,76 +212,154 @@ struct FireVaultAdaptiveAccountDetailsView: View {
         .accessibilityIdentifier("account-all-pin-locations-map")
     }
 
-    private var compactActions: some View {
-        HStack(spacing: 8) {
-            compactAction(
-                title: "NOTES",
-                count: account.notes.count,
-                symbol: "note.text",
-                tint: NativeShellPalette.amber
-            ) { store.addNote(to: account.id) }
-
-            compactAction(
-                title: "FILES & SCANS",
-                count: account.documents.count,
-                symbol: "doc.viewfinder",
-                tint: NativeShellPalette.blue
-            ) { store.addDocument(to: account.id, scan: true) }
-
-            compactAction(
-                title: "EQUIPMENT",
-                count: account.equipment.count,
-                symbol: "wrench.and.screwdriver.fill",
-                tint: NativeShellPalette.green
-            ) { store.addEquipment(to: account.id) }
-
-            compactAction(
-                title: "LOCATIONS",
-                count: account.locations.count,
-                symbol: "mappin.and.ellipse",
-                tint: NativeShellPalette.purple
-            ) {
-                store.addLocation(to: account.id)
-                pinsCamera = .region(pinRegion)
+    private var sectionSelector: some View {
+        HStack(spacing: 7) {
+            ForEach(FireVaultAccountDetailSection.allCases) { section in
+                Button {
+                    selectedSection = section
+                    UISelectionFeedbackGenerator().selectionChanged()
+                } label: {
+                    VStack(spacing: 3) {
+                        HStack(spacing: 5) {
+                            Image(systemName: section.symbol)
+                                .font(.caption.bold())
+                                .foregroundStyle(section.tint)
+                            Text(section.rawValue)
+                                .font(.caption2.bold())
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                        }
+                        Text("\(count(for: section))")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .padding(.horizontal, 6)
+                    .background(
+                        selectedSection == section
+                            ? section.tint.opacity(0.18)
+                            : NativeShellPalette.surface,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(
+                                selectedSection == section ? section.tint.opacity(0.8) : .white.opacity(0.07),
+                                lineWidth: selectedSection == section ? 1.5 : 1
+                            )
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(section.rawValue), \(count(for: section)) items")
             }
         }
     }
 
-    private func compactAction(
-        title: String,
-        count: Int,
-        symbol: String,
-        tint: Color,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 7) {
-                Image(systemName: symbol)
-                    .font(.subheadline.bold())
-                    .foregroundStyle(tint)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(title)
-                        .font(.caption2.bold())
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Text("\(count)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "plus.circle.fill")
-                    .font(.caption)
+    @ViewBuilder
+    private var selectedSectionContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(selectedSection.rawValue, systemImage: selectedSection.symbol)
+                    .font(.caption.bold())
+                    .tracking(0.9)
+                    .foregroundStyle(selectedSection.tint)
+                Spacer()
+                Text("\(count(for: selectedSection)) total")
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 48)
-            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .stroke(.white.opacity(0.07), lineWidth: 1)
+
+            switch selectedSection {
+            case .notes:
+                if account.notes.isEmpty {
+                    emptyRow("No notes saved", symbol: "note.text")
+                } else {
+                    ForEach(account.notes) { note in
+                        dataRow(title: note.title, subtitle: note.text, trailing: note.date, symbol: "note.text")
+                    }
+                }
+            case .documents:
+                if account.documents.isEmpty {
+                    emptyRow("No files or scans saved", symbol: "doc.viewfinder")
+                } else {
+                    ForEach(account.documents) { document in
+                        dataRow(title: document.title, subtitle: document.subtitle, trailing: document.date, symbol: document.kind == "scan" ? "doc.viewfinder" : "doc")
+                    }
+                }
+            case .equipment:
+                if account.equipment.isEmpty {
+                    emptyRow("No equipment saved", symbol: "wrench.and.screwdriver")
+                } else {
+                    ForEach(account.equipment) { equipment in
+                        dataRow(title: equipment.title, subtitle: equipment.subtitle, trailing: equipment.status, symbol: "wrench.and.screwdriver.fill")
+                    }
+                }
+            case .locations:
+                if account.locations.isEmpty {
+                    emptyRow("No locations saved", symbol: "mappin.slash")
+                } else {
+                    ForEach(account.locations) { location in
+                        dataRow(
+                            title: location.label,
+                            subtitle: [location.subtitle, location.plusCode].filter { !$0.isEmpty }.joined(separator: " • "),
+                            trailing: location.type,
+                            symbol: "mappin.circle.fill"
+                        )
+                    }
+                }
             }
         }
-        .buttonStyle(.plain)
+        .padding(12)
+        .background(NativeShellPalette.navigationBackground.opacity(0.72), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+    }
+
+    private func dataRow(title: String, subtitle: String, trailing: String, symbol: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .foregroundStyle(selectedSection.tint)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 8)
+            if !trailing.isEmpty {
+                Text(trailing)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 7)
+        .padding(.horizontal, 9)
+        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    private func emptyRow(_ message: String, symbol: String) -> some View {
+        Label(message, systemImage: symbol)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+            .padding(.horizontal, 10)
+            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    private func count(for section: FireVaultAccountDetailSection) -> Int {
+        switch section {
+        case .notes: account.notes.count
+        case .documents: account.documents.count
+        case .equipment: account.equipment.count
+        case .locations: account.locations.count
+        }
     }
 
     private var compactAccountSummary: some View {
@@ -261,7 +373,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
             Button {
                 store.toggleFavorite(account.id)
             } label: {
-                Label(account.favorite ? "Favorite" : "Favorite", systemImage: account.favorite ? "star.fill" : "star")
+                Label("Favorite", systemImage: account.favorite ? "star.fill" : "star")
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
