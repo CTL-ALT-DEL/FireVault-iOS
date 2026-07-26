@@ -402,6 +402,13 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                         Image(systemName: tab.symbol)
                             .font(.system(size: 20, weight: selected ? .bold : .semibold))
                             .symbolVariant(selected ? .fill : .none)
+                            .foregroundStyle(
+                                tab == .trip && breadcrumbs.isRecording
+                                    ? NativeShellPalette.green
+                                    : (selected
+                                        ? NativeShellPalette.blue
+                                        : NativeShellPalette.navigationInactive)
+                            )
                         Text(tab.title)
                             .font(.caption2.weight(selected ? .bold : .semibold))
                     }

@@ -31,6 +31,42 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(FireVaultShellTab.trip.symbol, "truck.box.fill")
     }
 
+    func testTripLogTelemetryCountsOnlyWaypointsFromTheLastMinute() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let points = [
+            FireVaultBreadcrumbPoint(
+                timestamp: now.addingTimeInterval(-10),
+                latitude: 42.85,
+                longitude: -106.32,
+                horizontalAccuracy: 12
+            ),
+            FireVaultBreadcrumbPoint(
+                timestamp: now.addingTimeInterval(-59),
+                latitude: 42.86,
+                longitude: -106.31,
+                horizontalAccuracy: 12
+            ),
+            FireVaultBreadcrumbPoint(
+                timestamp: now.addingTimeInterval(-61),
+                latitude: 42.87,
+                longitude: -106.30,
+                horizontalAccuracy: 12
+            ),
+            FireVaultBreadcrumbPoint(
+                timestamp: now.addingTimeInterval(1),
+                latitude: 42.88,
+                longitude: -106.29,
+                horizontalAccuracy: 12
+            )
+        ]
+        let day = FireVaultBreadcrumbDay(startedAt: now.addingTimeInterval(-600), points: points)
+
+        XCTAssertEqual(
+            FireVaultTripLogTelemetry.recentWaypointCount(in: day, endingAt: now),
+            2
+        )
+    }
+
     func testCaptureQuickActionIsConsumedOnlyOnce() throws {
         let suite = "FireVaultTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

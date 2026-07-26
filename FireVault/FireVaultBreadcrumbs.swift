@@ -119,6 +119,19 @@ struct FireVaultBreadcrumbDay: Codable, Identifiable, Equatable {
     }
 }
 
+enum FireVaultTripLogTelemetry {
+    static func recentWaypointCount(
+        in day: FireVaultBreadcrumbDay,
+        endingAt date: Date,
+        interval: TimeInterval = 60
+    ) -> Int {
+        let cutoff = date.addingTimeInterval(-max(0, interval))
+        return day.points.count { point in
+            point.timestamp >= cutoff && point.timestamp <= date
+        }
+    }
+}
+
 enum FireVaultBreadcrumbRules {
     static let maximumHorizontalAccuracy: CLLocationAccuracy = 100
     static let minimumPointDistance: CLLocationDistance = 12

@@ -21,6 +21,8 @@ struct FireVaultIPadBreadcrumbsView: View {
     @State private var selectedStop: FireVaultIPadStopSelection?
     @State private var confirmsEnd = false
     @State private var showsReport = false
+    @State private var waypointPulse = false
+    @State private var waypointPulseTask: Task<Void, Never>?
 
     private var selectedDay: FireVaultBreadcrumbDay? {
         if let selectedDayID {
@@ -34,12 +36,16 @@ struct FireVaultIPadBreadcrumbsView: View {
             GeometryReader { geometry in
                 let rightColumnWidth = max(360, min(440, geometry.size.width * 0.34))
                 let mapLimit = max(420, geometry.size.width - rightColumnWidth - 48)
-                let mapSide = min(max(420, geometry.size.height - 28), mapLimit)
+                let mapSide = min(max(420, geometry.size.height - 48), mapLimit)
 
                 HStack(alignment: .top, spacing: 16) {
                     if let day = selectedDay {
-                        routeMap(day)
-                            .frame(width: mapSide, height: mapSide)
+                        VStack(alignment: .leading, spacing: 6) {
+                            gpsTelemetry(day)
+                            routeMap(day)
+                                .frame(width: mapSide, height: mapSide)
+                        }
+                        .frame(width: mapSide)
                     } else {
                         ContentUnavailableView(
                             "No Trip Log Yet",
@@ -71,7 +77,7 @@ struct FireVaultIPadBreadcrumbsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .background(NativeShellPalette.background)
-            .navigationTitle("Trip Log")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -103,6 +109,13 @@ struct FireVaultIPadBreadcrumbsView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             selectedDayID = breadcrumbs.today?.id ?? breadcrumbs.days.first?.id
+        }
+        .onChange(of: selectedDay?.points.count ?? 0) { previousCount, newCount in
+            guard newCount > previousCount, breadcrumbs.isRecording else { return }
+            flashWaypointLED()
+        }
+        .onDisappear {
+            waypointPulseTask?.cancel()
         }
         .sheet(item: $selectedStop) { selection in
             FireVaultIPadStopEditor(
@@ -162,6 +175,48 @@ struct FireVaultIPadBreadcrumbsView: View {
                     .accessibilityLabel("Trip Log history")
                 }
             }
+        }
+    }
+
+    private func gpsTelemetry(_ day: FireVaultBreadcrumbDay) -> some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(NativeShellPalette.red)
+                    .frame(width: 7, height: 7)
+                    .scaleEffect(waypointPulse ? 1.65 : 1)
+                    .opacity(waypointPulse ? 1 : 0.42)
+                    .shadow(
+                        color: NativeShellPalette.red.opacity(waypointPulse ? 0.95 : 0.25),
+                        radius: waypointPulse ? 7 : 2
+                    )
+
+                Text(
+                    "\(FireVaultTripLogTelemetry.recentWaypointCount(in: day, endingAt: context.date)) WAYPOINTS / MIN"
+                )
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .tracking(0.7)
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+            }
+            .animation(.easeOut(duration: 0.22), value: waypointPulse)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "\(FireVaultTripLogTelemetry.recentWaypointCount(in: day, endingAt: context.date)) GPS waypoints recorded in the last minute"
+            )
+        }
+        .frame(height: 10)
+        .accessibilityIdentifier("ipad-trip-log-gps-telemetry")
+    }
+
+    private func flashWaypointLED() {
+        waypointPulseTask?.cancel()
+        waypointPulse = true
+        waypointPulseTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            waypointPulse = false
         }
     }
 

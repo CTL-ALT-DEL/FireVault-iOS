@@ -201,12 +201,23 @@ struct NativeAppShellView: View {
                         Image(systemName: tab.symbol)
                             .font(.system(size: 20, weight: isSelected ? .bold : .semibold))
                             .symbolVariant(isSelected ? .fill : .none)
+                            .foregroundStyle(
+                                tab == .trip && breadcrumbs.isRecording
+                                    ? NativeShellPalette.green
+                                    : (isSelected
+                                        ? NativeShellPalette.blue
+                                        : NativeShellPalette.navigationInactive)
+                            )
                         Text(tab.title)
                             .font(.caption2.weight(isSelected ? .bold : .semibold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
+                            .foregroundStyle(
+                                isSelected
+                                    ? NativeShellPalette.blue
+                                    : NativeShellPalette.navigationInactive
+                            )
                     }
-                    .foregroundStyle(isSelected ? NativeShellPalette.blue : NativeShellPalette.navigationInactive)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: 58)
                     .contentShape(Rectangle())

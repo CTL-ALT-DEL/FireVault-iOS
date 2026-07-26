@@ -21,6 +21,8 @@ struct FireVaultTripLogPortraitView: View {
     @State private var editingStop: FireVaultTripLogPortraitStopSelection?
     @State private var confirmsEnd = false
     @State private var showsReport = false
+    @State private var waypointPulse = false
+    @State private var waypointPulseTask: Task<Void, Never>?
 
     private var selectedDay: FireVaultBreadcrumbDay? {
         if let selectedDayID {
@@ -36,6 +38,8 @@ struct FireVaultTripLogPortraitView: View {
                     if let day = selectedDay {
                         let availableWidth = max(0, geometry.size.width - 28)
                         let mapHeight = min(availableWidth, max(190, geometry.size.height * 0.34))
+
+                        gpsTelemetry(day)
 
                         squareMap(day)
                             .frame(height: mapHeight)
@@ -53,12 +57,13 @@ struct FireVaultTripLogPortraitView: View {
                     }
                 }
                 .padding(.horizontal, 14)
-                .padding(.top, 8)
+                .padding(.top, showsCloseButton ? 8 : 2)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .background(NativeShellPalette.background)
-            .navigationTitle("Trip Log")
+            .navigationTitle(showsCloseButton ? "Trip Log" : "")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationBarHidden(!showsCloseButton)
             .toolbar {
                 if showsCloseButton {
                     ToolbarItem(placement: .topBarLeading) {
@@ -85,6 +90,13 @@ struct FireVaultTripLogPortraitView: View {
         .onAppear {
             selectedDayID = breadcrumbs.today?.id ?? breadcrumbs.days.first?.id
         }
+        .onChange(of: selectedDay?.points.count ?? 0) { previousCount, newCount in
+            guard newCount > previousCount, breadcrumbs.isRecording else { return }
+            flashWaypointLED()
+        }
+        .onDisappear {
+            waypointPulseTask?.cancel()
+        }
         .sheet(item: $editingStop) { selection in
             FireVaultTripLogPortraitStopEditorBridge(
                 breadcrumbs: breadcrumbs,
@@ -104,6 +116,48 @@ struct FireVaultTripLogPortraitView: View {
                     )
                 )
             }
+        }
+    }
+
+    private func gpsTelemetry(_ day: FireVaultBreadcrumbDay) -> some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(NativeShellPalette.red)
+                    .frame(width: 7, height: 7)
+                    .scaleEffect(waypointPulse ? 1.65 : 1)
+                    .opacity(waypointPulse ? 1 : 0.42)
+                    .shadow(
+                        color: NativeShellPalette.red.opacity(waypointPulse ? 0.95 : 0.25),
+                        radius: waypointPulse ? 7 : 2
+                    )
+
+                Text(
+                    "\(FireVaultTripLogTelemetry.recentWaypointCount(in: day, endingAt: context.date)) WAYPOINTS / MIN"
+                )
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .tracking(0.7)
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+            }
+            .animation(.easeOut(duration: 0.22), value: waypointPulse)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "\(FireVaultTripLogTelemetry.recentWaypointCount(in: day, endingAt: context.date)) GPS waypoints recorded in the last minute"
+            )
+        }
+        .frame(height: 10)
+        .accessibilityIdentifier("trip-log-gps-telemetry")
+    }
+
+    private func flashWaypointLED() {
+        waypointPulseTask?.cancel()
+        waypointPulse = true
+        waypointPulseTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            waypointPulse = false
         }
     }
 
@@ -273,29 +327,20 @@ struct FireVaultTripLogPortraitView: View {
     }
 
     private func recordingIndicator(_ day: FireVaultBreadcrumbDay) -> some View {
-        HStack(spacing: 7) {
-            ZStack {
-                Circle()
-                    .fill(indicatorTint.opacity(0.18))
-                    .frame(width: 34, height: 34)
-                Circle()
-                    .fill(indicatorTint)
-                    .frame(width: 10, height: 10)
-                    .shadow(color: indicatorTint.opacity(0.75), radius: breadcrumbs.isRecording ? 6 : 0)
-            }
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(indicatorTitle)
-                    .font(.caption.bold())
-                    .tracking(0.8)
-                    .foregroundStyle(indicatorTint)
-                Text(indicatorDetail(day))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+        VStack(alignment: .leading, spacing: 1) {
+            Text(indicatorTitle)
+                .font(.caption.bold())
+                .tracking(0.8)
+                .foregroundStyle(indicatorTint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(indicatorDetail(day))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
         }
-        .frame(maxWidth: 126, alignment: .leading)
+        .frame(maxWidth: 145, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 

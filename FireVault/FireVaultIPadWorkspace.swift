@@ -87,6 +87,11 @@ struct FireVaultIPadWorkspace: View {
                 Image(systemName: tab.symbol)
                     .font(.system(size: 17, weight: .semibold))
                     .symbolVariant(selected ? .fill : .none)
+                    .foregroundStyle(
+                        tab == .trip && breadcrumbs.isRecording
+                            ? NativeShellPalette.green
+                            : (selected ? .white : NativeShellPalette.navigationInactive)
+                    )
                     .frame(width: 26)
 
                 Text(tab.title)
