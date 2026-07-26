@@ -534,6 +534,13 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(size.width, 430, accuracy: 0.000_001)
     }
 
+    func testPhotoOverlayPlacementEditorUsesNativeLandscapeCameraRatio() {
+        let size = FireVaultOverlayPlacementEditor.landscapeDesignSize
+
+        XCTAssertEqual(size.width / size.height, 4.0 / 3.0, accuracy: 0.000_001)
+        XCTAssertEqual(size.height, 430, accuracy: 0.000_001)
+    }
+
     func testPhotoOverlayPreferencesPreserveRequiredAccountFields() {
         var preferences = FireVaultOverlayPreferences()
         preferences.fieldTemplate = "{technician}"

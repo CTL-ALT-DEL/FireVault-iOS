@@ -81,6 +81,13 @@ final class FireVaultQuickActionCenter: ObservableObject {
 final class FireVaultAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        FireVaultOrientationCoordinator.supportedOrientations
+    }
+
+    func application(
+        _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         Task { @MainActor in
@@ -112,6 +119,35 @@ final class FireVaultAppDelegate: NSObject, UIApplicationDelegate {
             configuration.delegateClass = FireVaultSceneDelegate.self
         }
         return configuration
+    }
+}
+
+@MainActor
+enum FireVaultOrientationCoordinator {
+    static var supportedOrientations: UIInterfaceOrientationMask = .portrait
+
+    static func beginOverlayPlacement() {
+        supportedOrientations = .allButUpsideDown
+        updateSupportedOrientations(preferred: .landscape)
+    }
+
+    static func finishOverlayPlacement() {
+        supportedOrientations = .portrait
+        updateSupportedOrientations(preferred: .portrait)
+    }
+
+    private static func updateSupportedOrientations(
+        preferred: UIInterfaceOrientationMask? = nil
+    ) {
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }) else { return }
+
+        scene.keyWindow?.rootViewController?
+            .setNeedsUpdateOfSupportedInterfaceOrientations()
+
+        guard let preferred else { return }
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: preferred))
     }
 }
 

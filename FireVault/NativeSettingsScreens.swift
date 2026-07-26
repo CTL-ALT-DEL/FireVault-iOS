@@ -85,6 +85,7 @@ struct NativeTechnicianSettingsView: View {
 struct NativeOverlaySettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var draft: FireVaultNativePreferences
+    @State private var isPlacementEditorPresented = false
     @FocusState private var focused: Bool
 
     init(settings: FireVaultNativeSettingsStore) {
@@ -95,20 +96,37 @@ struct NativeOverlaySettingsView: View {
     var body: some View {
         Form {
             Section {
-                FireVaultOverlayPreview(
-                    preferences: draft.overlay,
-                    technicianName: draft.technician.name.isEmpty ? "Demo Technician" : draft.technician.name,
-                    siteName: "North Riverside Fire and Life Safety Operations Center",
-                    address: "100 FireVault Way, Boise, ID 83702",
-                    accountID: "FV-1001",
-                    category: "Commercial"
-                )
+                ZStack {
+                    FireVaultOverlayPreview(
+                        preferences: draft.overlay,
+                        technicianName: draft.technician.name.isEmpty ? "Demo Technician" : draft.technician.name,
+                        siteName: "North Riverside Fire and Life Safety Operations Center",
+                        address: "100 FireVault Way, Boise, ID 83702",
+                        accountID: "FV-1001",
+                        category: "Commercial"
+                    )
+                    .allowsHitTesting(false)
+
+                    VStack(spacing: 6) {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.title2.bold())
+                        Text("Tap to position")
+                            .font(.caption.bold())
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.66), in: Capsule())
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { isPlacementEditorPresented = true }
                 .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
                 .accessibilityIdentifier("overlay-sample-preview")
+                .accessibilityLabel("Open full-screen Photo Overlay placement editor")
             } header: {
                 Text("Preview")
             } footer: {
-                Text("Touch and drag the logo or glass overlay directly. Releasing your finger locks that item in its new position.")
+                Text("Tap the photo to position and resize the overlay and FireVault logo in a full-screen landscape editor.")
             }
 
             Section("Appearance") {
@@ -186,6 +204,21 @@ struct NativeOverlaySettingsView: View {
             preservePlacedElements()
             draft.overlay.backgroundStyle = "frosted"
             settings.save(draft)
+        }
+        .fullScreenCover(isPresented: $isPlacementEditorPresented) {
+            FireVaultOverlayPlacementEditor(
+                preferences: draft.overlay,
+                technicianName: draft.technician.name.isEmpty ? "Demo Technician" : draft.technician.name,
+                siteName: "North Riverside Fire and Life Safety Operations Center",
+                address: "100 FireVault Way, Boise, ID 83702",
+                accountID: "FV-1001",
+                category: "Commercial",
+                onSave: { placedOverlay in
+                    draft.overlay = placedOverlay.normalized
+                    FireVaultOverlayEditorBridge.stage(draft.overlay)
+                    settings.save(draft)
+                }
+            )
         }
     }
 
