@@ -2,8 +2,7 @@
 //  FireVaultUnitPointOverlayCompatibility.swift
 //  FireVault
 //
-//  Allows an explicitly typed UnitPoint to be used for simple overlay placement
-//  without competing with SwiftUI's native Alignment overload.
+//  Allows an explicitly typed UnitPoint to be used for simple overlay placement.
 //
 
 import SwiftUI
@@ -11,9 +10,9 @@ import SwiftUI
 extension View {
     @_disfavoredOverload
     @ViewBuilder
-    func overlay<Overlay: View>(
+    func overlay<OverlayContent: View>(
         alignment point: UnitPoint,
-        @ViewBuilder content: () -> Overlay
+        @ViewBuilder content: @escaping () -> OverlayContent
     ) -> some View {
         let horizontal: HorizontalAlignment
         if point.x <= 0.25 {
@@ -34,8 +33,9 @@ extension View {
         }
 
         self.overlay(
-            alignment: Alignment(horizontal: horizontal, vertical: vertical),
-            content: content
-        )
+            alignment: Alignment(horizontal: horizontal, vertical: vertical)
+        ) {
+            content()
+        }
     }
 }
