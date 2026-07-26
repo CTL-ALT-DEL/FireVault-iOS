@@ -16,6 +16,8 @@
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -29,16 +31,14 @@
 			</array>
 		</dict>
 	</array>
-	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>FireVault uses the camera to photograph and scan fire alarm equipment and site documents.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>FireVault uses your location to identify nearby accounts and record a workday route when you start Track Log.</string>
+	<string>FireVault uses your location to identify nearby accounts and record a workday route when you start Trip Log.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>FireVault records Track Log activity only after you start a workday, allowing the route and detected stops to continue while you use other apps.</string>
+	<string>FireVault records Trip Log activity only after you start a workday, allowing the route and detected stops to continue while you use other apps.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>FireVault imports site and equipment photos that you select from your photo library.</string>
 	<key>UIApplicationSceneManifest</key>
