@@ -89,9 +89,38 @@ struct FireVaultPrivacyLockView: View {
             NativeShellPalette.background.ignoresSafeArea()
 
             VStack(spacing: 22) {
-                Image(systemName: "faceid")
-                    .font(.system(size: 62, weight: .medium))
-                    .foregroundStyle(NativeShellPalette.blue)
+                VStack(spacing: 12) {
+                    ZStack(alignment: .bottomTrailing) {
+                        Image("FireVaultLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 112, height: 112)
+                            .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
+                            .shadow(color: .black.opacity(0.42), radius: 14, y: 8)
+
+                        Image(systemName: "faceid")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .background(NativeShellPalette.blue, in: Circle())
+                            .overlay {
+                                Circle()
+                                    .stroke(NativeShellPalette.background, lineWidth: 4)
+                            }
+                            .offset(x: 8, y: 8)
+                    }
+
+                    HStack(spacing: 0) {
+                        Text("FIRE")
+                            .foregroundStyle(NativeShellPalette.red)
+                        Text("VAULT")
+                            .foregroundStyle(.white)
+                    }
+                    .font(.system(size: 27, weight: .bold, design: .rounded))
+                    .tracking(1.15)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("FireVault, Face ID protected")
 
                 VStack(spacing: 7) {
                     Text("FireVault Locked")
