@@ -15,6 +15,7 @@ private enum FireVaultNearbyMapLayer: String, CaseIterable, Identifiable {
     case imagery = "Satellite"
 
     var id: String { rawValue }
+
     var symbol: String {
         switch self {
         case .standard: "map"
@@ -35,7 +36,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
     @State private var scrollingID: String?
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var showsBreadcrumbs = false
-    @State private var mapLayer: FireVaultNearbyMapLayer = .hybrid
+    @State private var mapLayer: FireVaultNearbyMapLayer = .standard
     @State private var zoomLevel = 0.72
     @State private var showsZoomSlider = false
     @State private var zoomVisibilityToken = UUID()
@@ -58,7 +59,10 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
             coordinates.append(coordinate)
         }
         guard let first = coordinates.first else {
-            return .init(center: .init(latitude: 43.615, longitude: -116.202), span: .init(latitudeDelta: 0.18, longitudeDelta: 0.18))
+            return .init(
+                center: .init(latitude: 43.615, longitude: -116.202),
+                span: .init(latitudeDelta: 0.18, longitudeDelta: 0.18)
+            )
         }
         let latitudes = coordinates.map(\.latitude)
         let longitudes = coordinates.map(\.longitude)
@@ -81,9 +85,10 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
     var body: some View {
         GeometryReader { geometry in
             let availableWidth = max(0, geometry.size.width - 32)
-            let mapSide = min(availableWidth, max(250, geometry.size.height * 0.43))
+            let availableHeight = max(0, geometry.size.height)
+            let mapSide = min(availableWidth, max(300, availableHeight * 0.50))
 
-            VStack(spacing: 10) {
+            VStack(spacing: 8) {
                 statusHeader
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
@@ -113,7 +118,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
         .onChange(of: store.nearbyResetRequestID) { _, _ in resetMap() }
         .onChange(of: scrollingID) { _, newID in
             guard let newID, let row = nearbyRows.first(where: { $0.id == newID }) else { return }
-            select(row, haptic: true)
+            select(row, haptic: true, updateScrollPosition: false)
         }
         .fullScreenCover(isPresented: $showsBreadcrumbs) {
             FireVaultBreadcrumbsView(
@@ -239,10 +244,19 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                     mapAction(symbol: "note.text", label: "Open account details") {
                         store.openAccount(selectedRow.account.id)
                     }
-                    mapAction(symbol: "phone.fill", label: "Call account", disabled: !selectedRow.account.phone.contains(where: \.isNumber)) {
+                    mapAction(
+                        symbol: "phone.fill",
+                        label: "Call account",
+                        disabled: !selectedRow.account.phone.contains(where: \.isNumber),
+                        tint: NativeShellPalette.green
+                    ) {
                         store.call(selectedRow.account.phone)
                     }
-                    mapAction(symbol: "arrow.triangle.turn.up.right.diamond.fill", label: "Route to account", disabled: selectedRow.account.coordinate == nil) {
+                    mapAction(
+                        symbol: "arrow.triangle.turn.up.right.diamond.fill",
+                        label: "Route to account",
+                        disabled: selectedRow.account.coordinate == nil
+                    ) {
                         if let account = store.accounts.first(where: { $0.id == selectedRow.account.id }) {
                             store.openRoute(for: account)
                         }
@@ -286,7 +300,9 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
             ForEach(Array(nearbyRows.enumerated()), id: \.element.id) { index, row in
                 if let coordinate = row.account.coordinate {
                     Annotation(row.account.name, coordinate: coordinate) {
-                        Button { select(row, haptic: false) } label: {
+                        Button {
+                            select(row, haptic: false, updateScrollPosition: true)
+                        } label: {
                             Text("\(index + 1)")
                                 .font(.caption.bold())
                                 .foregroundStyle(.white)
@@ -307,6 +323,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
         symbol: String,
         label: String,
         disabled: Bool = false,
+        tint: Color = .black,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -314,7 +331,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                 .font(.system(size: 23, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 54, height: 54)
-                .background(.black.opacity(disabled ? 0.45 : 0.80), in: Circle())
+                .background((disabled ? Color.black.opacity(0.45) : tint.opacity(tint == .black ? 0.80 : 1)), in: Circle())
                 .overlay { Circle().stroke(.white.opacity(disabled ? 0.28 : 0.72), lineWidth: 1.5) }
                 .shadow(color: .black.opacity(0.55), radius: 7, y: 3)
         }
@@ -342,31 +359,37 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(Array(nearbyRows.enumerated()), id: \.element.id) { index, row in
-                            accountRow(row, index: index)
-                                .id(row.id)
+                GeometryReader { listGeometry in
+                    ScrollView {
+                        LazyVStack(spacing: 8) {
+                            ForEach(Array(nearbyRows.enumerated()), id: \.element.id) { index, row in
+                                accountRow(row, index: index)
+                                    .id(row.id)
+                            }
                         }
+                        .scrollTargetLayout()
+                        .padding(.bottom, max(0, listGeometry.size.height - 68))
                     }
-                    .scrollTargetLayout()
-                    .padding(.bottom, 12)
+                    .scrollIndicators(.hidden)
+                    .scrollPosition(id: $scrollingID, anchor: UnitPoint.top)
+                    .scrollTargetBehavior(.viewAligned)
                 }
-                .scrollIndicators(.hidden)
-                .scrollPosition(id: $scrollingID, anchor: UnitPoint.top)
-                .scrollTargetBehavior(.viewAligned)
             }
         }
     }
 
     private func accountRow(_ row: FireVaultNativeNearbyAccount, index: Int) -> some View {
-        Button { select(row, haptic: true) } label: {
+        let isSelected = selectedID == row.id
+
+        return Button {
+            select(row, haptic: true, updateScrollPosition: true)
+        } label: {
             HStack(spacing: 11) {
                 Text("\(index + 1)")
                     .font(.caption2.bold())
                     .foregroundStyle(.white)
                     .frame(width: 30, height: 30)
-                    .background(selectedID == row.id ? NativeShellPalette.red : NativeShellPalette.blue, in: Circle())
+                    .background(isSelected ? NativeShellPalette.red : NativeShellPalette.blue, in: Circle())
                 VStack(alignment: .leading, spacing: 3) {
                     Text(row.account.name).font(.subheadline.bold()).foregroundStyle(.white).lineLimit(1)
                     Text(row.account.address).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -379,11 +402,13 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
             }
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, minHeight: 68)
-            .background(selectedID == row.id ? NativeShellPalette.blue.opacity(0.14) : NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(isSelected ? NativeShellPalette.blue.opacity(0.18) : NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(selectedID == row.id ? NativeShellPalette.blue.opacity(0.8) : .white.opacity(0.07), lineWidth: selectedID == row.id ? 1.5 : 1)
+                    .stroke(isSelected ? NativeShellPalette.blue.opacity(0.9) : .white.opacity(0.07), lineWidth: isSelected ? 1.7 : 1)
             }
+            .opacity(selectedID == nil || isSelected ? 1 : 0.38)
+            .animation(.easeOut(duration: 0.18), value: selectedID)
         }
         .buttonStyle(.plain)
     }
@@ -414,13 +439,22 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
         .padding(.top, 5)
         .padding(.bottom, 2)
         .background(NativeShellPalette.navigationBackground.ignoresSafeArea(edges: .bottom))
-        .overlay(alignment: .top) { Rectangle().fill(NativeShellPalette.navigationDivider).frame(height: 1) }
+        .overlay(alignment: UnitPoint.top) {
+            Rectangle().fill(NativeShellPalette.navigationDivider).frame(height: 1)
+        }
     }
 
-    private func select(_ row: FireVaultNativeNearbyAccount, haptic: Bool) {
-        guard selectedID != row.id else { return }
+    private func select(
+        _ row: FireVaultNativeNearbyAccount,
+        haptic: Bool,
+        updateScrollPosition: Bool
+    ) {
+        guard selectedID != row.id else {
+            if updateScrollPosition { scrollingID = row.id }
+            return
+        }
         selectedID = row.id
-        scrollingID = row.id
+        if updateScrollPosition { scrollingID = row.id }
         store.selectCaptureAccount(row.account.id)
         zoomLevel = 0.72
         if haptic, settings.gps.hapticsAreEnabled {
@@ -435,7 +469,14 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
         let maximumDistance = 22_000.0
         let distance = maximumDistance - (zoomLevel * (maximumDistance - minimumDistance))
         withAnimation(.easeInOut(duration: 0.22)) {
-            cameraPosition = .camera(MapCamera(centerCoordinate: center, distance: distance, heading: 0, pitch: selectedRow == nil ? 38 : 48))
+            cameraPosition = .camera(
+                MapCamera(
+                    centerCoordinate: center,
+                    distance: distance,
+                    heading: 0,
+                    pitch: selectedRow == nil ? 38 : 48
+                )
+            )
         }
     }
 
@@ -451,13 +492,21 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
     }
 
     private func resetMap() {
+        mapLayer = .standard
         selectedID = nearbyRows.first?.id
         scrollingID = selectedID
         zoomLevel = selectedID == nil ? 0.35 : 0.72
         let latitudeDistance = overviewRegion.span.latitudeDelta * 111_000
         let longitudeDistance = overviewRegion.span.longitudeDelta * 85_000
         if selectedID == nil {
-            cameraPosition = .camera(MapCamera(centerCoordinate: overviewRegion.center, distance: max(1_600, max(latitudeDistance, longitudeDistance) * 1.8), heading: 0, pitch: 38))
+            cameraPosition = .camera(
+                MapCamera(
+                    centerCoordinate: overviewRegion.center,
+                    distance: max(1_600, max(latitudeDistance, longitudeDistance) * 1.8),
+                    heading: 0,
+                    pitch: 38
+                )
+            )
         } else {
             applyZoom()
         }
