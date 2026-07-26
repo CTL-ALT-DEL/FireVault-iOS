@@ -173,6 +173,15 @@ struct NativePrivacySettingsView: View {
     init(settings: FireVaultNativeSettingsStore) { self.settings = settings; _draft = State(initialValue: settings.preferences) }
     var body: some View {
         Form {
+            Section("Interaction") {
+                Toggle("Scrolling haptics", isOn: Binding(
+                    get: { draft.gps.hapticsEnabled ?? true },
+                    set: { draft.gps.hapticsEnabled = $0 }
+                ))
+                Text("Provides a light click as Nearby accounts snap into position.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             Section("Privacy") {
                 Toggle("Enable native privacy lock", isOn: $draft.privacy.enabled)
                 Picker("Auto-lock", selection: $draft.privacy.autoLockMinutes) { Text("Immediately").tag(0); Text("1 minute").tag(1); Text("5 minutes").tag(5); Text("15 minutes").tag(15) }
@@ -180,7 +189,7 @@ struct NativePrivacySettingsView: View {
                 Toggle("Hide content in app switcher", isOn: $draft.privacy.hideInAppSwitcher)
             }
         }
-        .nativeSettingsForm(title: "Privacy Lock") { settings.save(draft) }
+        .nativeSettingsForm(title: "Privacy & Interaction") { settings.save(draft) }
     }
 }
 
