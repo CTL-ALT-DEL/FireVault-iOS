@@ -11,7 +11,6 @@
 #import <objc/runtime.h>
 
 static const NSTimeInterval FVWaypointInterval = 120.0;
-static const CLLocationDistance FVDeferredDistance = 250.0;
 static const void *FVLastWaypointTimestampKey = &FVLastWaypointTimestampKey;
 static const void *FVManagerConfiguredKey = &FVManagerConfiguredKey;
 
@@ -27,11 +26,6 @@ static void FVConfigureLowPowerManager(CLLocationManager *manager) {
     manager.desiredAccuracy = kCLLocationAccuracyHundredMeters;
     manager.distanceFilter = 75.0;
     manager.pausesLocationUpdatesAutomatically = YES;
-
-    if ([manager respondsToSelector:@selector(allowDeferredLocationUpdatesUntilTraveled:timeout:)]) {
-        [manager allowDeferredLocationUpdatesUntilTraveled:FVDeferredDistance
-                                                    timeout:FVWaypointInterval];
-    }
 
     objc_setAssociatedObject(
         manager,
@@ -71,11 +65,6 @@ static void FVSmartLocationUpdate(
     );
 
     FVOriginalLocationUpdate(store, selector, manager, @[latest]);
-
-    if ([manager respondsToSelector:@selector(allowDeferredLocationUpdatesUntilTraveled:timeout:)]) {
-        [manager allowDeferredLocationUpdatesUntilTraveled:FVDeferredDistance
-                                                    timeout:FVWaypointInterval];
-    }
 }
 
 __attribute__((constructor))
