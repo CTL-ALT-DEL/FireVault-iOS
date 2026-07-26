@@ -16,7 +16,9 @@ struct FireVaultResolvedOverlayField: Identifiable, Equatable {
 }
 
 struct FireVaultOverlayPreviewGeometry {
-    static let designSize = CGSize(width: 430, height: 322.5)
+    /// The settings sample mirrors the full-screen editor's native 4:3
+    /// landscape camera canvas, even while Settings is shown in portrait.
+    static let designSize = CGSize(width: 430.0 * 4.0 / 3.0, height: 430)
 
     let previewSize: CGSize
 
@@ -53,6 +55,68 @@ struct FireVaultOverlayPreviewGeometry {
             width: previewTranslation.width / max(scale, 0.0001),
             height: previewTranslation.height / max(scale, 0.0001)
         )
+    }
+}
+
+private struct FireVaultOverlayDragSurface: UIViewRepresentable {
+    let canBegin: (CGPoint) -> Bool
+    let onBegan: (CGPoint) -> Void
+    let onChanged: (CGSize) -> Void
+    let onEnded: (CGSize) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = true
+
+        let recognizer = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handlePan(_:))
+        )
+        recognizer.delegate = context.coordinator
+        recognizer.cancelsTouchesInView = true
+        view.addGestureRecognizer(recognizer)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.parent = self
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var parent: FireVaultOverlayDragSurface
+
+        init(parent: FireVaultOverlayDragSurface) {
+            self.parent = parent
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let view = gestureRecognizer.view else { return false }
+            return parent.canBegin(gestureRecognizer.location(in: view))
+        }
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            guard let view = recognizer.view else { return }
+            let translation = recognizer.translation(in: view)
+            let translatedSize = CGSize(width: translation.x, height: translation.y)
+
+            switch recognizer.state {
+            case .began:
+                parent.onBegan(recognizer.location(in: view))
+            case .changed:
+                parent.onChanged(translatedSize)
+            case .ended:
+                parent.onEnded(translatedSize)
+            case .cancelled, .failed:
+                parent.onEnded(.zero)
+            default:
+                break
+            }
+        }
     }
 }
 
@@ -359,29 +423,67 @@ struct FireVaultOverlayPreview: View {
             let designSize = FireVaultOverlayPreviewGeometry.designSize
 
             ZStack {
-                Image("NotifierPanelSample")
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: designSize.width, height: designSize.height)
-                    .clipped()
+                ZStack {
+                    Image("NotifierPanelSample")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: designSize.width, height: designSize.height)
+                        .clipped()
 
-                FireVaultPhotoOverlayView(
-                    preferences: previewPreferences(size: designSize),
-                    technicianName: technicianName,
-                    siteName: siteName,
-                    address: address,
-                    accountID: accountID,
-                    category: category,
-                    timestamp: .now
-                )
+                    FireVaultPhotoOverlayView(
+                        preferences: previewPreferences(size: designSize),
+                        technicianName: technicianName,
+                        siteName: siteName,
+                        address: address,
+                        accountID: accountID,
+                        category: category,
+                        timestamp: .now
+                    )
+                    .frame(width: designSize.width, height: designSize.height)
+                    .allowsHitTesting(false)
+                }
                 .frame(width: designSize.width, height: designSize.height)
+                .scaleEffect(metrics.scale)
+                // scaleEffect changes drawing but not SwiftUI's layout size.
+                // Collapse the layout frame to the visible camera canvas so
+                // the UIKit hit surface and rendered elements share bounds.
+                .frame(
+                    width: metrics.scaledDesignSize.width,
+                    height: metrics.scaledDesignSize.height
+                )
                 .allowsHitTesting(false)
+
+                // UIKit owns the pan so the surrounding Form cannot steal a
+                // drag that begins directly on the logo or glass panel.
+                // Touches elsewhere fail immediately and continue scrolling.
+                FireVaultOverlayDragSurface(
+                    canBegin: { previewPoint in
+                        dragTarget(
+                            at: metrics.designPoint(from: previewPoint),
+                            size: designSize
+                        ) != nil
+                    },
+                    onBegan: { previewPoint in
+                        activeDragTarget = dragTarget(
+                            at: metrics.designPoint(from: previewPoint),
+                            size: designSize
+                        )
+                        dragTranslation = .zero
+                    },
+                    onChanged: { previewTranslation in
+                        guard activeDragTarget != nil else { return }
+                        dragTranslation = metrics.designTranslation(from: previewTranslation)
+                    },
+                    onEnded: { previewTranslation in
+                        finishDrag(
+                            translation: metrics.designTranslation(from: previewTranslation),
+                            designSize: designSize
+                        )
+                    }
+                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
             }
-            .frame(width: designSize.width, height: designSize.height)
-            .scaleEffect(metrics.scale)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            .contentShape(Rectangle())
-            .highPriorityGesture(canvasDragGesture(metrics: metrics))
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .aspectRatio(4.0 / 3.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -396,43 +498,28 @@ struct FireVaultOverlayPreview: View {
         .accessibilityHint("Drag the glass overlay or FireVault logo to place it on the photo")
     }
 
-    private func canvasDragGesture(metrics: FireVaultOverlayPreviewGeometry) -> some Gesture {
-        DragGesture(minimumDistance: 2, coordinateSpace: .local)
-            .onChanged { value in
-                if activeDragTarget == nil {
-                    activeDragTarget = dragTarget(
-                        at: metrics.designPoint(from: value.startLocation),
-                        size: FireVaultOverlayPreviewGeometry.designSize
-                    )
-                }
-                guard activeDragTarget != nil else { return }
-                dragTranslation = metrics.designTranslation(from: value.translation)
-            }
-            .onEnded { value in
-                defer {
-                    activeDragTarget = nil
-                    dragTranslation = .zero
-                }
+    private func finishDrag(translation: CGSize, designSize: CGSize) {
+        defer {
+            activeDragTarget = nil
+            dragTranslation = .zero
+        }
 
-                guard let activeDragTarget else { return }
-                let designTranslation = metrics.designTranslation(from: value.translation)
-                let designSize = FireVaultOverlayPreviewGeometry.designSize
-                let xChange = Double(designTranslation.width / max(designSize.width * 0.36, 1))
-                let yChange = Double(designTranslation.height / max(designSize.height * 0.36, 1))
+        guard let activeDragTarget else { return }
+        let xChange = Double(translation.width / max(designSize.width * 0.36, 1))
+        let yChange = Double(translation.height / max(designSize.height * 0.36, 1))
 
-                switch activeDragTarget {
-                case .overlay:
-                    editedPreferences.positionX += xChange
-                    editedPreferences.positionY += yChange
-                case .logo:
-                    editedPreferences.logoPositionX += xChange
-                    editedPreferences.logoPositionY += yChange
-                }
+        switch activeDragTarget {
+        case .overlay:
+            editedPreferences.positionX += xChange
+            editedPreferences.positionY += yChange
+        case .logo:
+            editedPreferences.logoPositionX += xChange
+            editedPreferences.logoPositionY += yChange
+        }
 
-                editedPreferences = editedPreferences.normalized
-                stageEdits()
-                UISelectionFeedbackGenerator().selectionChanged()
-            }
+        editedPreferences = editedPreferences.normalized
+        stageEdits()
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 
     private func dragTarget(at location: CGPoint, size: CGSize) -> DragTarget? {
@@ -532,6 +619,405 @@ struct FireVaultOverlayPreview: View {
     }
 
     private func stageEdits() { FireVaultOverlayEditorBridge.stage(editedPreferences) }
+}
+
+struct FireVaultOverlayPlacementEditor: View {
+    private enum PlacementTarget: Equatable {
+        case overlay
+        case logo
+
+        var title: String {
+            switch self {
+            case .overlay: "Overlay Size"
+            case .logo: "Logo Size"
+            }
+        }
+    }
+
+    static let landscapeDesignSize = CGSize(
+        width: 430.0 * 4.0 / 3.0,
+        height: 430
+    )
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var editedPreferences: FireVaultOverlayPreferences
+    @State private var activeDragTarget: PlacementTarget?
+    @State private var selectedTarget: PlacementTarget?
+    @State private var dragTranslation: CGSize = .zero
+    @State private var controlsAreVisible = false
+    @State private var instructionsAreVisible = true
+    @State private var hasEnteredLandscape = false
+    @State private var hasFinished = false
+    @State private var hideControlsTask: Task<Void, Never>?
+
+    let technicianName: String
+    let siteName: String
+    let address: String
+    let accountID: String
+    let category: String
+    let onSave: (FireVaultOverlayPreferences) -> Void
+
+    init(
+        preferences: FireVaultOverlayPreferences,
+        technicianName: String,
+        siteName: String,
+        address: String,
+        accountID: String,
+        category: String,
+        onSave: @escaping (FireVaultOverlayPreferences) -> Void
+    ) {
+        _editedPreferences = State(initialValue: preferences.normalized)
+        self.technicianName = technicianName
+        self.siteName = siteName
+        self.address = address
+        self.accountID = accountID
+        self.category = category
+        self.onSave = onSave
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let isLandscape = geometry.size.width > geometry.size.height
+
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                if isLandscape {
+                    landscapeEditor(in: geometry.size)
+                } else {
+                    rotatePrompt
+                }
+            }
+            .onAppear {
+                FireVaultOrientationCoordinator.beginOverlayPlacement()
+                hasEnteredLandscape = isLandscape
+            }
+            .onChange(of: isLandscape) { _, nowLandscape in
+                if nowLandscape {
+                    hasEnteredLandscape = true
+                } else if hasEnteredLandscape {
+                    finishAndDismiss()
+                }
+            }
+        }
+        .statusBarHidden(true)
+        .persistentSystemOverlays(.hidden)
+        .onDisappear {
+            hideControlsTask?.cancel()
+            FireVaultOrientationCoordinator.finishOverlayPlacement()
+        }
+    }
+
+    private func landscapeEditor(in availableSize: CGSize) -> some View {
+        let designSize = Self.landscapeDesignSize
+        let horizontalInset: CGFloat = 18
+        let verticalInset: CGFloat = 12
+        let scale = min(
+            (availableSize.width - horizontalInset * 2) / designSize.width,
+            (availableSize.height - verticalInset * 2) / designSize.height
+        )
+        let canvasSize = CGSize(
+            width: designSize.width * scale,
+            height: designSize.height * scale
+        )
+
+        return ZStack {
+            ZStack {
+                Image("NotifierPanelSample")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: designSize.width, height: designSize.height)
+                    .clipped()
+
+                FireVaultPhotoOverlayView(
+                    preferences: previewPreferences(in: designSize),
+                    technicianName: technicianName,
+                    siteName: siteName,
+                    address: address,
+                    accountID: accountID,
+                    category: category,
+                    timestamp: .now
+                )
+                .frame(width: designSize.width, height: designSize.height)
+            }
+            .frame(width: designSize.width, height: designSize.height)
+            .scaleEffect(scale)
+            .frame(width: canvasSize.width, height: canvasSize.height)
+            .allowsHitTesting(false)
+
+            FireVaultOverlayDragSurface(
+                canBegin: { visiblePoint in
+                    placementTarget(
+                        at: CGPoint(
+                            x: visiblePoint.x / max(scale, 0.0001),
+                            y: visiblePoint.y / max(scale, 0.0001)
+                        ),
+                        size: designSize
+                    ) != nil
+                },
+                onBegan: { visiblePoint in
+                    let target = placementTarget(
+                        at: CGPoint(
+                            x: visiblePoint.x / max(scale, 0.0001),
+                            y: visiblePoint.y / max(scale, 0.0001)
+                        ),
+                        size: designSize
+                    )
+                    activeDragTarget = target
+                    selectedTarget = target
+                    dragTranslation = .zero
+                    instructionsAreVisible = false
+                    showControls()
+                },
+                onChanged: { visibleTranslation in
+                    guard activeDragTarget != nil else { return }
+                    dragTranslation = CGSize(
+                        width: visibleTranslation.width / max(scale, 0.0001),
+                        height: visibleTranslation.height / max(scale, 0.0001)
+                    )
+                },
+                onEnded: { visibleTranslation in
+                    finishDrag(
+                        translation: CGSize(
+                            width: visibleTranslation.width / max(scale, 0.0001),
+                            height: visibleTranslation.height / max(scale, 0.0001)
+                        ),
+                        designSize: designSize
+                    )
+                }
+            )
+            .frame(width: canvasSize.width, height: canvasSize.height)
+        }
+        .frame(width: canvasSize.width, height: canvasSize.height)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(.white.opacity(0.22), lineWidth: 1)
+        }
+        .overlay {
+            if instructionsAreVisible {
+                instructionPill
+                    .transition(.opacity)
+            }
+        }
+        .overlay {
+            if controlsAreVisible, let selectedTarget {
+                horizontalSizeControl(for: selectedTarget)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: controlsAreVisible)
+        .animation(.easeOut(duration: 0.2), value: instructionsAreVisible)
+    }
+
+    private var instructionPill: some View {
+        Text("Drag the logo or overlay • Rotate to portrait to save")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.black.opacity(0.7), in: Capsule())
+    }
+
+    private var rotatePrompt: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "iphone.gen3.radiowaves.left.and.right")
+                .font(.system(size: 52, weight: .medium))
+                .foregroundStyle(NativeShellPalette.blue)
+            Text(hasEnteredLandscape ? "Saving placement…" : "Rotate iPhone to Landscape")
+                .font(.title2.bold())
+                .foregroundStyle(.white)
+            if !hasEnteredLandscape {
+                Text("Use the full-width camera preview to position the overlay and FireVault logo.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.white.opacity(0.72))
+                    .frame(maxWidth: 340)
+            }
+        }
+        .padding(30)
+    }
+
+    private func horizontalSizeControl(for target: PlacementTarget) -> some View {
+        HStack(spacing: 12) {
+            Text(target.title)
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+            Slider(
+                value: sizeBinding(for: target),
+                in: target == .overlay ? 0.45...1.35 : 0.45...1.8,
+                step: 0.05,
+                onEditingChanged: { isEditing in
+                    if isEditing {
+                        showControls()
+                    } else {
+                        scheduleControlsHide()
+                    }
+                }
+            )
+            .tint(NativeShellPalette.blue)
+            .frame(width: 220)
+
+            Text("\(Int((sizeValue(for: target) * 100).rounded()))%")
+                .font(.caption.monospacedDigit().bold())
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.black.opacity(0.78), in: Capsule())
+    }
+
+    private func sizeBinding(for target: PlacementTarget) -> Binding<Double> {
+        Binding(
+            get: { sizeValue(for: target) },
+            set: { newValue in
+                switch target {
+                case .overlay: editedPreferences.scale = newValue
+                case .logo: editedPreferences.logoScale = newValue
+                }
+                editedPreferences = editedPreferences.normalized
+                showControls()
+            }
+        )
+    }
+
+    private func sizeValue(for target: PlacementTarget) -> Double {
+        switch target {
+        case .overlay: editedPreferences.scale
+        case .logo: editedPreferences.logoScale
+        }
+    }
+
+    private func placementTarget(at point: CGPoint, size: CGSize) -> PlacementTarget? {
+        let overlaySize = CGSize(
+            width: estimatedPanelWidth * editedPreferences.scale,
+            height: estimatedPanelHeight * editedPreferences.scale
+        )
+        let overlayRect = CGRect(
+            x: overlayCenter(in: size).x - overlaySize.width / 2,
+            y: overlayCenter(in: size).y - overlaySize.height / 2,
+            width: overlaySize.width,
+            height: overlaySize.height
+        ).insetBy(dx: -12, dy: -12)
+
+        let logoRect = CGRect(
+            x: logoCenter(in: size).x - 59 * editedPreferences.logoScale,
+            y: logoCenter(in: size).y - 22 * editedPreferences.logoScale,
+            width: 118 * editedPreferences.logoScale,
+            height: 44 * editedPreferences.logoScale
+        ).insetBy(dx: -12, dy: -12)
+
+        if editedPreferences.showLogo, logoRect.contains(point) { return .logo }
+        if overlayRect.contains(point) { return .overlay }
+        return nil
+    }
+
+    private func finishDrag(translation: CGSize, designSize: CGSize) {
+        defer {
+            activeDragTarget = nil
+            dragTranslation = .zero
+            scheduleControlsHide()
+        }
+        guard let activeDragTarget else { return }
+
+        let xChange = Double(translation.width / max(designSize.width * 0.36, 1))
+        let yChange = Double(translation.height / max(designSize.height * 0.36, 1))
+        switch activeDragTarget {
+        case .overlay:
+            editedPreferences.positionX += xChange
+            editedPreferences.positionY += yChange
+        case .logo:
+            editedPreferences.logoPositionX += xChange
+            editedPreferences.logoPositionY += yChange
+        }
+        editedPreferences = editedPreferences.normalized
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    private func previewPreferences(in size: CGSize) -> FireVaultOverlayPreferences {
+        var value = editedPreferences
+        guard let activeDragTarget else { return value.normalized }
+
+        let xChange = Double(dragTranslation.width / max(size.width * 0.36, 1))
+        let yChange = Double(dragTranslation.height / max(size.height * 0.36, 1))
+        switch activeDragTarget {
+        case .overlay:
+            value.positionX += xChange
+            value.positionY += yChange
+        case .logo:
+            value.logoPositionX += xChange
+            value.logoPositionY += yChange
+        }
+        return value.normalized
+    }
+
+    private func overlayCenter(in size: CGSize) -> CGPoint {
+        CGPoint(
+            x: size.width * (0.5 + CGFloat(editedPreferences.positionX) * 0.36),
+            y: size.height * (0.5 + CGFloat(editedPreferences.positionY) * 0.36)
+        )
+    }
+
+    private func logoCenter(in size: CGSize) -> CGPoint {
+        CGPoint(
+            x: size.width * (0.5 + CGFloat(editedPreferences.logoPositionX) * 0.36),
+            y: size.height * (0.5 + CGFloat(editedPreferences.logoPositionY) * 0.36)
+        )
+    }
+
+    private var estimatedPanelWidth: CGFloat {
+        let fields = resolvedFields
+        let longest = max(
+            siteName.count,
+            fields.filter { $0.field != .technician }.map(\.value.count).max() ?? 0
+        )
+        let informationWidth = min(300, max(145, CGFloat(longest) * 5.9))
+        return min(
+            410,
+            informationWidth + (fields.contains { $0.field == .technician } ? 76 : 0) + 28
+        )
+    }
+
+    private var estimatedPanelHeight: CGFloat {
+        let visibleLines = resolvedFields.filter { $0.field != .technician }.count
+            + (editedPreferences.showTagline ? 1 : 0)
+        let baseHeight = max(48, CGFloat(visibleLines) * 12 + 18)
+        return editedPreferences.glassThickness == "thick" ? baseHeight + 4 : baseHeight
+    }
+
+    private var resolvedFields: [FireVaultResolvedOverlayField] {
+        FireVaultOverlayTemplateFormatter.resolvedFields(
+            preferences: editedPreferences,
+            siteName: siteName,
+            address: address,
+            accountID: accountID,
+            category: category,
+            technicianName: technicianName,
+            timestamp: .now
+        )
+    }
+
+    private func showControls() {
+        hideControlsTask?.cancel()
+        controlsAreVisible = true
+    }
+
+    private func scheduleControlsHide() {
+        hideControlsTask?.cancel()
+        hideControlsTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            controlsAreVisible = false
+        }
+    }
+
+    private func finishAndDismiss() {
+        guard !hasFinished else { return }
+        hasFinished = true
+        hideControlsTask?.cancel()
+        onSave(editedPreferences.normalized)
+        FireVaultOrientationCoordinator.finishOverlayPlacement()
+        dismiss()
+    }
 }
 
 @MainActor
