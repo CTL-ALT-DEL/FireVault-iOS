@@ -18,7 +18,7 @@ struct FireVaultIPadWorkspaceV2: View {
     var body: some View {
         HStack(spacing: 0) {
             sidebar
-                .frame(width: 218)
+                .frame(width: 232)
 
             Rectangle()
                 .fill(.white.opacity(0.08))
@@ -34,27 +34,33 @@ struct FireVaultIPadWorkspaceV2: View {
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 7) {
                 Text(payload.demoMode ? "DEMO WORKSPACE" : "FIELD WORKSPACE")
                     .font(.caption2.bold())
                     .tracking(1.35)
                     .foregroundStyle(payload.demoMode ? NativeShellPalette.amber : NativeShellPalette.green)
 
                 Text(payload.locationStatus)
-                    .font(.footnote)
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 18)
+            .padding(.horizontal, 18)
+            .padding(.top, 22)
 
-            VStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("WORKSPACE")
+                    .font(.caption2.bold())
+                    .tracking(1.25)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 10)
+
                 ForEach(FireVaultShellTab.allCases) { tab in
                     sidebarButton(tab)
                 }
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 12)
 
             Spacer(minLength: 12)
 
@@ -70,9 +76,19 @@ struct FireVaultIPadWorkspaceV2: View {
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary.opacity(0.72))
             }
-            .padding(16)
+            .padding(18)
         }
-        .background(NativeShellPalette.navigationBackground)
+        .background {
+            LinearGradient(
+                colors: [
+                    NativeShellPalette.navigationBackground,
+                    NativeShellPalette.navigationBackground.opacity(0.92),
+                    NativeShellPalette.background
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
     }
 
     private func sidebarButton(_ tab: FireVaultShellTab) -> some View {
@@ -84,10 +100,14 @@ struct FireVaultIPadWorkspaceV2: View {
             }
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: tab.symbol)
-                    .font(.system(size: 17, weight: .semibold))
-                    .symbolVariant(selected ? .fill : .none)
-                    .frame(width: 26)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(selected ? NativeShellPalette.blue.opacity(0.24) : .white.opacity(0.04))
+                    Image(systemName: tab.symbol)
+                        .font(.system(size: 17, weight: .semibold))
+                        .symbolVariant(selected ? .fill : .none)
+                }
+                .frame(width: 38, height: 38)
 
                 Text(tab.title)
                     .font(.body.weight(selected ? .bold : .semibold))
@@ -100,19 +120,25 @@ struct FireVaultIPadWorkspaceV2: View {
                 }
             }
             .foregroundStyle(selected ? .white : NativeShellPalette.navigationInactive)
-            .padding(.horizontal, 13)
-            .frame(minHeight: 48)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 54)
             .background(
-                selected ? NativeShellPalette.blue.opacity(0.18) : .clear,
-                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                selected ? NativeShellPalette.blue.opacity(0.14) : .clear,
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
             )
             .overlay {
                 if selected {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(NativeShellPalette.blue.opacity(0.72), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(NativeShellPalette.blue.opacity(0.55), lineWidth: 1)
+                        .overlay(alignment: .leading) {
+                            Capsule()
+                                .fill(NativeShellPalette.blue)
+                                .frame(width: 4, height: 28)
+                                .offset(x: -2)
+                        }
                 }
             }
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(tab.title)
@@ -312,7 +338,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                         }
                     }
                 }
-                .mapStyle(.hybrid(elevation: .realistic))
+                .mapStyle(.standard(elevation: .realistic))
             }
 
             if let selectedRow {

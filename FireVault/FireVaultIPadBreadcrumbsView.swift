@@ -42,7 +42,7 @@ struct FireVaultIPadBreadcrumbsView: View {
                             .frame(width: mapSide, height: mapSide)
                     } else {
                         ContentUnavailableView(
-                            "No Breadcrumbs Yet",
+                            "No Trip Log Yet",
                             systemImage: "point.topleft.down.to.point.bottomright.curvepath",
                             description: Text("Start your workday to record today’s route and account stops.")
                         )
@@ -50,26 +50,28 @@ struct FireVaultIPadBreadcrumbsView: View {
                         .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
                     }
 
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 14) {
-                            daySelector
-                            trackingControls
+                    VStack(alignment: .leading, spacing: 12) {
+                        daySelector
+                        trackingControls
 
-                            if let day = selectedDay {
-                                summary(day)
+                        if let day = selectedDay {
+                            summary(day)
+
+                            ScrollView {
                                 timeline(day)
+                                    .padding(.bottom, 24)
                             }
+                            .scrollIndicators(.visible)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
-                        .padding(.bottom, 24)
                     }
-                    .scrollIndicators(.hidden)
                     .frame(width: rightColumnWidth)
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .background(NativeShellPalette.background)
-            .navigationTitle("Breadcrumbs")
+            .navigationTitle("Trip Log")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -157,7 +159,7 @@ struct FireVaultIPadBreadcrumbsView: View {
                         Image(systemName: "calendar")
                     }
                     .buttonStyle(.bordered)
-                    .accessibilityLabel("Breadcrumbs history")
+                    .accessibilityLabel("Trip Log history")
                 }
             }
         }

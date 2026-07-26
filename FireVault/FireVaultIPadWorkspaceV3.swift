@@ -28,7 +28,7 @@ struct FireVaultIPadWorkspaceV3: View {
             if store.selectedTab == .accounts {
                 HStack(spacing: 0) {
                     Color.clear
-                        .frame(width: 219)
+                        .frame(width: 233)
                         .allowsHitTesting(false)
 
                     FireVaultIPadAccountsWorkspaceV3(
@@ -138,7 +138,9 @@ private struct FireVaultIPadAccountsWorkspaceV3: View {
                 .buttonStyle(.glassProminent)
                 .accessibilityLabel("Add account")
             }
-            .padding(18)
+            .padding(.horizontal, 22)
+            .padding(.top, 22)
+            .padding(.bottom, 16)
 
             HStack(spacing: 9) {
                 Image(systemName: "magnifyingglass")
@@ -163,26 +165,26 @@ private struct FireVaultIPadAccountsWorkspaceV3: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(.white.opacity(0.08), lineWidth: 1)
             }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 14)
+            .padding(.horizontal, 22)
+            .padding(.bottom, 16)
 
             if accounts.isEmpty {
                 ContentUnavailableView.search(text: searchText)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 9) {
+                    LazyVStack(spacing: 10) {
                         ForEach(accounts) { account in
                             accountRow(account)
                         }
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 24)
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 28)
                 }
                 .scrollIndicators(.hidden)
             }
         }
-        .frame(maxWidth: 760)
+        .frame(maxWidth: 840)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(NativeShellPalette.background)
     }
