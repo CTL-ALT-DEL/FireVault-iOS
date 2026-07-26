@@ -95,43 +95,54 @@ struct FireVaultAdaptiveAccountDetailsView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
+        GeometryReader { geometry in
+            let isLandscape = geometry.size.width > geometry.size.height
+            let horizontalPadding: CGFloat = isLandscape ? 18 : 16
+            let availableWidth = max(0, geometry.size.width - (horizontalPadding * 2))
+            let mapWidth = max(240, (availableWidth - 12) / 2)
+            let mapHeight: CGFloat = {
+                if isLandscape {
+                    return min(mapWidth, max(240, geometry.size.height * 0.46))
+                }
+                return min(mapWidth, max(210, geometry.size.height * 0.34))
+            }()
 
-            GeometryReader { geometry in
-                let availableWidth = max(0, geometry.size.width - 36)
-                let mapHeightLimit = max(210, geometry.size.height * 0.46)
-                let mapSide = min((availableWidth - 12) / 2, mapHeightLimit)
+            VStack(spacing: 0) {
+                header
+
+                HStack(alignment: .top, spacing: 12) {
+                    mapCard(
+                        title: "ADDRESS",
+                        subtitle: account.address,
+                        layer: $addressLayer,
+                        map: AnyView(addressStyledMap)
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: mapHeight)
+
+                    mapCard(
+                        title: "PIN LOCATIONS",
+                        subtitle: "\(mappedPins.count) mapped",
+                        layer: $pinsLayer,
+                        map: AnyView(pinsStyledMap)
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: mapHeight)
+                }
+                .padding(.horizontal, horizontalPadding)
+                .padding(.bottom, 12)
+
+                sectionSelector
+                    .padding(.horizontal, horizontalPadding)
+                    .padding(.bottom, 10)
 
                 ScrollView {
-                    VStack(spacing: 12) {
-                        HStack(alignment: .top, spacing: 12) {
-                            mapCard(
-                                title: "ADDRESS",
-                                subtitle: account.address,
-                                layer: $addressLayer,
-                                map: AnyView(addressStyledMap)
-                            )
-                            .frame(width: mapSide, height: mapSide)
-
-                            mapCard(
-                                title: "PIN LOCATIONS",
-                                subtitle: "\(mappedPins.count) mapped",
-                                layer: $pinsLayer,
-                                map: AnyView(pinsStyledMap)
-                            )
-                            .frame(width: mapSide, height: mapSide)
-                        }
-                        .frame(maxWidth: .infinity)
-
-                        sectionSelector
-                        selectedSectionContent
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.top, 8)
-                    .padding(.bottom, 28)
+                    selectedSectionContent
+                        .padding(.horizontal, horizontalPadding)
+                        .padding(.bottom, 28)
                 }
                 .scrollIndicators(.hidden)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .background(NativeShellPalette.background)
