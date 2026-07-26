@@ -15,6 +15,47 @@ struct FireVaultResolvedOverlayField: Identifiable, Equatable {
     var id: String { field.rawValue }
 }
 
+struct FireVaultOverlayPreviewGeometry {
+    static let designSize = CGSize(width: 430, height: 322.5)
+
+    let previewSize: CGSize
+
+    var scale: CGFloat {
+        min(
+            previewSize.width / Self.designSize.width,
+            previewSize.height / Self.designSize.height
+        )
+    }
+
+    var scaledDesignSize: CGSize {
+        CGSize(
+            width: Self.designSize.width * scale,
+            height: Self.designSize.height * scale
+        )
+    }
+
+    var designOrigin: CGPoint {
+        CGPoint(
+            x: (previewSize.width - scaledDesignSize.width) / 2,
+            y: (previewSize.height - scaledDesignSize.height) / 2
+        )
+    }
+
+    func designPoint(from previewPoint: CGPoint) -> CGPoint {
+        CGPoint(
+            x: (previewPoint.x - designOrigin.x) / max(scale, 0.0001),
+            y: (previewPoint.y - designOrigin.y) / max(scale, 0.0001)
+        )
+    }
+
+    func designTranslation(from previewTranslation: CGSize) -> CGSize {
+        CGSize(
+            width: previewTranslation.width / max(scale, 0.0001),
+            height: previewTranslation.height / max(scale, 0.0001)
+        )
+    }
+}
+
 enum FireVaultOverlayTemplateFormatter {
     static func resolvedFields(
         preferences: FireVaultOverlayPreferences,
@@ -314,16 +355,14 @@ struct FireVaultOverlayPreview: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let designWidth: CGFloat = 430
-            let designHeight: CGFloat = 322.5
-            let designSize = CGSize(width: designWidth, height: designHeight)
-            let previewScale = geometry.size.width / designWidth
+            let metrics = FireVaultOverlayPreviewGeometry(previewSize: geometry.size)
+            let designSize = FireVaultOverlayPreviewGeometry.designSize
 
             ZStack {
                 Image("NotifierPanelSample")
                     .resizable()
                     .scaledToFill()
-                    .frame(width: designWidth, height: designHeight)
+                    .frame(width: designSize.width, height: designSize.height)
                     .clipped()
 
                 FireVaultPhotoOverlayView(
@@ -335,13 +374,14 @@ struct FireVaultOverlayPreview: View {
                     category: category,
                     timestamp: .now
                 )
-                .frame(width: designWidth, height: designHeight)
+                .frame(width: designSize.width, height: designSize.height)
                 .allowsHitTesting(false)
             }
-            .frame(width: designWidth, height: designHeight)
+            .frame(width: designSize.width, height: designSize.height)
+            .scaleEffect(metrics.scale)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .contentShape(Rectangle())
-            .gesture(canvasDragGesture(in: designSize))
-            .scaleEffect(previewScale, anchor: .topLeading)
+            .highPriorityGesture(canvasDragGesture(metrics: metrics))
         }
         .aspectRatio(4.0 / 3.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -353,16 +393,20 @@ struct FireVaultOverlayPreview: View {
         }
         .onAppear { stageEdits() }
         .accessibilityIdentifier("overlay-interactive-preview")
+        .accessibilityHint("Drag the glass overlay or FireVault logo to place it on the photo")
     }
 
-    private func canvasDragGesture(in size: CGSize) -> some Gesture {
+    private func canvasDragGesture(metrics: FireVaultOverlayPreviewGeometry) -> some Gesture {
         DragGesture(minimumDistance: 2, coordinateSpace: .local)
             .onChanged { value in
                 if activeDragTarget == nil {
-                    activeDragTarget = dragTarget(at: value.startLocation, size: size)
+                    activeDragTarget = dragTarget(
+                        at: metrics.designPoint(from: value.startLocation),
+                        size: FireVaultOverlayPreviewGeometry.designSize
+                    )
                 }
                 guard activeDragTarget != nil else { return }
-                dragTranslation = value.translation
+                dragTranslation = metrics.designTranslation(from: value.translation)
             }
             .onEnded { value in
                 defer {
@@ -371,8 +415,10 @@ struct FireVaultOverlayPreview: View {
                 }
 
                 guard let activeDragTarget else { return }
-                let xChange = Double(value.translation.width / max(size.width * 0.36, 1))
-                let yChange = Double(value.translation.height / max(size.height * 0.36, 1))
+                let designTranslation = metrics.designTranslation(from: value.translation)
+                let designSize = FireVaultOverlayPreviewGeometry.designSize
+                let xChange = Double(designTranslation.width / max(designSize.width * 0.36, 1))
+                let yChange = Double(designTranslation.height / max(designSize.height * 0.36, 1))
 
                 switch activeDragTarget {
                 case .overlay:
