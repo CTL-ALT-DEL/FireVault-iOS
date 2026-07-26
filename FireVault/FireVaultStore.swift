@@ -42,6 +42,11 @@ enum FireVaultMediaError: LocalizedError {
     }
 }
 
+enum FireVaultCaptureQuickAction: Equatable {
+    case photo
+    case scan
+}
+
 @MainActor
 final class FireVaultStore: ObservableObject {
     @Published var accounts: [FireVaultWorkspaceAccount]
@@ -52,6 +57,7 @@ final class FireVaultStore: ObservableObject {
     @Published private(set) var demoMode: Bool
     @Published private(set) var geocodingProgress: FireVaultGeocodingProgress?
     @Published private(set) var nearbyResetRequestID = UUID()
+    @Published private(set) var pendingCaptureQuickAction: FireVaultCaptureQuickAction?
 
     private let defaults: UserDefaults
     private let demoCoordinate = CLLocationCoordinate2D(latitude: 43.6150, longitude: -116.2023)
@@ -148,6 +154,15 @@ final class FireVaultStore: ObservableObject {
     func selectCaptureAccount(_ id: String) {
         guard accounts.contains(where: { $0.id == id }) else { return }
         captureAccountID = id
+    }
+
+    func requestCapture(_ action: FireVaultCaptureQuickAction) {
+        pendingCaptureQuickAction = action
+    }
+
+    func consumeCaptureQuickAction() -> FireVaultCaptureQuickAction? {
+        defer { pendingCaptureQuickAction = nil }
+        return pendingCaptureQuickAction
     }
 
     func closeAccount(to tab: FireVaultShellTab? = nil) {

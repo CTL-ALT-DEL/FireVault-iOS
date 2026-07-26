@@ -12,6 +12,8 @@ struct ContentView: View {
     @StateObject private var settings = FireVaultNativeSettingsStore()
     @StateObject private var locationService = FireVaultLocationService()
     @StateObject private var liveBreadcrumbs = FireVaultBreadcrumbStore()
+    @StateObject private var quickActions = FireVaultQuickActionCenter.shared
+    @StateObject private var privacyLock = FireVaultPrivacyLockController()
     @State private var demoBreadcrumbs: FireVaultBreadcrumbStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -30,12 +32,22 @@ struct ContentView: View {
         GeometryReader { geometry in
             ZStack {
                 applicationContent(availableSize: geometry.size)
-                    .accessibilityHidden(showsSplash)
+                    .accessibilityHidden(showsSplash || isPrivacyLocked)
 
                 if showsSplash {
                     FireVaultSplashView()
                         .transition(.opacity)
                         .zIndex(1)
+                }
+
+                if isPrivacyLocked {
+                    FireVaultPrivacyLockView(controller: privacyLock)
+                        .transition(.opacity)
+                        .zIndex(2)
+                } else if scenePhase != .active,
+                          settings.preferences.privacy.hideInAppSwitcher {
+                    FireVaultPrivacyShieldView()
+                        .zIndex(3)
                 }
             }
         }
@@ -43,6 +55,8 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .task {
             prepareActiveVault()
+            privacyLock.configure(enabled: settings.preferences.privacy.enabled)
+            handlePendingQuickAction()
             guard showsSplash else { return }
             try? await Task.sleep(for: .seconds(reduceMotion ? 1.15 : 3.65))
             guard !Task.isCancelled else { return }
@@ -51,8 +65,30 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active else { return }
-            prepareActiveVault()
+            switch newPhase {
+            case .active:
+                prepareActiveVault()
+                privacyLock.lockIfNeeded(settings.preferences.privacy)
+                if isPrivacyLocked {
+                    privacyLock.authenticate()
+                } else {
+                    handlePendingQuickAction()
+                }
+            case .background:
+                privacyLock.enteredBackground()
+            default:
+                break
+            }
+        }
+        .onChange(of: privacyLock.isUnlocked) { _, unlocked in
+            if unlocked { handlePendingQuickAction() }
+        }
+        .onChange(of: quickActions.pendingAction) { _, _ in
+            handlePendingQuickAction()
+        }
+        .onChange(of: settings.preferences.privacy.enabled) { _, enabled in
+            privacyLock.configure(enabled: enabled)
+            if enabled { privacyLock.authenticate() }
         }
         .onChange(of: store.demoMode) { _, _ in
             prepareActiveVault()
@@ -133,6 +169,54 @@ struct ContentView: View {
             FireVaultDemoShowroom.installAccountsIfNeeded(into: store)
         }
         activeBreadcrumbs.restoreActiveWorkday(accounts: store.accounts)
+    }
+
+    private var isPrivacyLocked: Bool {
+        settings.preferences.privacy.enabled && !privacyLock.isUnlocked
+    }
+
+    private func handlePendingQuickAction() {
+        guard !isPrivacyLocked, let action = quickActions.consume() else { return }
+
+        switch action {
+        case .startLog:
+            store.closeAccount(to: .nearby)
+            if let day = activeBreadcrumbs.activeDay, day.isPaused {
+                activeBreadcrumbs.resumeWorkday(accounts: store.accounts)
+            } else if activeBreadcrumbs.activeDay == nil {
+                activeBreadcrumbs.startWorkday(accounts: store.accounts)
+            }
+        case .stopLog:
+            store.closeAccount(to: .nearby)
+            if activeBreadcrumbs.activeDay != nil {
+                activeBreadcrumbs.endWorkday()
+            }
+        case .photo:
+            store.closeAccount(to: .photo)
+            store.requestCapture(.photo)
+        case .scan:
+            store.closeAccount(to: .photo)
+            store.requestCapture(.scan)
+        }
+    }
+}
+
+private struct FireVaultPrivacyShieldView: View {
+    var body: some View {
+        ZStack {
+            NativeShellPalette.background.ignoresSafeArea()
+            VStack(spacing: 12) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 46))
+                    .foregroundStyle(NativeShellPalette.blue)
+                Text("FireVault")
+                    .font(.title2.bold())
+                Text("Workspace hidden")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityIdentifier("firevault-app-switcher-shield")
     }
 }
 

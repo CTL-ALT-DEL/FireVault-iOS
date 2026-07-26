@@ -33,6 +33,7 @@ struct NativePlusCodeSettingsView: View {
 
 struct NativeReportSettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @EnvironmentObject private var authentication: FireVaultAuthentication
     @State private var draft: FireVaultNativePreferences
     @State private var deliveryStatus = ""
     @FocusState private var focused: Bool
@@ -115,6 +116,12 @@ struct NativeReportSettingsView: View {
                 }
             }
         }
+        .task {
+            applySignedInEmailIfNeeded(authentication.signedInEmail)
+        }
+        .onChange(of: authentication.signedInEmail) { _, email in
+            applySignedInEmailIfNeeded(email)
+        }
     }
 
     private var dailyDeliveryTime: Binding<Date> {
@@ -143,6 +150,12 @@ struct NativeReportSettingsView: View {
     private var timeZoneLabel: String {
         TimeZone.current.localizedName(for: .standard, locale: .current)
             ?? TimeZone.current.identifier
+    }
+
+    private func applySignedInEmailIfNeeded(_ email: String) {
+        let current = draft.email.defaultTo.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard current.isEmpty, !email.isEmpty else { return }
+        draft.email.defaultTo = email
     }
 }
 
@@ -277,10 +290,22 @@ struct NativePrivacySettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section("Privacy") {
-                Toggle("Enable native privacy lock", isOn: $draft.privacy.enabled)
+                Toggle(
+                    "Require Face ID",
+                    isOn: Binding(
+                        get: { draft.privacy.enabled },
+                        set: { enabled in
+                            draft.privacy.enabled = enabled
+                            settings.save(draft)
+                        }
+                    )
+                )
                 Picker("Auto-lock", selection: $draft.privacy.autoLockMinutes) { Text("Immediately").tag(0); Text("1 minute").tag(1); Text("5 minutes").tag(5); Text("15 minutes").tag(15) }
                 Toggle("Lock when app enters background", isOn: $draft.privacy.lockOnBackground)
                 Toggle("Hide content in app switcher", isOn: $draft.privacy.hideInAppSwitcher)
+                Text("Face ID protects the signed-in FireVault workspace. Your device passcode remains available as Apple’s secure fallback.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
         .nativeSettingsForm(title: "Privacy & Interaction") { settings.save(draft) }

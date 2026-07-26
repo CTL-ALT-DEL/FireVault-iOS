@@ -35,6 +35,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>FireVault uses the camera to photograph and scan fire alarm equipment and site documents.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>FireVault uses Face ID to protect your signed-in field workspace.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>FireVault uses your location to identify nearby accounts and record a workday route when you start Trip Log.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
@@ -48,6 +50,41 @@
 		<key>UISceneConfigurations</key>
 		<dict/>
 	</dict>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemIconType</key>
+			<string>UIApplicationShortcutIconTypeLocation</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Start Log</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.davidbannerman.FireVault.quick-action.start-log</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconType</key>
+			<string>UIApplicationShortcutIconTypePause</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Stop Log</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.davidbannerman.FireVault.quick-action.stop-log</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconType</key>
+			<string>UIApplicationShortcutIconTypeCapturePhoto</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Photo</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.davidbannerman.FireVault.quick-action.photo</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconType</key>
+			<string>UIApplicationShortcutIconTypeTask</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Scan</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.davidbannerman.FireVault.quick-action.scan</string>
+		</dict>
+	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>
