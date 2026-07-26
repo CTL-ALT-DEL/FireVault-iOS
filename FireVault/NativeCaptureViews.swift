@@ -16,10 +16,9 @@ struct FireVaultResolvedOverlayField: Identifiable, Equatable {
 }
 
 struct FireVaultOverlayPreviewGeometry {
-    /// UIImagePickerController's native still-photo canvas is 3:4 in portrait.
-    /// Keep the logical width at 430 so the preview uses the same typography
-    /// scale as FireVaultPhotoOverlayRenderer.
-    static let designSize = CGSize(width: 430, height: 430.0 * 4.0 / 3.0)
+    /// The settings sample mirrors the full-screen editor's native 4:3
+    /// landscape camera canvas, even while Settings is shown in portrait.
+    static let designSize = CGSize(width: 430.0 * 4.0 / 3.0, height: 430)
 
     let previewSize: CGSize
 
@@ -486,7 +485,7 @@ struct FireVaultOverlayPreview: View {
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
-        .aspectRatio(3.0 / 4.0, contentMode: .fit)
+        .aspectRatio(4.0 / 3.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.12), lineWidth: 1) }
         .onChange(of: preferences) { _, newValue in
@@ -646,6 +645,7 @@ struct FireVaultOverlayPlacementEditor: View {
     @State private var selectedTarget: PlacementTarget?
     @State private var dragTranslation: CGSize = .zero
     @State private var controlsAreVisible = false
+    @State private var instructionsAreVisible = true
     @State private var hasEnteredLandscape = false
     @State private var hasFinished = false
     @State private var hideControlsTask: Task<Void, Never>?
@@ -766,6 +766,7 @@ struct FireVaultOverlayPlacementEditor: View {
                     activeDragTarget = target
                     selectedTarget = target
                     dragTranslation = .zero
+                    instructionsAreVisible = false
                     showControls()
                 },
                 onChanged: { visibleTranslation in
@@ -793,32 +794,20 @@ struct FireVaultOverlayPlacementEditor: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(.white.opacity(0.22), lineWidth: 1)
         }
-        .overlay(alignment: .top) {
-            instructionPill
-                .padding(.top, 10)
+        .overlay {
+            if instructionsAreVisible {
+                instructionPill
+                    .transition(.opacity)
+            }
         }
-        .overlay(alignment: .leading) {
+        .overlay {
             if controlsAreVisible, let selectedTarget {
-                verticalSizeControl(for: selectedTarget)
-                    .padding(.leading, 12)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
+                horizontalSizeControl(for: selectedTarget)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
             }
-        }
-        .overlay(alignment: .topTrailing) {
-            Button {
-                finishAndDismiss()
-            } label: {
-                Label("Done", systemImage: "checkmark.circle.fill")
-                    .font(.headline)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.black.opacity(0.7), in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white)
-            .padding(12)
         }
         .animation(.easeInOut(duration: 0.2), value: controlsAreVisible)
+        .animation(.easeOut(duration: 0.2), value: instructionsAreVisible)
     }
 
     private var instructionPill: some View {
@@ -848,12 +837,11 @@ struct FireVaultOverlayPlacementEditor: View {
         .padding(30)
     }
 
-    private func verticalSizeControl(for target: PlacementTarget) -> some View {
-        VStack(spacing: 8) {
+    private func horizontalSizeControl(for target: PlacementTarget) -> some View {
+        HStack(spacing: 12) {
             Text(target.title)
                 .font(.caption.bold())
                 .foregroundStyle(.white)
-
             Slider(
                 value: sizeBinding(for: target),
                 in: target == .overlay ? 0.45...1.35 : 0.45...1.8,
@@ -867,17 +855,15 @@ struct FireVaultOverlayPlacementEditor: View {
                 }
             )
             .tint(NativeShellPalette.blue)
-            .frame(width: 180)
-            .rotationEffect(.degrees(-90))
-            .frame(width: 44, height: 180)
+            .frame(width: 220)
 
             Text("\(Int((sizeValue(for: target) * 100).rounded()))%")
                 .font(.caption.monospacedDigit().bold())
                 .foregroundStyle(.white)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 12)
-        .background(.black.opacity(0.74), in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.black.opacity(0.78), in: Capsule())
     }
 
     private func sizeBinding(for target: PlacementTarget) -> Binding<Double> {

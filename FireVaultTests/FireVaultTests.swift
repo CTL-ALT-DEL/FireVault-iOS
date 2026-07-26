@@ -527,11 +527,11 @@ final class FireVaultTests: XCTestCase {
         }
     }
 
-    func testPhotoOverlayPreviewUsesNativePortraitCameraRatio() {
+    func testPhotoOverlayPreviewUsesNativeLandscapeCameraRatio() {
         let size = FireVaultOverlayPreviewGeometry.designSize
 
-        XCTAssertEqual(size.width / size.height, 3.0 / 4.0, accuracy: 0.000_001)
-        XCTAssertEqual(size.width, 430, accuracy: 0.000_001)
+        XCTAssertEqual(size.width / size.height, 4.0 / 3.0, accuracy: 0.000_001)
+        XCTAssertEqual(size.height, 430, accuracy: 0.000_001)
     }
 
     func testPhotoOverlayPlacementEditorUsesNativeLandscapeCameraRatio() {
