@@ -9,15 +9,8 @@ import Foundation
 import Combine
 
 enum FireVaultOverlayField: String, CaseIterable, Identifiable {
-    case site
-    case address
-    case accountID
-    case category
-    case technician
-    case timestamp
-
+    case site, address, accountID, category, technician, timestamp
     var id: String { rawValue }
-
     var title: String {
         switch self {
         case .site: "Site name"
@@ -28,7 +21,6 @@ enum FireVaultOverlayField: String, CaseIterable, Identifiable {
         case .timestamp: "Date and time"
         }
     }
-
     var symbol: String {
         switch self {
         case .site: "building.2"
@@ -39,28 +31,31 @@ enum FireVaultOverlayField: String, CaseIterable, Identifiable {
         case .timestamp: "calendar.badge.clock"
         }
     }
-
-    var isRequired: Bool {
-        self == .site || self == .address || self == .accountID
-    }
+    var isRequired: Bool { self == .site || self == .address || self == .accountID }
 }
 
 struct FireVaultTechnicianPreferences: Codable, Equatable {
-    var name = ""
-    var company = ""
-    var phone = ""
-    var email = ""
-    var license = ""
+    var name = ""; var company = ""; var phone = ""; var email = ""; var license = ""
 }
 
 struct FireVaultOverlayPreferences: Codable, Equatable {
     var alignment = "bottom"
+    var horizontalPosition = "left"
+    var scale = 0.50
+    var positionX = -0.78
+    var positionY = 0.78
+    var logoScale = 0.70
+    var logoPositionX = 0.78
+    var logoPositionY = -0.78
+    var logoPlacement = "freeform"
     var fontSize = "medium"
-    var backgroundStyle = "bar"
+    var backgroundStyle = "frosted"
+    var glassStyle = "regular"
+    var glassThickness = "regular"
     var opacity = 85
     var showLogo = true
     var showTagline = true
-    var accentColor = "red"
+    var accentColor = "blue"
     var tagline = "FIREVAULT FIELD DOCUMENTATION"
     var fieldOrder = FireVaultOverlayField.allCases.map(\.rawValue)
     var hiddenFields = [FireVaultOverlayField.category.rawValue]
@@ -74,27 +69,27 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
     var normalized: Self {
         var copy = self
         copy.opacity = min(100, max(35, opacity))
-        if !["top", "middle", "bottom"].contains(copy.alignment) { copy.alignment = "bottom" }
-        if !["small", "medium", "large"].contains(copy.fontSize) { copy.fontSize = "medium" }
-        if !["bar", "card", "minimal"].contains(copy.backgroundStyle) { copy.backgroundStyle = "bar" }
-        if !["red", "blue", "amber", "white"].contains(copy.accentColor) { copy.accentColor = "red" }
+        copy.scale = min(1.35, max(0.45, scale))
+        copy.positionX = min(1.35, max(-1.35, positionX))
+        copy.positionY = min(1.35, max(-1.35, positionY))
+        copy.logoScale = min(1.8, max(0.45, logoScale))
+        copy.logoPositionX = min(1.35, max(-1.35, logoPositionX))
+        copy.logoPositionY = min(1.35, max(-1.35, logoPositionY))
+        copy.logoPlacement = "freeform"
+        if !["top", "bottom"].contains(copy.alignment) { copy.alignment = "bottom" }
+        if !["left", "right"].contains(copy.horizontalPosition) { copy.horizontalPosition = "left" }
+        copy.fontSize = "medium"
+        copy.backgroundStyle = "frosted"
+        copy.glassStyle = "regular"
+        copy.glassThickness = "regular"
+        if !["red", "blue", "amber", "white"].contains(copy.accentColor) { copy.accentColor = "blue" }
         copy.tagline = String(copy.tagline.prefix(80))
         let allowedFields = Set(FireVaultOverlayField.allCases.map(\.rawValue))
         var seenFields = Set<String>()
-        copy.fieldOrder = copy.fieldOrder.filter {
-            allowedFields.contains($0) && seenFields.insert($0).inserted
-        }
-        for field in FireVaultOverlayField.allCases where !seenFields.contains(field.rawValue) {
-            copy.fieldOrder.append(field.rawValue)
-        }
-        let requiredFields = Set(
-            FireVaultOverlayField.allCases.filter(\.isRequired).map(\.rawValue)
-        )
-        copy.hiddenFields = Array(
-            Set(copy.hiddenFields)
-                .intersection(allowedFields)
-                .subtracting(requiredFields)
-        )
+        copy.fieldOrder = copy.fieldOrder.filter { allowedFields.contains($0) && seenFields.insert($0).inserted }
+        for field in FireVaultOverlayField.allCases where !seenFields.contains(field.rawValue) { copy.fieldOrder.append(field.rawValue) }
+        let requiredFields = Set(FireVaultOverlayField.allCases.filter(\.isRequired).map(\.rawValue))
+        copy.hiddenFields = Array(Set(copy.hiddenFields).intersection(allowedFields).subtracting(requiredFields))
         copy.fieldTemplate = Self.requiredFieldTemplate(copy.fieldTemplate)
         return copy
     }
@@ -102,147 +97,160 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case alignment
-        case fontSize
-        case backgroundStyle
-        case opacity
-        case showLogo
-        case showTagline
-        case accentColor
-        case tagline
-        case fieldOrder
-        case hiddenFields
-        case fieldTemplate
+        case alignment, horizontalPosition, scale, positionX, positionY
+        case logoScale, logoPositionX, logoPositionY, logoPlacement
+        case fontSize, backgroundStyle, glassStyle, glassThickness, opacity, showLogo, showTagline
+        case accentColor, tagline, fieldOrder, hiddenFields, fieldTemplate
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         alignment = try values.decodeIfPresent(String.self, forKey: .alignment) ?? "bottom"
-        fontSize = try values.decodeIfPresent(String.self, forKey: .fontSize) ?? "medium"
-        backgroundStyle = try values.decodeIfPresent(String.self, forKey: .backgroundStyle) ?? "bar"
+        horizontalPosition = try values.decodeIfPresent(String.self, forKey: .horizontalPosition) ?? "left"
+        scale = try values.decodeIfPresent(Double.self, forKey: .scale) ?? 0.50
+        positionX = try values.decodeIfPresent(Double.self, forKey: .positionX) ?? -0.78
+        positionY = try values.decodeIfPresent(Double.self, forKey: .positionY) ?? 0.78
+        logoScale = try values.decodeIfPresent(Double.self, forKey: .logoScale) ?? 0.70
+        logoPositionX = try values.decodeIfPresent(Double.self, forKey: .logoPositionX) ?? 0.78
+        logoPositionY = try values.decodeIfPresent(Double.self, forKey: .logoPositionY) ?? -0.78
+        logoPlacement = "freeform"
+        fontSize = "medium"
+        backgroundStyle = "frosted"
+        glassStyle = "regular"
+        glassThickness = "regular"
         opacity = try values.decodeIfPresent(Int.self, forKey: .opacity) ?? 85
         showLogo = try values.decodeIfPresent(Bool.self, forKey: .showLogo) ?? true
         showTagline = try values.decodeIfPresent(Bool.self, forKey: .showTagline) ?? true
-        accentColor = try values.decodeIfPresent(String.self, forKey: .accentColor) ?? "red"
-        tagline = try values.decodeIfPresent(String.self, forKey: .tagline)
-            ?? "FIREVAULT FIELD DOCUMENTATION"
-        fieldOrder = try values.decodeIfPresent([String].self, forKey: .fieldOrder)
-            ?? FireVaultOverlayField.allCases.map(\.rawValue)
-        hiddenFields = try values.decodeIfPresent([String].self, forKey: .hiddenFields)
-            ?? [FireVaultOverlayField.category.rawValue]
-        fieldTemplate = try values.decodeIfPresent(String.self, forKey: .fieldTemplate)
-            ?? """
-            {site}
-            {address}
-            Account ID: {accountID}
-            {technician} • {date} {time}
-            """
+        accentColor = try values.decodeIfPresent(String.self, forKey: .accentColor) ?? "blue"
+        tagline = try values.decodeIfPresent(String.self, forKey: .tagline) ?? "FIREVAULT FIELD DOCUMENTATION"
+        fieldOrder = try values.decodeIfPresent([String].self, forKey: .fieldOrder) ?? FireVaultOverlayField.allCases.map(\.rawValue)
+        hiddenFields = try values.decodeIfPresent([String].self, forKey: .hiddenFields) ?? [FireVaultOverlayField.category.rawValue]
+        fieldTemplate = try values.decodeIfPresent(String.self, forKey: .fieldTemplate) ?? """
+        {site}
+        {address}
+        Account ID: {accountID}
+        {technician} • {date} {time}
+        """
     }
 
     private static func requiredFieldTemplate(_ value: String) -> String {
         var result = String(value.prefix(500))
-        let requiredTokens = ["{site}", "{address}", "{accountID}"]
-
-        for token in requiredTokens where !result.contains(token) {
-            if !result.isEmpty, !result.hasSuffix("\n") {
-                result.append("\n")
-            }
+        for token in ["{site}", "{address}", "{accountID}"] where !result.contains(token) {
+            if !result.isEmpty, !result.hasSuffix("\n") { result.append("\n") }
             result.append(token)
         }
         return result
     }
 }
 
+@MainActor
+enum FireVaultOverlayEditorBridge {
+    private static var pending: FireVaultOverlayPreferences?
+
+    static func stage(_ overlay: FireVaultOverlayPreferences) {
+        pending = overlay.normalized
+    }
+
+    static func merge(into overlay: FireVaultOverlayPreferences) -> FireVaultOverlayPreferences {
+        guard let pending else { return overlay }
+        self.pending = nil
+        var merged = overlay
+        merged.scale = pending.scale
+        merged.positionX = pending.positionX
+        merged.positionY = pending.positionY
+        merged.logoScale = pending.logoScale
+        merged.logoPositionX = pending.logoPositionX
+        merged.logoPositionY = pending.logoPositionY
+        return merged.normalized
+    }
+}
+
 struct FireVaultGPSPreferences: Codable, Equatable {
     static let allowedRadius = 0.25...25.0
     static let radiusOptions: [Double] = [0.25, 0.5, 0.75, 1] + (2...25).map(Double.init)
-
     var nearbyRadiusMiles: Double = 1
     var highAccuracy = true
     var gpsToolsEnabled = true
     var includeCoordinatesInReports = true
     var addressAssistanceEnabled = true
-
+    var hapticsEnabled: Bool? = true
+    var hapticsAreEnabled: Bool { hapticsEnabled ?? true }
     var normalized: Self {
         var copy = self
-        let clamped = min(
-            Self.allowedRadius.upperBound,
-            max(Self.allowedRadius.lowerBound, nearbyRadiusMiles)
-        )
-        copy.nearbyRadiusMiles = Self.radiusOptions.min {
-            abs($0 - clamped) < abs($1 - clamped)
-        } ?? 1
+        let clamped = min(Self.allowedRadius.upperBound, max(Self.allowedRadius.lowerBound, nearbyRadiusMiles))
+        copy.nearbyRadiusMiles = Self.radiusOptions.min { abs($0 - clamped) < abs($1 - clamped) } ?? 1
+        if copy.hapticsEnabled == nil { copy.hapticsEnabled = true }
         return copy
     }
-
-    var radiusStatus: String {
-        "\(nearbyRadiusMiles.formatted(.number.precision(.fractionLength(0...2)))) mi"
-    }
-
-    static func radiusLabel(_ value: Double) -> String {
-        "\(value.formatted(.number.precision(.fractionLength(0...2)))) mi"
-    }
-
-    static func radiusWheelLabel(_ value: Double) -> String {
-        value.formatted(.number.precision(.fractionLength(0...2)))
-    }
+    var radiusStatus: String { "\(nearbyRadiusMiles.formatted(.number.precision(.fractionLength(0...2)))) mi" }
+    static func radiusLabel(_ value: Double) -> String { "\(value.formatted(.number.precision(.fractionLength(0...2)))) mi" }
+    static func radiusWheelLabel(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(0...2))) }
 }
 
-struct FireVaultPlusCodePreferences: Codable, Equatable {
-    var enabled = true
-    var autoGenerate = true
-    var accountLength = 10
-    var locationLength = 11
-    var verifyAfterDays = 180
-    var searchable = true
-    var includeInReports = true
-}
-
+struct FireVaultPlusCodePreferences: Codable, Equatable { var enabled = true; var autoGenerate = true; var accountLength = 10; var locationLength = 11; var verifyAfterDays = 180; var searchable = true; var includeInReports = true }
 struct FireVaultReportPreferences: Codable, Equatable {
     var title = "FireVault Service Report"
     var format = "detailed"
     var includeTechnician = true
     var includeTasks = true
     var includeDeficiencies = true
-}
+    var dailyEmailEnabled = false
+    var dailyEmailHour = 18
+    var dailyEmailMinute = 0
+    var weeklyEmailEnabled = false
+    var weeklyEmailWeekday = 6
+    var weeklyEmailHour = 18
+    var weeklyEmailMinute = 15
+    var reportTimeZone = TimeZone.current.identifier
 
-struct FireVaultEmailPreferences: Codable, Equatable {
-    var defaultTo = ""
-    var cc = ""
-    var defaultSubject = "FireVault Service Report"
-    var signature = ""
-}
+    init() {}
 
-struct FireVaultStoragePreferences: Codable, Equatable {
-    var photoProvider = "local"
-    var documentProvider = "local"
-    var photoFolder = "FireVault/Photos"
-    var documentFolder = "FireVault/Documents"
-    var microsoftProfileLabel = ""
-    var microsoftEmail = ""
-    var sharePointSiteURL = ""
-    var libraryName = "Documents"
-}
+    private enum CodingKeys: String, CodingKey {
+        case title, format, includeTechnician, includeTasks, includeDeficiencies
+        case dailyEmailEnabled, dailyEmailHour, dailyEmailMinute
+        case weeklyEmailEnabled, weeklyEmailWeekday, weeklyEmailHour, weeklyEmailMinute
+        case reportTimeZone
+    }
 
-struct FireVaultSyncPreferences: Codable, Equatable {
-    var organization = ""
-    var workspace = "FireVault Shared Vault"
-    var conflictPolicy = "review"
-}
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        title = try values.decodeIfPresent(String.self, forKey: .title) ?? "FireVault Service Report"
+        format = try values.decodeIfPresent(String.self, forKey: .format) ?? "detailed"
+        includeTechnician = try values.decodeIfPresent(Bool.self, forKey: .includeTechnician) ?? true
+        includeTasks = try values.decodeIfPresent(Bool.self, forKey: .includeTasks) ?? true
+        includeDeficiencies = try values.decodeIfPresent(Bool.self, forKey: .includeDeficiencies) ?? true
+        dailyEmailEnabled = try values.decodeIfPresent(Bool.self, forKey: .dailyEmailEnabled) ?? false
+        dailyEmailHour = try values.decodeIfPresent(Int.self, forKey: .dailyEmailHour) ?? 18
+        dailyEmailMinute = try values.decodeIfPresent(Int.self, forKey: .dailyEmailMinute) ?? 0
+        weeklyEmailEnabled = try values.decodeIfPresent(Bool.self, forKey: .weeklyEmailEnabled) ?? false
+        weeklyEmailWeekday = try values.decodeIfPresent(Int.self, forKey: .weeklyEmailWeekday) ?? 6
+        weeklyEmailHour = try values.decodeIfPresent(Int.self, forKey: .weeklyEmailHour) ?? 18
+        weeklyEmailMinute = try values.decodeIfPresent(Int.self, forKey: .weeklyEmailMinute) ?? 15
+        reportTimeZone = try values.decodeIfPresent(String.self, forKey: .reportTimeZone)
+            ?? TimeZone.current.identifier
+    }
 
-struct FireVaultWebDAVPreferences: Codable, Equatable {
-    var enabled = false
-    var serverURL = ""
-    var username = ""
-    var folder = "/FireVault"
+    var normalized: Self {
+        var copy = self
+        copy.dailyEmailHour = min(23, max(0, dailyEmailHour))
+        copy.dailyEmailMinute = min(59, max(0, dailyEmailMinute))
+        copy.weeklyEmailWeekday = min(7, max(1, weeklyEmailWeekday))
+        copy.weeklyEmailHour = min(23, max(0, weeklyEmailHour))
+        copy.weeklyEmailMinute = min(59, max(0, weeklyEmailMinute))
+        if TimeZone(identifier: copy.reportTimeZone) == nil {
+            copy.reportTimeZone = TimeZone.current.identifier
+        }
+        if !["detailed", "compact"].contains(copy.format) {
+            copy.format = "detailed"
+        }
+        return copy
+    }
 }
-
-struct FireVaultPrivacyPreferences: Codable, Equatable {
-    var enabled = false
-    var autoLockMinutes = 5
-    var lockOnBackground = true
-    var hideInAppSwitcher = true
-}
+struct FireVaultEmailPreferences: Codable, Equatable { var defaultTo = ""; var cc = ""; var defaultSubject = "FireVault Service Report"; var signature = "" }
+struct FireVaultStoragePreferences: Codable, Equatable { var photoProvider = "local"; var documentProvider = "local"; var photoFolder = "FireVault/Photos"; var documentFolder = "FireVault/Documents"; var microsoftProfileLabel = ""; var microsoftEmail = ""; var sharePointSiteURL = ""; var libraryName = "Documents" }
+struct FireVaultSyncPreferences: Codable, Equatable { var organization = ""; var workspace = "FireVault Shared Vault"; var conflictPolicy = "review" }
+struct FireVaultWebDAVPreferences: Codable, Equatable { var enabled = false; var serverURL = ""; var username = ""; var folder = "/FireVault" }
+struct FireVaultPrivacyPreferences: Codable, Equatable { var enabled = false; var autoLockMinutes = 5; var lockOnBackground = true; var hideInAppSwitcher = true }
 
 struct FireVaultNativePreferences: Codable, Equatable {
     var technician = FireVaultTechnicianPreferences()
@@ -256,36 +264,28 @@ struct FireVaultNativePreferences: Codable, Equatable {
     var webDAV = FireVaultWebDAVPreferences()
     var privacy = FireVaultPrivacyPreferences()
     var categories: [String] = ["Commercial", "Healthcare", "Education", "Government", "Residential"]
-
     var normalized: Self {
         var copy = self
         copy.gps = gps.normalized
         copy.overlay = overlay.normalized
-        copy.categories = categories
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        copy.reports = reports.normalized
+        copy.categories = categories.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         return copy
     }
 }
 
 @MainActor
 final class FireVaultNativeSettingsStore: ObservableObject {
-    private enum Key {
-        static let preferences = "firevault.native.settings.all.v2"
-    }
-
+    private enum Key { static let preferences = "firevault.native.settings.all.v2" }
     @Published private(set) var preferences: FireVaultNativePreferences
-
     var gps: FireVaultGPSPreferences { preferences.gps }
-
     private let defaults: UserDefaults
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: Key.preferences),
-           let saved = try? decoder.decode(FireVaultNativePreferences.self, from: data) {
+        if let data = defaults.data(forKey: Key.preferences), let saved = try? decoder.decode(FireVaultNativePreferences.self, from: data) {
             preferences = saved.normalized
         } else {
             preferences = FireVaultNativePreferences()
@@ -293,19 +293,18 @@ final class FireVaultNativeSettingsStore: ObservableObject {
     }
 
     func save(_ updated: FireVaultNativePreferences) {
-        preferences = updated.normalized
+        var merged = updated
+        merged.overlay = FireVaultOverlayEditorBridge.merge(into: updated.overlay)
+        preferences = merged.normalized
         persist()
     }
 
     func saveGPS(_ updated: FireVaultGPSPreferences) {
-        var next = preferences
-        next.gps = updated
-        save(next)
+        var next = preferences; next.gps = updated; save(next)
     }
 
     private func persist() {
         guard let data = try? encoder.encode(preferences) else { return }
         defaults.set(data, forKey: Key.preferences)
     }
-
 }

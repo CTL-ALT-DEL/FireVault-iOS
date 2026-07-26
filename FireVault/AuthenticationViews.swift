@@ -29,7 +29,7 @@ final class FireVaultAuthentication: ObservableObject {
         listenerTask = Task { [weak self] in
             for await (_, session) in SupabaseManager.client.auth.authStateChanges {
                 guard let self, !Task.isCancelled else { return }
-                phase = session == nil ? .signedOut : .signedIn
+                phase = session == nil || session?.isExpired == true ? .signedOut : .signedIn
             }
         }
     }

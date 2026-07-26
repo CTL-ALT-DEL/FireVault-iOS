@@ -208,20 +208,20 @@ struct FireVaultBreadcrumbPermissionState: Equatable {
         switch authorizationStatus {
         case .authorizedAlways:
             if accuracyAuthorization == .reducedAccuracy {
-                return "Turn on Precise Location in iOS Settings so Breadcrumbs can recognize short stops and nearby accounts."
+                return "Turn on Precise Location in iOS Settings so Trip Log can recognize short stops and nearby accounts."
             }
-            return "Breadcrumbs can continue an active workday while FireVault is in the background."
+            return "Trip Log can continue an active workday while FireVault is in the background."
         case .authorizedWhenInUse:
             if accuracyAuthorization == .reducedAccuracy {
-                return "Turn on Precise Location in iOS Settings so Breadcrumbs can recognize short stops and nearby accounts."
+                return "Turn on Precise Location in iOS Settings so Trip Log can recognize short stops and nearby accounts."
             }
             return "An active workday continues in the background and uses the visible iOS location indicator."
         case .denied:
-            return "Allow location access in iOS Settings before starting or resuming a Breadcrumbs workday."
+            return "Allow location access in iOS Settings before starting or resuming a Trip Log workday."
         case .restricted:
             return "Location access is restricted by this iPhone’s system or management settings."
         case .notDetermined:
-            return "FireVault asks for location access only when you start your first Breadcrumbs workday."
+            return "FireVault asks for location access only when you start your first Trip Log workday."
         @unknown default:
             return "This iPhone is not currently providing location access to FireVault."
         }
@@ -313,7 +313,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         activeStopID = nil
         sessionIsPrepared = false
         updateActiveDay { $0.isPaused = true }
-        statusText = "Breadcrumbs paused"
+        statusText = "Trip Log paused"
     }
 
     func resumeWorkday(accounts: [FireVaultWorkspaceAccount]) {
@@ -335,7 +335,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         guard !activeDay.isPaused else {
             sessionIsPrepared = false
             stopLocationUpdates()
-            statusText = "Breadcrumbs paused"
+            statusText = "Trip Log paused"
             return
         }
         guard !isRecording else { return }
@@ -356,6 +356,14 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         sessionIsPrepared = false
         statusText = "Workday complete"
         persist()
+        let completedDay = days[index]
+        let preferences = FireVaultNativeSettingsStore().preferences
+        Task {
+            await FireVaultTripLogAutomationService.shared.syncCompletedDay(
+                completedDay,
+                preferences: preferences
+            )
+        }
     }
 
     func deleteDay(_ id: UUID) {
@@ -428,7 +436,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         guard sessionIsPrepared, let activeDay else { return }
         guard !activeDay.isPaused else {
             stopLocationUpdates()
-            statusText = "Breadcrumbs paused"
+            statusText = "Trip Log paused"
             return
         }
         switch manager.authorizationStatus {
@@ -436,7 +444,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             startAuthorizedUpdates()
         case .denied:
             stopLocationUpdates()
-            statusText = "Location access is off for Breadcrumbs"
+            statusText = "Location access is off for Trip Log"
         case .restricted:
             stopLocationUpdates()
             statusText = "Location access is restricted"
@@ -457,7 +465,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         if let locationError = error as? CLError, locationError.code == .denied {
             stopLocationUpdates()
-            statusText = "Location access is off for Breadcrumbs"
+            statusText = "Location access is off for Trip Log"
         } else {
             statusText = "Waiting for a reliable GPS position…"
         }
@@ -478,7 +486,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             startAuthorizedUpdates()
         case .denied:
             stopLocationUpdates()
-            statusText = "Location access is off for Breadcrumbs"
+            statusText = "Location access is off for Trip Log"
         case .restricted:
             stopLocationUpdates()
             statusText = "Location access is restricted"
@@ -786,7 +794,7 @@ struct FireVaultBreadcrumbsView: View {
                         timeline(day)
                     } else {
                         ContentUnavailableView(
-                            "No Breadcrumbs Yet",
+                            "No Trip Log Yet",
                             systemImage: "point.topleft.down.to.point.bottomright.curvepath",
                             description: Text("Start your workday to record today’s route and account stops.")
                         )
@@ -797,7 +805,7 @@ struct FireVaultBreadcrumbsView: View {
                 .padding(.bottom, 28)
             }
             .background(NativeShellPalette.background)
-            .navigationTitle("Breadcrumbs")
+            .navigationTitle("Trip Log")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -974,7 +982,7 @@ struct FireVaultBreadcrumbsView: View {
                     }
                 }
 
-                Text("Breadcrumbs starts only when you choose Start Workday. Route history stays in FireVault on this iPhone unless you explicitly export a report.")
+                Text("Trip Log starts only when you choose Start Workday. Route history stays in FireVault on this device unless you explicitly export a report.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1379,7 +1387,7 @@ private struct FireVaultBreadcrumbStopEditor: View {
         } header: {
             Text("Visit Note")
         } footer: {
-            Text("This note belongs to the Breadcrumbs visit and does not create a separate account note.")
+            Text("This note belongs to the Trip Log visit and does not create a separate account note.")
         }
     }
 

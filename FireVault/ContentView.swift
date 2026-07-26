@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  FireVault
 //
-//  Pure SwiftUI application root for Build 1.08.06.
+//  Pure SwiftUI application root for Build 1.08.07.
 //
 
 import SwiftUI
@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var demoBreadcrumbs: FireVaultBreadcrumbStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showsSplash = true
 
     init() {
@@ -26,14 +27,16 @@ struct ContentView: View {
     }
 
     var body: some View {
-        ZStack {
-            applicationContent
-                .accessibilityHidden(showsSplash)
+        GeometryReader { geometry in
+            ZStack {
+                applicationContent(availableSize: geometry.size)
+                    .accessibilityHidden(showsSplash)
 
-            if showsSplash {
-                FireVaultSplashView()
-                    .transition(.opacity)
-                    .zIndex(1)
+                if showsSplash {
+                    FireVaultSplashView()
+                        .transition(.opacity)
+                        .zIndex(1)
+                }
             }
         }
         .animation(.easeOut(duration: 0.2), value: store.selectedAccountID)
@@ -61,23 +64,59 @@ struct ContentView: View {
         }
     }
 
-    @ViewBuilder
-    private var applicationContent: some View {
-        VStack(spacing: 0) {
+    private func applicationContent(availableSize: CGSize) -> some View {
+        let isLandscapeWindow = availableSize.width > availableSize.height
+        let usesRegularIPad = horizontalSizeClass == .regular && availableSize.width >= 600
+        let usesWideWorkspace = usesRegularIPad
+            && isLandscapeWindow
+            && availableSize.width >= 900
+        let usesPortraitIPadNearby = usesRegularIPad
+            && !isLandscapeWindow
+            && store.selectedTab == .nearby
+            && store.selectedAccount == nil
+        let payload = store.appPayload(
+            userCoordinate: locationService.coordinate,
+            liveLocationStatus: locationService.statusText
+        )
+
+        return VStack(spacing: 0) {
             FireVaultBrandHeader()
 
             ZStack {
                 NativeShellPalette.background.ignoresSafeArea()
 
-                if let account = store.selectedAccount {
+                if let account = store.selectedAccount, usesRegularIPad {
+                    FireVaultAdaptiveAccountDetailsView(
+                        account: account,
+                        store: store,
+                        returnTab: store.selectedTab,
+                        returnTitle: store.selectedTab == .nearby ? "Nearby" : "Account List"
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                } else if usesWideWorkspace {
+                    FireVaultIPadWorkspaceV3(
+                        payload: payload,
+                        store: store,
+                        settings: settings,
+                        locationService: locationService,
+                        breadcrumbs: activeBreadcrumbs
+                    )
+                    .transition(.opacity)
+                } else if let account = store.selectedAccount {
                     FieldWorkspaceView(account: account, store: store)
                         .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                } else if usesPortraitIPadNearby {
+                    FireVaultIPadPortraitNearbyViewV2(
+                        payload: payload,
+                        store: store,
+                        settings: settings,
+                        locationService: locationService,
+                        breadcrumbs: activeBreadcrumbs
+                    )
+                    .transition(.opacity)
                 } else {
                     NativeAppShellView(
-                        payload: store.appPayload(
-                            userCoordinate: locationService.coordinate,
-                            liveLocationStatus: locationService.statusText
-                        ),
+                        payload: payload,
                         store: store,
                         settings: settings,
                         locationService: locationService,
@@ -125,9 +164,9 @@ private struct FireVaultBrandHeader: View {
                     .foregroundColor(.white)
                     .tracking(1.35)
             }
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("FireVault")
+            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("FireVault")
 
             Spacer()
 
@@ -230,9 +269,9 @@ private struct FireVaultSplashView: View {
                             .foregroundColor(.white)
                             .tracking(0.4)
                     }
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("FireVault")
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("FireVault")
 
                     Text("FIELD WORKSPACE")
                         .font(.caption.bold())
