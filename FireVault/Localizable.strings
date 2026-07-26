@@ -1,2 +1,33 @@
 /* Build 1.08.07 copy refinements */
 "Large hybrid map with the closest accounts beside it" = "";
+
+/* Track Log naming */
+"Breadcrumbs" = "Track Log";
+"BREADCRUMBS" = "TRACK LOG";
+"Breadcrumb" = "Track Log";
+"BREADCRUMB" = "TRACK LOG";
+"No Breadcrumbs Yet" = "No Track Log Yet";
+"Breadcrumbs history" = "Track Log history";
+"Breadcrumb history" = "Track Log history";
+"Open Breadcrumbs" = "Open Track Log";
+"Open Breadcrumb" = "Open Track Log";
+"Breadcrumbs Settings" = "Track Log Settings";
+"Breadcrumb Settings" = "Track Log Settings";
+"Breadcrumbs Report" = "Track Log Report";
+"Breadcrumb Report" = "Track Log Report";
+"Breadcrumbs Daily Report" = "Track Log Daily Report";
+"Breadcrumbs route" = "Track Log route";
+"Breadcrumb route" = "Track Log route";
+"Start Breadcrumbs" = "Start Track Log";
+"Pause Breadcrumbs" = "Pause Track Log";
+"Resume Breadcrumbs" = "Resume Track Log";
+"Stop Breadcrumbs" = "Stop Track Log";
+"Breadcrumbs unavailable" = "Track Log unavailable";
+"Breadcrumbs paused" = "Track Log paused";
+"Breadcrumbs recording" = "Track Log recording";
+"Breadcrumbs are recording" = "Track Log is recording";
+"Breadcrumbs is recording" = "Track Log is recording";
+"Breadcrumbs workspace" = "Track Log workspace";
+"Breadcrumbs map" = "Track Log map";
+"Breadcrumbs data" = "Track Log data";
+"Breadcrumbs permission" = "Track Log permission";
