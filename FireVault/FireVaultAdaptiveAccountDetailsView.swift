@@ -35,6 +35,22 @@ private enum FireVaultAccountDetailSection: String, CaseIterable, Identifiable {
     }
 }
 
+private enum FireVaultAccountMapLayer: String, CaseIterable, Identifiable {
+    case standard = "Standard"
+    case hybrid = "Hybrid"
+    case imagery = "Satellite"
+
+    var id: String { rawValue }
+
+    var symbol: String {
+        switch self {
+        case .standard: "map"
+        case .hybrid: "map.fill"
+        case .imagery: "globe.americas.fill"
+        }
+    }
+}
+
 struct FireVaultAdaptiveAccountDetailsView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
@@ -44,9 +60,15 @@ struct FireVaultAdaptiveAccountDetailsView: View {
     @State private var addressCamera: MapCameraPosition = .automatic
     @State private var pinsCamera: MapCameraPosition = .automatic
     @State private var selectedSection: FireVaultAccountDetailSection = .notes
+    @State private var addressLayer: FireVaultAccountMapLayer = .standard
+    @State private var pinsLayer: FireVaultAccountMapLayer = .standard
 
     private var mappedPins: [FireVaultWorkspaceLocation] {
         account.locations.filter { $0.coordinate != nil }
+    }
+
+    private var formattedPhone: String {
+        Self.formatPhone(account.phone)
     }
 
     private var addressRegion: MKCoordinateRegion {
@@ -83,14 +105,16 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                             mapCard(
                                 title: "ADDRESS",
                                 subtitle: account.address,
-                                map: AnyView(addressMap)
+                                layer: $addressLayer,
+                                map: AnyView(addressStyledMap)
                             )
                             .frame(width: mapSide, height: mapSide)
 
                             mapCard(
                                 title: "PIN LOCATIONS",
                                 subtitle: "\(mappedPins.count) mapped",
-                                map: AnyView(pinMap)
+                                layer: $pinsLayer,
+                                map: AnyView(pinsStyledMap)
                             )
                             .frame(width: mapSide, height: mapSide)
                         }
@@ -98,7 +122,6 @@ struct FireVaultAdaptiveAccountDetailsView: View {
 
                         sectionSelector
                         selectedSectionContent
-                        compactAccountSummary
                     }
                     .padding(.horizontal, 18)
                     .padding(.bottom, 28)
@@ -111,53 +134,110 @@ struct FireVaultAdaptiveAccountDetailsView: View {
             addressCamera = .region(addressRegion)
             pinsCamera = .region(pinRegion)
             selectedSection = .notes
+            addressLayer = .standard
+            pinsLayer = .standard
         }
         .accessibilityIdentifier("adaptive-account-dual-map-details")
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             Button(returnTitle, systemImage: "chevron.left") {
                 store.closeAccount(to: returnTab)
             }
             .buttonStyle(.glass)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(account.name)
-                    .font(.title3.bold())
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                Text(account.address)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 10) {
+                    Text(account.name)
+                        .font(.title2.bold())
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
 
-            Spacer()
+                    if !account.accountId.isEmpty {
+                        headerBadge("ACCOUNT", value: account.accountId)
+                    }
 
-            Button {
-                store.call(account.phone)
-            } label: {
-                Image(systemName: "phone.fill")
+                    if !account.category.isEmpty {
+                        headerBadge("CATEGORY", value: account.category)
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    Label(account.address, systemImage: "mappin.and.ellipse")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    Button {
+                        store.call(account.phone)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "phone.fill")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 36, height: 36)
+                                .background(NativeShellPalette.green, in: Circle())
+                            Text(formattedPhone.isEmpty ? "No phone" : formattedPhone)
+                                .font(.subheadline.bold())
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!account.phone.contains(where: \.isNumber))
+                    .opacity(account.phone.contains(where: \.isNumber) ? 1 : 0.5)
+                    .accessibilityLabel("Call \(formattedPhone)")
+                }
             }
-            .buttonStyle(.glass)
-            .disabled(!account.phone.contains(where: \.isNumber))
-            .accessibilityLabel("Call account")
 
             Button {
                 store.openRoute(for: account)
             } label: {
-                Image(systemName: "arrow.triangle.turn.up.right.diamond.fill")
+                Label("Route", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                    .font(.headline)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 46)
             }
             .buttonStyle(.glassProminent)
             .disabled(account.coordinate == nil)
             .accessibilityLabel("Route to account")
+
+            Button {
+                store.toggleFavorite(account.id)
+            } label: {
+                Image(systemName: account.favorite ? "star.fill" : "star")
+                    .font(.title3.bold())
+            }
+            .buttonStyle(.glass)
+            .accessibilityLabel("Favorite account")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
     }
 
-    private func mapCard(title: String, subtitle: String, map: AnyView) -> some View {
+    private func headerBadge(_ label: String, value: String) -> some View {
+        HStack(spacing: 5) {
+            Text(label)
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(NativeShellPalette.surface, in: Capsule())
+    }
+
+    private func mapCard(
+        title: String,
+        subtitle: String,
+        layer: Binding<FireVaultAccountMapLayer>,
+        map: AnyView
+    ) -> some View {
         ZStack(alignment: .topLeading) {
             map
 
@@ -177,10 +257,40 @@ struct FireVaultAdaptiveAccountDetailsView: View {
             .padding(9)
             .allowsHitTesting(false)
         }
+        .overlay(alignment: .topTrailing) {
+            Menu {
+                Picker("Map Layer", selection: layer) {
+                    ForEach(FireVaultAccountMapLayer.allCases) { option in
+                        Label(option.rawValue, systemImage: option.symbol).tag(option)
+                    }
+                }
+            } label: {
+                Image(systemName: "square.3.layers.3d.top.filled")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 46, height: 46)
+                    .background(.black.opacity(0.76), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(9)
+            .accessibilityLabel("Map layers")
+        }
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(.white.opacity(0.14), lineWidth: 1)
+        }
+    }
+
+    @ViewBuilder
+    private var addressStyledMap: some View {
+        switch addressLayer {
+        case .standard:
+            addressMap.mapStyle(.standard(elevation: .realistic))
+        case .hybrid:
+            addressMap.mapStyle(.hybrid(elevation: .realistic))
+        case .imagery:
+            addressMap.mapStyle(.imagery(elevation: .realistic))
         }
     }
 
@@ -191,8 +301,19 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     .tint(NativeShellPalette.red)
             }
         }
-        .mapStyle(.hybrid(elevation: .realistic))
         .accessibilityIdentifier("account-address-zoom-map")
+    }
+
+    @ViewBuilder
+    private var pinsStyledMap: some View {
+        switch pinsLayer {
+        case .standard:
+            pinMap.mapStyle(.standard(elevation: .realistic))
+        case .hybrid:
+            pinMap.mapStyle(.hybrid(elevation: .realistic))
+        case .imagery:
+            pinMap.mapStyle(.imagery(elevation: .realistic))
+        }
     }
 
     private var pinMap: some View {
@@ -208,43 +329,38 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 }
             }
         }
-        .mapStyle(.hybrid(elevation: .realistic))
         .accessibilityIdentifier("account-all-pin-locations-map")
     }
 
     private var sectionSelector: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 8) {
             ForEach(FireVaultAccountDetailSection.allCases) { section in
                 Button {
                     selectedSection = section
                     UISelectionFeedbackGenerator().selectionChanged()
                 } label: {
-                    VStack(spacing: 3) {
-                        HStack(spacing: 5) {
-                            Image(systemName: section.symbol)
-                                .font(.caption.bold())
-                                .foregroundStyle(section.tint)
-                            Text(section.rawValue)
-                                .font(.caption2.bold())
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                        }
+                    HStack(spacing: 8) {
+                        Image(systemName: section.symbol)
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(section.tint)
+                        Text(section.rawValue)
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
                         Text("\(count(for: section))")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .font(.subheadline.bold().monospacedDigit())
+                            .foregroundStyle(selectedSection == section ? .white : .secondary)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .padding(.horizontal, 6)
+                    .frame(maxWidth: .infinity, minHeight: 54)
+                    .padding(.horizontal, 10)
                     .background(
-                        selectedSection == section
-                            ? section.tint.opacity(0.18)
-                            : NativeShellPalette.surface,
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        selectedSection == section ? section.tint.opacity(0.20) : NativeShellPalette.surface,
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                     )
                     .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
                             .stroke(
-                                selectedSection == section ? section.tint.opacity(0.8) : .white.opacity(0.07),
+                                selectedSection == section ? section.tint.opacity(0.85) : .white.opacity(0.07),
                                 lineWidth: selectedSection == section ? 1.5 : 1
                             )
                     }
@@ -260,12 +376,11 @@ struct FireVaultAdaptiveAccountDetailsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label(selectedSection.rawValue, systemImage: selectedSection.symbol)
-                    .font(.caption.bold())
-                    .tracking(0.9)
+                    .font(.subheadline.bold())
                     .foregroundStyle(selectedSection.tint)
                 Spacer()
                 Text("\(count(for: selectedSection)) total")
-                    .font(.caption.monospacedDigit())
+                    .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
 
@@ -319,24 +434,14 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 .foregroundStyle(selectedSection.tint)
                 .frame(width: 26)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
+                Text(title).font(.subheadline.bold()).foregroundStyle(.white).lineLimit(1)
                 if !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
             }
             Spacer(minLength: 8)
             if !trailing.isEmpty {
-                Text(trailing)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing)
-                    .lineLimit(2)
+                Text(trailing).font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.trailing).lineLimit(2)
             }
         }
         .padding(.vertical, 7)
@@ -362,37 +467,21 @@ struct FireVaultAdaptiveAccountDetailsView: View {
         }
     }
 
-    private var compactAccountSummary: some View {
-        HStack(spacing: 14) {
-            summaryItem("ACCOUNT", account.accountId.isEmpty ? "Not entered" : account.accountId)
-            Divider().frame(height: 30)
-            summaryItem("CATEGORY", account.category.isEmpty ? "Not entered" : account.category)
-            Divider().frame(height: 30)
-            summaryItem("PHONE", account.phone.isEmpty ? "Not entered" : account.phone)
-            Spacer(minLength: 0)
-            Button {
-                store.toggleFavorite(account.id)
-            } label: {
-                Label("Favorite", systemImage: account.favorite ? "star.fill" : "star")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+    private static func formatPhone(_ raw: String) -> String {
+        let digits = raw.filter(\.isNumber)
+        if digits.count == 10 {
+            let area = digits.prefix(3)
+            let middle = digits.dropFirst(3).prefix(3)
+            let last = digits.suffix(4)
+            return "(\(area)) \(middle)-\(last)"
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(NativeShellPalette.navigationBackground.opacity(0.72), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-    }
-
-    private func summaryItem(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption2.bold())
-                .tracking(0.8)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.caption.bold())
-                .foregroundStyle(.white)
-                .lineLimit(1)
+        if digits.count == 11, digits.first == "1" {
+            let ten = String(digits.dropFirst())
+            let area = ten.prefix(3)
+            let middle = ten.dropFirst(3).prefix(3)
+            let last = ten.suffix(4)
+            return "(\(area)) \(middle)-\(last)"
         }
+        return raw
     }
 }
