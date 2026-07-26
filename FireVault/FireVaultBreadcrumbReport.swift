@@ -1084,7 +1084,7 @@ private enum FireVaultTripLogMapSnapshot {
         let options = MKMapSnapshotter.Options()
         options.region = region
         options.size = size
-        options.scale = UIScreen.main.scale
+        options.scale = 2
         options.mapType = .standard
         options.showsBuildings = true
         options.pointOfInterestFilter = .excludingAll
@@ -1100,7 +1100,7 @@ private enum FireVaultTripLogMapSnapshot {
         }
 
         let format = UIGraphicsImageRendererFormat()
-        format.scale = UIScreen.main.scale
+        format.scale = 2
         return UIGraphicsImageRenderer(size: size, format: format).image { _ in
             snapshot.image.draw(in: CGRect(origin: .zero, size: size))
 
