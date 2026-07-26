@@ -290,7 +290,16 @@ struct NativePrivacySettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section("Privacy") {
-                Toggle("Require Face ID", isOn: $draft.privacy.enabled)
+                Toggle(
+                    "Require Face ID",
+                    isOn: Binding(
+                        get: { draft.privacy.enabled },
+                        set: { enabled in
+                            draft.privacy.enabled = enabled
+                            settings.save(draft)
+                        }
+                    )
+                )
                 Picker("Auto-lock", selection: $draft.privacy.autoLockMinutes) { Text("Immediately").tag(0); Text("1 minute").tag(1); Text("5 minutes").tag(5); Text("15 minutes").tag(15) }
                 Toggle("Lock when app enters background", isOn: $draft.privacy.lockOnBackground)
                 Toggle("Hide content in app switcher", isOn: $draft.privacy.hideInAppSwitcher)
