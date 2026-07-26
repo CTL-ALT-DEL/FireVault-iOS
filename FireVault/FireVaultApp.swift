@@ -9,6 +9,8 @@ import SwiftUI
 
 @main
 struct FireVaultApp: App {
+    @UIApplicationDelegateAdaptor(FireVaultAppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup {
             FireVaultAuthGate()

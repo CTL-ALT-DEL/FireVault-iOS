@@ -12,6 +12,31 @@ import MapKit
 
 @MainActor
 final class FireVaultTests: XCTestCase {
+    func testEveryHomeScreenQuickActionRoundTripsThroughItsShortcutType() {
+        XCTAssertEqual(
+            FireVaultQuickAction.allCases.map {
+                FireVaultQuickAction(shortcutType: $0.shortcutType)
+            },
+            FireVaultQuickAction.allCases.map(Optional.some)
+        )
+        XCTAssertEqual(
+            FireVaultQuickAction.allCases.map(\.title),
+            ["Start Log", "Stop Log", "Photo", "Scan"]
+        )
+    }
+
+    func testCaptureQuickActionIsConsumedOnlyOnce() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+
+        store.requestCapture(.scan)
+
+        XCTAssertEqual(store.consumeCaptureQuickAction(), .scan)
+        XCTAssertNil(store.consumeCaptureQuickAction())
+    }
+
     func testSettingsItemAccessibilityLabelIncludesUsefulContext() {
         let item = FireVaultNativeSettingItem(
             id: "photo-overlay",

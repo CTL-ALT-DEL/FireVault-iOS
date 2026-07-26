@@ -14,6 +14,7 @@ final class FireVaultAuthentication: ObservableObject {
     @Published private(set) var isWorking = false
     @Published var errorMessage: String?
     @Published var confirmationMessage: String?
+    @Published private(set) var signedInEmail = ""
 
     private var hasStarted = false
     private var listenerTask: Task<Void, Never>?
@@ -30,6 +31,9 @@ final class FireVaultAuthentication: ObservableObject {
             for await (_, session) in SupabaseManager.client.auth.authStateChanges {
                 guard let self, !Task.isCancelled else { return }
                 phase = session == nil || session?.isExpired == true ? .signedOut : .signedIn
+                signedInEmail = session?.user.email?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased() ?? ""
             }
         }
     }
@@ -41,10 +45,13 @@ final class FireVaultAuthentication: ObservableObject {
         defer { isWorking = false }
 
         do {
-            try await SupabaseManager.client.auth.signIn(
+            let session = try await SupabaseManager.client.auth.signIn(
                 email: email.trimmingCharacters(in: .whitespacesAndNewlines),
                 password: password
             )
+            signedInEmail = session.user.email?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() ?? ""
             phase = .signedIn
         } catch {
             errorMessage = friendlyMessage(for: error)
@@ -83,6 +90,7 @@ final class FireVaultAuthentication: ObservableObject {
 
         do {
             try await SupabaseManager.client.auth.signOut()
+            signedInEmail = ""
             phase = .signedOut
         } catch {
             errorMessage = friendlyMessage(for: error)

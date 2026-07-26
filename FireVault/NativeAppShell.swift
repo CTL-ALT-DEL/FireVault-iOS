@@ -1184,6 +1184,12 @@ private struct NativePhotoView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(NativeShellPalette.background)
             .navigationTitle("Photo")
+            .task {
+                handleCaptureQuickAction()
+            }
+            .onChange(of: store.pendingCaptureQuickAction) { _, _ in
+                handleCaptureQuickAction()
+            }
             .onChange(of: selectedItem) { _, item in
                 Task {
                     guard let data = try? await item?.loadTransferable(type: Data.self),
@@ -1395,6 +1401,16 @@ private struct NativePhotoView: View {
             return
         }
         launchCapture(intent)
+    }
+
+    private func handleCaptureQuickAction() {
+        guard let action = store.consumeCaptureQuickAction() else { return }
+        switch action {
+        case .photo:
+            beginCapture(.camera)
+        case .scan:
+            beginCapture(.scanner)
+        }
     }
 
     private func launchCapture(_ intent: CaptureIntent) {
@@ -1779,7 +1795,7 @@ private struct NativeSettingsView: View {
         case "backup": NativeMigrationStatusView(title: "Backup & Restore", symbol: "externaldrive.badge.timemachine", message: "Native full-vault backup will be enabled after accounts, media, notes, and equipment share the native repository.")
         case "webdav": NativeWebDAVSettingsView(settings: settings)
         case "privacy": NativePrivacySettingsView(settings: settings)
-        case "security": NativeMigrationStatusView(title: "Security", symbol: "shield.checkered", message: "FireVault now uses the iOS application sandbox. Native Face ID and protected-export controls are the next security milestone.")
+        case "security": NativeMigrationStatusView(title: "Security", symbol: "shield.checkered", message: "FireVault uses the iOS application sandbox and can require Face ID to unlock a signed-in workspace. Configure Face ID under Privacy Lock.")
         case "manual": NativeManualView()
         case "updates": NativeUpdatesView(versionInfo: versionInfo)
         case "demo": NativeDemoSettingsView(store: store)
