@@ -8,6 +8,30 @@
 import MapKit
 import SwiftUI
 
+private enum FireVaultIPadNearbyMapLayer: String, CaseIterable, Identifiable {
+    case standard
+    case hybrid
+    case imagery
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .standard: "Standard"
+        case .hybrid: "Hybrid"
+        case .imagery: "Satellite"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .standard: "map"
+        case .hybrid: "map.fill"
+        case .imagery: "globe.americas.fill"
+        }
+    }
+}
+
 struct FireVaultIPadWorkspaceV2: View {
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
@@ -193,6 +217,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
     @State private var selectedID: String?
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var showsBreadcrumbs = false
+    @State private var mapLayer: FireVaultIPadNearbyMapLayer = .standard
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -309,7 +334,97 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(NativeShellPalette.surface)
             } else {
-                Map(position: $cameraPosition) {
+                landscapeMap
+            }
+
+            if let selectedRow {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(selectedRow.account.name)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+
+                    Text(selectedRow.account.address)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+
+                    Label(selectedRow.distanceLabel, systemImage: "location.fill")
+                        .font(.caption.bold())
+                        .foregroundStyle(NativeShellPalette.green)
+                }
+                .padding(14)
+                .frame(maxWidth: 330, alignment: .leading)
+                .background(.black.opacity(0.84), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 17, style: .continuous)
+                        .stroke(.white.opacity(0.16), lineWidth: 1)
+                }
+                .padding(14)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            Menu {
+                Picker("Map Layer", selection: $mapLayer) {
+                    ForEach(FireVaultIPadNearbyMapLayer.allCases) { layer in
+                        Label(layer.title, systemImage: layer.symbol).tag(layer)
+                    }
+                }
+            } label: {
+                FireVaultMapControlGlyph(role: .layers)
+            }
+            .buttonStyle(.plain)
+            .padding(12)
+            .accessibilityLabel("Map layers")
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if let selectedRow {
+                FireVaultMapActionStrip {
+                    FireVaultMapControlButton(role: .note, label: "Open account details") {
+                        store.openAccount(selectedRow.account.id)
+                    }
+                    FireVaultMapControlButton(
+                        role: .call,
+                        label: "Call account",
+                        disabled: !selectedRow.account.phone.contains(where: \.isNumber)
+                    ) {
+                        store.call(selectedRow.account.phone)
+                    }
+                    FireVaultMapControlButton(
+                        role: .route,
+                        label: "Route to account",
+                        disabled: selectedRow.account.coordinate == nil
+                    ) {
+                        if let account = store.accounts.first(where: { $0.id == selectedRow.account.id }) {
+                            store.openRoute(for: account)
+                        }
+                    }
+                }
+                .padding(12)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(.white.opacity(0.12), lineWidth: 1)
+        }
+        .accessibilityIdentifier("ipad-nearby-square-map")
+    }
+
+    @ViewBuilder
+    private var landscapeMap: some View {
+        switch mapLayer {
+        case .standard:
+            baseLandscapeMap.mapStyle(.standard(elevation: .realistic))
+        case .hybrid:
+            baseLandscapeMap.mapStyle(.hybrid(elevation: .realistic))
+        case .imagery:
+            baseLandscapeMap.mapStyle(.imagery(elevation: .realistic))
+        }
+    }
+
+    private var baseLandscapeMap: some View {
+        Map(position: $cameraPosition) {
                     if !payload.demoMode, let current = locationService.coordinate {
                         Annotation("Your Location", coordinate: current) {
                             FireVaultIPadCurrentLocationMarkerV2()
@@ -338,51 +453,6 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                         }
                     }
                 }
-                .mapStyle(.standard(elevation: .realistic))
-            }
-
-            if let selectedRow {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(selectedRow.account.name)
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-
-                    Text(selectedRow.account.address)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-
-                    HStack {
-                        Label(selectedRow.distanceLabel, systemImage: "location.fill")
-                            .font(.caption.bold())
-                            .foregroundStyle(NativeShellPalette.green)
-
-                        Spacer()
-
-                        Button("Open Account", systemImage: "arrow.up.right.square") {
-                            store.openAccount(selectedRow.account.id)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                    }
-                }
-                .padding(14)
-                .frame(maxWidth: 330, alignment: .leading)
-                .background(.black.opacity(0.84), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 17, style: .continuous)
-                        .stroke(.white.opacity(0.16), lineWidth: 1)
-                }
-                .padding(14)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(.white.opacity(0.12), lineWidth: 1)
-        }
-        .accessibilityIdentifier("ipad-nearby-square-map")
     }
 
     private var accountPanel: some View {

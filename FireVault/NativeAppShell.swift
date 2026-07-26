@@ -525,42 +525,34 @@ private struct NativeNearbyView: View {
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if let selected {
-                        HStack(spacing: 8) {
-                            Button {
-                                store.call(selected.account.phone)
-                            } label: {
-                                Image(systemName: "phone.fill")
-                                    .font(.headline)
-                                    .foregroundStyle(selectedHasPhone ? NativeShellPalette.green : .secondary)
-                                    .frame(width: 44, height: 44)
-                                    .background(NativeShellPalette.surface, in: Circle())
+                        FireVaultMapActionStrip {
+                            FireVaultMapControlButton(
+                                role: .note,
+                                label: "Open \(selected.account.name) details"
+                            ) {
+                                store.openAccount(selected.account.id)
                             }
-                            .buttonStyle(.plain)
-                            .disabled(!selectedHasPhone)
-                            .accessibilityLabel("Call \(selected.account.name)")
+                            .accessibilityIdentifier("nearby-map-note")
+
+                            FireVaultMapControlButton(
+                                role: .call,
+                                label: "Call \(selected.account.name)",
+                                disabled: !selectedHasPhone
+                            ) {
+                                store.call(selected.account.phone)
+                            }
                             .accessibilityValue(selectedHasPhone ? selected.account.phone : "No phone number")
                             .accessibilityIdentifier("nearby-map-call")
 
-                            Button {
+                            FireVaultMapControlButton(
+                                role: .route,
+                                label: "Route to \(selected.account.name)",
+                                disabled: selectedWorkspaceAccount == nil
+                            ) {
                                 guard let account = selectedWorkspaceAccount else { return }
                                 store.openRoute(for: account)
-                            } label: {
-                                Image(systemName: "arrow.triangle.turn.up.right.diamond.fill")
-                                    .font(.headline)
-                                    .foregroundStyle(NativeShellPalette.blue)
-                                    .frame(width: 44, height: 44)
-                                    .background(NativeShellPalette.surface, in: Circle())
                             }
-                            .buttonStyle(.plain)
-                            .disabled(selectedWorkspaceAccount == nil)
-                            .accessibilityLabel("Route to \(selected.account.name)")
                             .accessibilityIdentifier("nearby-map-route")
-                        }
-                        .padding(7)
-                        .background(Color.black.opacity(0.88), in: Capsule())
-                        .overlay {
-                            Capsule()
-                                .stroke(.white.opacity(0.16), lineWidth: 1)
                         }
                         .padding(10)
                     }
@@ -651,14 +643,7 @@ private struct NativeNearbyView: View {
                 Label("3D View", systemImage: "view.3d")
             }
         } label: {
-            Image(systemName: mapIs3D ? "square.3.layers.3d.top.filled" : mapLayer.symbol)
-                .font(.headline)
-                .foregroundStyle(NativeShellPalette.blue)
-                .frame(width: 42, height: 42)
-                .background(Color.black.opacity(0.86), in: Circle())
-                .overlay {
-                    Circle().stroke(.white.opacity(0.18), lineWidth: 1)
-                }
+            FireVaultMapControlGlyph(role: .layers)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Map options")

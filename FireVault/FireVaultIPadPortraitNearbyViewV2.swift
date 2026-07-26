@@ -217,11 +217,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                         }
                     }
                 } label: {
-                    Image(systemName: "square.3.layers.3d.top.filled")
-                        .font(.system(size: 21, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 48, height: 48)
-                        .background(.black.opacity(0.78), in: Circle())
+                    FireVaultMapControlGlyph(role: .layers)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Map layers")
@@ -244,20 +240,19 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
         }
         .overlay(alignment: Alignment.bottomTrailing) {
             if let selectedRow {
-                HStack(spacing: 10) {
-                    mapAction(symbol: "note.text", label: "Open account details") {
+                FireVaultMapActionStrip {
+                    FireVaultMapControlButton(role: .note, label: "Open account details") {
                         store.openAccount(selectedRow.account.id)
                     }
-                    mapAction(
-                        symbol: "phone.fill",
+                    FireVaultMapControlButton(
+                        role: .call,
                         label: "Call account",
-                        disabled: !selectedRow.account.phone.contains(where: \.isNumber),
-                        tint: NativeShellPalette.green
+                        disabled: !selectedRow.account.phone.contains(where: \.isNumber)
                     ) {
                         store.call(selectedRow.account.phone)
                     }
-                    mapAction(
-                        symbol: "arrow.triangle.turn.up.right.diamond.fill",
+                    FireVaultMapControlButton(
+                        role: .route,
                         label: "Route to account",
                         disabled: selectedRow.account.coordinate == nil
                     ) {
@@ -322,30 +317,6 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
             }
         }
         .simultaneousGesture(TapGesture().onEnded { revealZoomSlider() })
-    }
-
-    private func mapAction(
-        symbol: String,
-        label: String,
-        disabled: Bool = false,
-        tint: Color = .black,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 23, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 54, height: 54)
-                .background(
-                    disabled ? Color.black.opacity(0.45) : tint.opacity(tint == .black ? 0.80 : 1),
-                    in: Circle()
-                )
-                .overlay { Circle().stroke(.white.opacity(disabled ? 0.28 : 0.72), lineWidth: 1.5) }
-                .shadow(color: .black.opacity(0.55), radius: 7, y: 3)
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .accessibilityLabel(label)
     }
 
     private var accountList: some View {
