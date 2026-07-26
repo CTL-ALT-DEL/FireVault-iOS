@@ -71,6 +71,10 @@ struct FireVaultAdaptiveAccountDetailsView: View {
         Self.formatPhone(account.phone)
     }
 
+    private var hasPhone: Bool {
+        account.phone.contains(where: \.isNumber)
+    }
+
     private var addressRegion: MKCoordinateRegion {
         guard let coordinate = account.coordinate else {
             return .init(
@@ -124,6 +128,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                         selectedSectionContent
                     }
                     .padding(.horizontal, 18)
+                    .padding(.top, 8)
                     .padding(.bottom, 28)
                 }
                 .scrollIndicators(.hidden)
@@ -141,80 +146,103 @@ struct FireVaultAdaptiveAccountDetailsView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 14) {
-            Button(returnTitle, systemImage: "chevron.left") {
-                store.closeAccount(to: returnTab)
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                Button(returnTitle, systemImage: "chevron.left") {
+                    store.closeAccount(to: returnTab)
+                }
+                .buttonStyle(.glass)
+
+                Spacer()
+
+                Button {
+                    store.toggleFavorite(account.id)
+                } label: {
+                    Image(systemName: account.favorite ? "star.fill" : "star")
+                        .font(.title3.bold())
+                        .frame(width: 46, height: 46)
+                }
+                .buttonStyle(.glass)
+                .accessibilityLabel("Favorite account")
             }
-            .buttonStyle(.glass)
 
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 10) {
+            HStack(alignment: .center, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text(account.name)
-                        .font(.title2.bold())
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.82)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                    if !account.accountId.isEmpty {
-                        headerBadge("ACCOUNT", value: account.accountId)
-                    }
+                    Label(account.address, systemImage: "mappin.and.ellipse")
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                    if !account.category.isEmpty {
-                        headerBadge("CATEGORY", value: account.category)
+                    HStack(spacing: 8) {
+                        if !account.accountId.isEmpty {
+                            headerBadge("ACCOUNT", value: account.accountId)
+                        }
+                        if !account.category.isEmpty {
+                            headerBadge("CATEGORY", value: account.category)
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                HStack(spacing: 10) {
-                    Label(account.address, systemImage: "mappin.and.ellipse")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-
-                    Spacer(minLength: 8)
-
+                HStack(spacing: 12) {
                     Button {
                         store.call(account.phone)
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "phone.fill")
-                                .font(.system(size: 17, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 36, height: 36)
-                                .background(NativeShellPalette.green, in: Circle())
+                        HStack(spacing: 10) {
                             Text(formattedPhone.isEmpty ? "No phone" : formattedPhone)
-                                .font(.subheadline.bold())
+                                .font(.headline.bold())
                                 .foregroundStyle(.white)
+                                .lineLimit(1)
+
+                            Image(systemName: "phone.fill")
+                                .font(.system(size: 19, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 50, height: 50)
+                                .background(NativeShellPalette.green, in: Circle())
                         }
                     }
                     .buttonStyle(.plain)
-                    .disabled(!account.phone.contains(where: \.isNumber))
-                    .opacity(account.phone.contains(where: \.isNumber) ? 1 : 0.5)
+                    .disabled(!hasPhone)
+                    .opacity(hasPhone ? 1 : 0.5)
                     .accessibilityLabel("Call \(formattedPhone)")
+
+                    Button {
+                        store.openRoute(for: account)
+                    } label: {
+                        Image(systemName: "arrow.triangle.turn.up.right.diamond.fill")
+                            .font(.system(size: 19, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 50, height: 50)
+                            .background(NativeShellPalette.blue, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(account.coordinate == nil)
+                    .opacity(account.coordinate == nil ? 0.5 : 1)
+                    .accessibilityLabel("Route to account")
                 }
+                .fixedSize(horizontal: true, vertical: false)
             }
-
-            Button {
-                store.openRoute(for: account)
-            } label: {
-                Label("Route", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
-                    .font(.headline)
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 46)
+            .padding(16)
+            .background(
+                NativeShellPalette.navigationBackground.opacity(0.78),
+                in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(.white.opacity(0.08), lineWidth: 1)
             }
-            .buttonStyle(.glassProminent)
-            .disabled(account.coordinate == nil)
-            .accessibilityLabel("Route to account")
-
-            Button {
-                store.toggleFavorite(account.id)
-            } label: {
-                Image(systemName: account.favorite ? "star.fill" : "star")
-                    .font(.title3.bold())
-            }
-            .buttonStyle(.glass)
-            .accessibilityLabel("Favorite account")
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.top, 18)
+        .padding(.bottom, 14)
     }
 
     private func headerBadge(_ label: String, value: String) -> some View {
