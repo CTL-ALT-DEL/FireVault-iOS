@@ -103,12 +103,13 @@ struct FireVaultVersionInfo: Equatable {
 }
 
 enum FireVaultShellTab: String, CaseIterable, Identifiable {
-    case nearby, accounts, photo, settings
+    case nearby, accounts, trip, photo, settings
     var id: String { rawValue }
     var title: String {
         switch self {
         case .nearby: "Nearby"
         case .accounts: "Accounts"
+        case .trip: "Trip"
         case .photo: "Photo"
         case .settings: "Settings"
         }
@@ -117,6 +118,7 @@ enum FireVaultShellTab: String, CaseIterable, Identifiable {
         switch self {
         case .nearby: "location.fill"
         case .accounts: "magnifyingglass"
+        case .trip: "truck.box.fill"
         case .photo: "camera.fill"
         case .settings: "slider.horizontal.3"
         }
@@ -144,7 +146,21 @@ struct NativeAppShellView: View {
                         locationService: locationService,
                         breadcrumbs: breadcrumbs
                     )
-                case .accounts: NativeAccountsView(payload: payload, store: store)
+                case .accounts:
+                    NativeAccountsView(
+                        payload: payload,
+                        store: store,
+                        settings: settings
+                    )
+                case .trip:
+                    FireVaultTripLogPortraitView(
+                        breadcrumbs: breadcrumbs,
+                        store: store,
+                        technicianName: settings.preferences.technician.name,
+                        companyName: settings.preferences.technician.company,
+                        includeCoordinatesInReports: settings.gps.includeCoordinatesInReports,
+                        showsCloseButton: false
+                    )
                 case .photo: NativePhotoView(store: store, settings: settings)
                 case .settings: NativeSettingsView(payload: payload, store: store, settings: settings)
                 }
@@ -256,7 +272,6 @@ private struct NativeNearbyView: View {
     @State private var accountScrollWasActive = false
     @State private var mapLayer: FireVaultMapLayer = .standard
     @State private var mapIs3D = false
-    @State private var showsBreadcrumbs = false
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -314,13 +329,6 @@ private struct NativeNearbyView: View {
             statusHeader
                 .padding(.horizontal, 16)
 
-            FireVaultBreadcrumbCompactBar(
-                breadcrumbs: breadcrumbs,
-                accounts: store.accounts,
-                open: { showsBreadcrumbs = true }
-            )
-            .padding(.horizontal, 16)
-
             if shouldShowCoordinateSetup {
                 coordinateSetup
                     .padding(.horizontal, 16)
@@ -371,15 +379,6 @@ private struct NativeNearbyView: View {
             }
         } message: {
             Text("FireVault sends only street, city, state, and ZIP fields to the U.S. Census Geocoder, then uses Apple Maps for unmatched addresses. Account names, IDs, notes, photos, and files remain on this iPhone. Returned coordinates are saved locally.")
-        }
-        .fullScreenCover(isPresented: $showsBreadcrumbs) {
-            FireVaultTripLogPortraitView(
-                breadcrumbs: breadcrumbs,
-                store: store,
-                technicianName: settings.preferences.technician.name,
-                companyName: settings.preferences.technician.company,
-                includeCoordinatesInReports: settings.gps.includeCoordinatesInReports
-            )
         }
     }
 
@@ -1010,8 +1009,11 @@ private enum NativeAccountSort: String, CaseIterable, Identifiable {
 private struct NativeAccountsView: View {
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
+    @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var search = ""
     @State private var sort: NativeAccountSort = .alphabetic
+    @State private var topAccountID: String?
+    @State private var accountScrollIsActive = false
 
     private var accounts: [FireVaultNativeAccount] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1031,32 +1033,73 @@ private struct NativeAccountsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            GeometryReader { geometry in
                 if accounts.isEmpty {
-                    if search.isEmpty {
-                        ContentUnavailableView(
-                            "No Accounts",
-                            systemImage: "building.2",
-                            description: Text("Add an account here or import a CSV from Settings.")
-                        )
-                        .listRowBackground(Color.clear)
-                    } else {
-                        ContentUnavailableView.search(text: search)
-                            .listRowBackground(Color.clear)
-                    }
-                } else {
-                    Section {
-                        ForEach(accounts) { account in
-                            Button {
-                                store.openAccount(account.id)
-                            } label: { NativeAccountRow(account: account) }
-                            .buttonStyle(.plain)
-                            .listRowBackground(NativeShellPalette.surface)
+                    Group {
+                        if search.isEmpty {
+                            ContentUnavailableView(
+                                "No Accounts",
+                                systemImage: "building.2",
+                                description: Text("Add an account here or import a CSV from Settings.")
+                            )
+                        } else {
+                            ContentUnavailableView.search(text: search)
                         }
-                    } header: { Text("\(accounts.count) account\(accounts.count == 1 ? "" : "s")") }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 9) {
+                            Text("\(accounts.count) ACCOUNT\(accounts.count == 1 ? "" : "S")")
+                                .font(.caption.bold())
+                                .tracking(1.1)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 4)
+
+                            ForEach(accounts) { account in
+                                Button {
+                                    topAccountID = account.id
+                                    store.openAccount(account.id)
+                                } label: {
+                                    NativeAccountRow(account: account)
+                                        .padding(.horizontal, 12)
+                                        .background(
+                                            NativeShellPalette.surface,
+                                            in: RoundedRectangle(cornerRadius: 17, style: .continuous)
+                                        )
+                                        .overlay {
+                                            RoundedRectangle(cornerRadius: 17, style: .continuous)
+                                                .stroke(.white.opacity(0.07), lineWidth: 1)
+                                        }
+                                }
+                                .buttonStyle(.plain)
+                                .id(account.id)
+                            }
+
+                            Color.clear
+                                .frame(height: max(0, geometry.size.height - 92))
+                                .allowsHitTesting(false)
+                        }
+                        .scrollTargetLayout()
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 18)
+                    }
+                    .scrollIndicators(.hidden)
+                    .scrollPosition(id: $topAccountID, anchor: .top)
+                    .scrollTargetBehavior(.viewAligned(limitBehavior: .never, anchor: .top))
+                    .onScrollPhaseChange { _, phase in
+                        accountScrollIsActive = phase.isScrolling
+                    }
+                    .onChange(of: topAccountID) { _, newID in
+                        guard accountScrollIsActive, newID != nil,
+                              settings.gps.hapticsAreEnabled else { return }
+                        let feedback = UISelectionFeedbackGenerator()
+                        feedback.prepare()
+                        feedback.selectionChanged()
+                    }
+                    .accessibilityIdentifier("accounts-snapping-scroll")
                 }
             }
-            .scrollContentBackground(.hidden)
             .background(NativeShellPalette.background)
             .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Name, address, or account ID")
             .navigationTitle("Accounts")
@@ -1995,65 +2038,100 @@ private struct FVHorizontalRadiusPicker: View {
     }
 
     var body: some View {
-        VStack(spacing: 1) {
-            Text("MILES")
-                .font(.system(size: 9, weight: .bold, design: .rounded))
-                .tracking(1.1)
-                .foregroundStyle(.secondary)
+        VStack(spacing: 2) {
+            HStack(spacing: 5) {
+                Image(systemName: "airplane")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(NativeShellPalette.amber)
+                Text("RANGE • MI")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .tracking(1.05)
+                    .foregroundStyle(.white.opacity(0.76))
+            }
                 .accessibilityHidden(true)
 
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 7) {
-                    ForEach(options, id: \.self) { radius in
-                        Button {
-                            select(radius)
-                        } label: {
-                            Text(FireVaultGPSPreferences.radiusWheelLabel(radius))
-                                .font(.system(size: 15, weight: radius == selection ? .bold : .semibold, design: .rounded))
-                                .monospacedDigit()
-                                .foregroundStyle(radius == selection ? .white : .secondary)
-                                .frame(minWidth: 32, minHeight: 28)
-                                .background {
-                                    if radius == selection {
-                                        Capsule()
-                                            .fill(NativeShellPalette.red)
-                                    }
-                                }
-                                .contentShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .id(radius)
-                        .accessibilityLabel("\(FireVaultGPSPreferences.radiusLabel(radius)) radius")
-                        .accessibilityAddTraits(radius == selection ? .isSelected : [])
+            ZStack {
+                HStack(spacing: 15) {
+                    ForEach(0..<9, id: \.self) { index in
+                        Capsule()
+                            .fill(.white.opacity(index == 4 ? 0.35 : 0.12))
+                            .frame(width: 1, height: index == 4 ? 24 : 12)
                     }
                 }
-                .scrollTargetLayout()
-            }
-            .contentMargins(.horizontal, 66, for: .scrollContent)
-            .scrollIndicators(.hidden)
-            .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
-            .scrollPosition(id: $centeredRadius, anchor: .center)
-            .frame(width: 165, height: 32)
-            .mask {
-                LinearGradient(
-                    stops: [
-                        .init(color: .clear, location: 0),
-                        .init(color: .black, location: 0.15),
-                        .init(color: .black, location: 0.85),
-                        .init(color: .clear, location: 1)
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
+                .allowsHitTesting(false)
+
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 7) {
+                        ForEach(options, id: \.self) { radius in
+                            Button {
+                                select(radius)
+                            } label: {
+                                Text(FireVaultGPSPreferences.radiusWheelLabel(radius))
+                                    .font(.system(size: 15, weight: radius == selection ? .bold : .semibold, design: .rounded))
+                                    .monospacedDigit()
+                                    .foregroundStyle(radius == selection ? .black : .white.opacity(0.62))
+                                    .frame(minWidth: 32, minHeight: 28)
+                                    .background {
+                                        if radius == selection {
+                                            Capsule()
+                                                .fill(NativeShellPalette.amber)
+                                                .shadow(color: NativeShellPalette.amber.opacity(0.45), radius: 5)
+                                        }
+                                    }
+                                    .contentShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .id(radius)
+                            .accessibilityLabel("\(FireVaultGPSPreferences.radiusLabel(radius)) radius")
+                            .accessibilityAddTraits(radius == selection ? .isSelected : [])
+                        }
+                    }
+                    .scrollTargetLayout()
+                }
+                .contentMargins(.horizontal, 66, for: .scrollContent)
+                .scrollIndicators(.hidden)
+                .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+                .scrollPosition(id: $centeredRadius, anchor: .center)
+                .frame(width: 165, height: 32)
+                .mask {
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .black, location: 0.15),
+                            .init(color: .black, location: 0.85),
+                            .init(color: .clear, location: 1)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                }
+
+                Capsule()
+                    .fill(NativeShellPalette.amber.opacity(0.75))
+                    .frame(width: 2, height: 5)
+                    .offset(y: 15)
+                    .allowsHitTesting(false)
             }
         }
         .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .background(.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(.white.opacity(0.10), lineWidth: 1)
+        .padding(.vertical, 5)
+        .background {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.10, green: 0.23, blue: 0.34),
+                    Color(red: 0.07, green: 0.14, blue: 0.22),
+                    NativeShellPalette.blue.opacity(0.30)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
         }
+        .overlay {
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(NativeShellPalette.blue.opacity(0.42), lineWidth: 1)
+        }
+        .shadow(color: NativeShellPalette.blue.opacity(0.14), radius: 6, y: 3)
         .sensoryFeedback(.selection, trigger: selection)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Nearby radius")

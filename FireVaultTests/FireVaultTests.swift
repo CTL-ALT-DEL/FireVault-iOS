@@ -25,6 +25,12 @@ final class FireVaultTests: XCTestCase {
         )
     }
 
+    func testTripLogOccupiesCenterNavigationPosition() {
+        XCTAssertEqual(FireVaultShellTab.allCases.count, 5)
+        XCTAssertEqual(FireVaultShellTab.allCases[2], .trip)
+        XCTAssertEqual(FireVaultShellTab.trip.symbol, "truck.box.fill")
+    }
+
     func testCaptureQuickActionIsConsumedOnlyOnce() throws {
         let suite = "FireVaultTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

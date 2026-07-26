@@ -35,7 +35,6 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
     @State private var selectedID: String?
     @State private var scrollingID: String?
     @State private var cameraPosition: MapCameraPosition = .automatic
-    @State private var showsBreadcrumbs = false
     @State private var mapLayer: FireVaultNearbyMapLayer = .standard
     @State private var zoomLevel = 0.72
     @State private var showsZoomSlider = false
@@ -95,13 +94,6 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
 
-                FireVaultBreadcrumbCompactBar(
-                    breadcrumbs: breadcrumbs,
-                    accounts: store.accounts,
-                    open: { showsBreadcrumbs = true }
-                )
-                .padding(.horizontal, 16)
-
                 squareMap
                     .frame(width: mapSide, height: mapSide)
                     .frame(maxWidth: .infinity)
@@ -121,15 +113,6 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
         .onChange(of: scrollingID) { _, newID in
             guard let newID, let row = nearbyRows.first(where: { $0.id == newID }) else { return }
             select(row, haptic: true, updateScrollPosition: false)
-        }
-        .fullScreenCover(isPresented: $showsBreadcrumbs) {
-            FireVaultTripLogPortraitView(
-                breadcrumbs: breadcrumbs,
-                store: store,
-                technicianName: settings.preferences.technician.name,
-                companyName: settings.preferences.technician.company,
-                includeCoordinatesInReports: settings.gps.includeCoordinatesInReports
-            )
         }
         .accessibilityIdentifier("ipad-portrait-nearby-fixed-map")
     }

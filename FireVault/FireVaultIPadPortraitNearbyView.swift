@@ -17,7 +17,6 @@ struct FireVaultIPadPortraitNearbyView: View {
 
     @State private var selectedID: String?
     @State private var cameraPosition: MapCameraPosition = .automatic
-    @State private var showsBreadcrumbs = false
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -69,12 +68,6 @@ struct FireVaultIPadPortraitNearbyView: View {
                 VStack(spacing: 12) {
                     statusHeader
 
-                    FireVaultBreadcrumbCompactBar(
-                        breadcrumbs: breadcrumbs,
-                        accounts: store.accounts,
-                        open: { showsBreadcrumbs = true }
-                    )
-
                     squareMap
                         .aspectRatio(1, contentMode: .fit)
                         .frame(maxWidth: .infinity)
@@ -93,15 +86,6 @@ struct FireVaultIPadPortraitNearbyView: View {
         .task { resetMap() }
         .onChange(of: settings.gps.nearbyRadiusMiles) { _, _ in resetMap() }
         .onChange(of: store.nearbyResetRequestID) { _, _ in resetMap() }
-        .fullScreenCover(isPresented: $showsBreadcrumbs) {
-            FireVaultTripLogPortraitView(
-                breadcrumbs: breadcrumbs,
-                store: store,
-                technicianName: settings.preferences.technician.name,
-                companyName: settings.preferences.technician.company,
-                includeCoordinatesInReports: settings.gps.includeCoordinatesInReports
-            )
-        }
         .accessibilityIdentifier("ipad-portrait-nearby-square-map-screen")
     }
 

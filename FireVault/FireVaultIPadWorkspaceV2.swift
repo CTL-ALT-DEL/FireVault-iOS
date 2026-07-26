@@ -195,6 +195,15 @@ struct FireVaultIPadWorkspaceV2: View {
         case .accounts:
             FireVaultIPadAccountsWorkspaceV2(payload: payload, store: store)
 
+        case .trip:
+            FireVaultIPadBreadcrumbsView(
+                breadcrumbs: breadcrumbs,
+                store: store,
+                technicianName: settings.preferences.technician.name,
+                companyName: settings.preferences.technician.company,
+                includeCoordinatesInReports: settings.gps.includeCoordinatesInReports
+            )
+
         case .photo, .settings:
             FireVaultIPadLegacyDetailHostV2(
                 payload: payload,
@@ -218,7 +227,6 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
     @State private var scrollingID: String?
     @State private var accountScrollIsActive = false
     @State private var cameraPosition: MapCameraPosition = .automatic
-    @State private var showsBreadcrumbs = false
     @State private var mapLayer: FireVaultIPadNearbyMapLayer = .standard
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
@@ -277,15 +285,6 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
             }
             select(row, haptic: true, updateScrollPosition: false)
         }
-        .fullScreenCover(isPresented: $showsBreadcrumbs) {
-            FireVaultIPadBreadcrumbsView(
-                breadcrumbs: breadcrumbs,
-                store: store,
-                technicianName: settings.preferences.technician.name,
-                companyName: settings.preferences.technician.company,
-                includeCoordinatesInReports: settings.gps.includeCoordinatesInReports
-            )
-        }
     }
 
     private var header: some View {
@@ -296,13 +295,6 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                 .foregroundStyle(payload.demoMode ? NativeShellPalette.amber : NativeShellPalette.green)
 
             Spacer()
-
-            FireVaultBreadcrumbCompactBar(
-                breadcrumbs: breadcrumbs,
-                accounts: store.accounts,
-                open: { showsBreadcrumbs = true }
-            )
-            .frame(maxWidth: 360)
 
             Menu {
                 Picker("Nearby Radius", selection: radiusBinding) {

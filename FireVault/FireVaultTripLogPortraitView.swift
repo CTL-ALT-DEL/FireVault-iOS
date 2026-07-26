@@ -14,6 +14,7 @@ struct FireVaultTripLogPortraitView: View {
     let technicianName: String
     let companyName: String
     let includeCoordinatesInReports: Bool
+    var showsCloseButton = true
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDayID: UUID?
@@ -31,10 +32,10 @@ struct FireVaultTripLogPortraitView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     if let day = selectedDay {
                         let availableWidth = max(0, geometry.size.width - 28)
-                        let mapHeight = min(availableWidth, max(220, geometry.size.height * 0.40))
+                        let mapHeight = min(availableWidth, max(190, geometry.size.height * 0.34))
 
                         squareMap(day)
                             .frame(height: mapHeight)
@@ -59,8 +60,10 @@ struct FireVaultTripLogPortraitView: View {
             .navigationTitle("Trip Log")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Close", systemImage: "xmark") { dismiss() }
+                if showsCloseButton {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Close", systemImage: "xmark") { dismiss() }
+                    }
                 }
             }
             .confirmationDialog(
@@ -194,55 +197,50 @@ struct FireVaultTripLogPortraitView: View {
     }
 
     private func controlDock(_ day: FireVaultBreadcrumbDay) -> some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 10) {
+        VStack(spacing: 7) {
+            HStack(spacing: 7) {
                 recordingIndicator(day)
-                Spacer(minLength: 8)
-                historyMenu
-                reportButton
-            }
+                Spacer(minLength: 2)
 
-            HStack(spacing: 10) {
                 if breadcrumbs.activeDay == nil {
-                    tripActionButton(
+                    compactTripAction(
                         title: "START",
                         symbol: "play.fill",
-                        tint: NativeShellPalette.green,
-                        prominent: true
+                        tint: NativeShellPalette.green
                     ) {
                         breadcrumbs.startWorkday(accounts: store.accounts)
                         selectedDayID = breadcrumbs.activeDay?.id
                     }
                 } else if breadcrumbs.isRecording {
-                    tripActionButton(
+                    compactTripAction(
                         title: "PAUSE",
                         symbol: "pause.fill",
-                        tint: NativeShellPalette.amber,
-                        prominent: false
+                        tint: NativeShellPalette.amber
                     ) {
                         breadcrumbs.pauseWorkday()
                     }
                 } else {
-                    tripActionButton(
+                    compactTripAction(
                         title: "RESUME",
                         symbol: "play.fill",
-                        tint: NativeShellPalette.green,
-                        prominent: true
+                        tint: NativeShellPalette.green
                     ) {
                         breadcrumbs.resumeWorkday(accounts: store.accounts)
                     }
                 }
 
-                tripActionButton(
+                compactTripAction(
                     title: "STOP",
                     symbol: "stop.fill",
-                    tint: NativeShellPalette.red,
-                    prominent: false
+                    tint: NativeShellPalette.red
                 ) {
                     confirmsEnd = true
                 }
                 .disabled(breadcrumbs.activeDay == nil)
-                .opacity(breadcrumbs.activeDay == nil ? 0.42 : 1)
+                .opacity(breadcrumbs.activeDay == nil ? 0.38 : 1)
+
+                historyMenu
+                reportButton
             }
 
             if breadcrumbs.permissionState.requiresSettings {
@@ -253,21 +251,33 @@ struct FireVaultTripLogPortraitView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(14)
-        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(.white.opacity(0.08), lineWidth: 1)
+        .padding(9)
+        .background {
+            LinearGradient(
+                colors: [
+                    indicatorTint.opacity(0.16),
+                    NativeShellPalette.surface,
+                    NativeShellPalette.blue.opacity(0.08)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(indicatorTint.opacity(0.34), lineWidth: 1)
+        }
+        .shadow(color: indicatorTint.opacity(0.10), radius: 9, y: 4)
         .accessibilityIdentifier("trip-log-portrait-controls")
     }
 
     private func recordingIndicator(_ day: FireVaultBreadcrumbDay) -> some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 7) {
             ZStack {
                 Circle()
                     .fill(indicatorTint.opacity(0.18))
-                    .frame(width: 38, height: 38)
+                    .frame(width: 34, height: 34)
                 Circle()
                     .fill(indicatorTint)
                     .frame(width: 10, height: 10)
@@ -280,11 +290,12 @@ struct FireVaultTripLogPortraitView: View {
                     .tracking(0.8)
                     .foregroundStyle(indicatorTint)
                 Text(indicatorDetail(day))
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
         }
+        .frame(maxWidth: 126, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 
@@ -320,16 +331,12 @@ struct FireVaultTripLogPortraitView: View {
                 }
             }
         } label: {
-            VStack(spacing: 4) {
-                Image(systemName: "calendar.badge.clock")
-                    .font(.system(size: 24, weight: .semibold))
-                Text("HISTORY")
-                    .font(.caption2.bold())
-                    .tracking(0.7)
-            }
-            .frame(width: 72, height: 58)
+            Image(systemName: "calendar.badge.clock")
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 38, height: 38)
         }
         .buttonStyle(.bordered)
+        .controlSize(.small)
         .disabled(breadcrumbs.days.isEmpty)
         .accessibilityLabel("Trip Log history")
     }
@@ -338,18 +345,36 @@ struct FireVaultTripLogPortraitView: View {
         Button {
             showsReport = true
         } label: {
-            VStack(spacing: 4) {
-                Image(systemName: "doc.text.fill")
-                    .font(.system(size: 24, weight: .semibold))
-                Text("REPORT")
-                    .font(.caption2.bold())
-                    .tracking(0.7)
-            }
-            .frame(width: 72, height: 58)
+            Image(systemName: "doc.text.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 38, height: 38)
         }
         .buttonStyle(.borderedProminent)
+        .controlSize(.small)
         .disabled(selectedDay == nil)
         .accessibilityHint("Previews and exports the selected Trip Log report")
+    }
+
+    private func compactTripAction(
+        title: String,
+        symbol: String,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: symbol)
+                    .font(.caption.bold())
+                Text(title)
+                    .font(.system(size: 8, weight: .bold))
+                    .tracking(0.25)
+            }
+            .foregroundStyle(.white)
+            .frame(width: 42, height: 38)
+            .background(tint.opacity(0.86), in: RoundedRectangle(cornerRadius: 11))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title) Trip Log")
     }
 
     @ViewBuilder
@@ -384,12 +409,12 @@ struct FireVaultTripLogPortraitView: View {
     private func summary(_ day: FireVaultBreadcrumbDay) -> some View {
         HStack(spacing: 1) {
             portraitMetric(title: "MILES", value: day.totalDistanceMeters.tripLogMiles, symbol: "road.lanes")
-            Divider().frame(height: 44)
+            Divider().frame(height: 36)
             portraitMetric(title: "STOPS", value: "\(day.stops.count)", symbol: "mappin.and.ellipse")
-            Divider().frame(height: 44)
+            Divider().frame(height: 36)
             portraitMetric(title: "TIME", value: day.elapsedTime.tripLogDuration, symbol: "clock")
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
         .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
