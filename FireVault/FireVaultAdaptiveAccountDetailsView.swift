@@ -97,20 +97,20 @@ struct FireVaultAdaptiveAccountDetailsView: View {
     var body: some View {
         GeometryReader { geometry in
             let isLandscape = geometry.size.width > geometry.size.height
-            let horizontalPadding: CGFloat = isLandscape ? 18 : 16
+            let horizontalPadding: CGFloat = isLandscape ? 12 : 16
             let availableWidth = max(0, geometry.size.width - (horizontalPadding * 2))
-            let mapWidth = max(240, (availableWidth - 12) / 2)
+            let mapWidth = max(240, (availableWidth - 10) / 2)
             let mapHeight: CGFloat = {
                 if isLandscape {
-                    return min(mapWidth, max(240, geometry.size.height * 0.46))
+                    return min(mapWidth, max(230, geometry.size.height * 0.48))
                 }
                 return min(mapWidth, max(210, geometry.size.height * 0.34))
             }()
 
             VStack(spacing: 0) {
-                header
+                header(isLandscape: isLandscape)
 
-                HStack(alignment: .top, spacing: 12) {
+                HStack(alignment: .top, spacing: isLandscape ? 10 : 12) {
                     mapCard(
                         title: "ADDRESS",
                         subtitle: account.address,
@@ -130,16 +130,16 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     .frame(height: mapHeight)
                 }
                 .padding(.horizontal, horizontalPadding)
-                .padding(.bottom, 12)
+                .padding(.bottom, isLandscape ? 8 : 12)
 
                 sectionSelector
                     .padding(.horizontal, horizontalPadding)
-                    .padding(.bottom, 10)
+                    .padding(.bottom, isLandscape ? 6 : 10)
 
                 ScrollView {
                     selectedSectionContent
                         .padding(.horizontal, horizontalPadding)
-                        .padding(.bottom, 28)
+                        .padding(.bottom, isLandscape ? 16 : 28)
                 }
                 .scrollIndicators(.hidden)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -156,8 +156,8 @@ struct FireVaultAdaptiveAccountDetailsView: View {
         .accessibilityIdentifier("adaptive-account-dual-map-details")
     }
 
-    private var header: some View {
-        VStack(spacing: 12) {
+    private func header(isLandscape: Bool) -> some View {
+        VStack(spacing: isLandscape ? 8 : 12) {
             HStack(spacing: 12) {
                 Button(returnTitle, systemImage: "chevron.left") {
                     store.closeAccount(to: returnTab)
@@ -171,23 +171,23 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 } label: {
                     Image(systemName: account.favorite ? "star.fill" : "star")
                         .font(.title3.bold())
-                        .frame(width: 46, height: 46)
+                        .frame(width: isLandscape ? 42 : 46, height: isLandscape ? 42 : 46)
                 }
                 .buttonStyle(.glass)
                 .accessibilityLabel("Favorite account")
             }
 
-            HStack(alignment: .center, spacing: 18) {
-                VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: isLandscape ? 14 : 18) {
+                VStack(alignment: .leading, spacing: isLandscape ? 5 : 8) {
                     Text(account.name)
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .font(.system(size: isLandscape ? 24 : 28, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .minimumScaleFactor(0.82)
                         .fixedSize(horizontal: false, vertical: true)
 
                     Label(account.address, systemImage: "mappin.and.ellipse")
-                        .font(.body.weight(.medium))
+                        .font(isLandscape ? .subheadline.weight(.medium) : .body.weight(.medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -241,7 +241,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 }
                 .fixedSize(horizontal: true, vertical: false)
             }
-            .padding(16)
+            .padding(isLandscape ? 12 : 16)
             .background(
                 NativeShellPalette.navigationBackground.opacity(0.78),
                 in: RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -251,9 +251,9 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     .stroke(.white.opacity(0.08), lineWidth: 1)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 18)
-        .padding(.bottom, 14)
+        .padding(.horizontal, isLandscape ? 12 : 16)
+        .padding(.top, isLandscape ? 8 : 18)
+        .padding(.bottom, isLandscape ? 8 : 14)
     }
 
     private func headerBadge(_ label: String, value: String) -> some View {
