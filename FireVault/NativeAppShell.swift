@@ -378,7 +378,7 @@ private struct NativeNearbyView: View {
             Text("FireVault sends only street, city, state, and ZIP fields to the U.S. Census Geocoder, then uses Apple Maps for unmatched addresses. Account names, IDs, notes, photos, and files remain on this iPhone. Returned coordinates are saved locally.")
         }
         .fullScreenCover(isPresented: $showsBreadcrumbs) {
-            FireVaultBreadcrumbsView(
+            FireVaultTripLogPortraitView(
                 breadcrumbs: breadcrumbs,
                 store: store,
                 technicianName: settings.preferences.technician.name,

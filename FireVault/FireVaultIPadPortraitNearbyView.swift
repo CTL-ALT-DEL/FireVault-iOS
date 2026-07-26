@@ -94,7 +94,7 @@ struct FireVaultIPadPortraitNearbyView: View {
         .onChange(of: settings.gps.nearbyRadiusMiles) { _, _ in resetMap() }
         .onChange(of: store.nearbyResetRequestID) { _, _ in resetMap() }
         .fullScreenCover(isPresented: $showsBreadcrumbs) {
-            FireVaultBreadcrumbsView(
+            FireVaultTripLogPortraitView(
                 breadcrumbs: breadcrumbs,
                 store: store,
                 technicianName: settings.preferences.technician.name,

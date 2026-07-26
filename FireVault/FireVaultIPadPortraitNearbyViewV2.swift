@@ -123,7 +123,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
             select(row, haptic: true, updateScrollPosition: false)
         }
         .fullScreenCover(isPresented: $showsBreadcrumbs) {
-            FireVaultBreadcrumbsView(
+            FireVaultTripLogPortraitView(
                 breadcrumbs: breadcrumbs,
                 store: store,
                 technicianName: settings.preferences.technician.name,
