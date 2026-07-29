@@ -12,6 +12,65 @@ import MapKit
 
 @MainActor
 final class FireVaultTests: XCTestCase {
+    func testAccountBriefResponseDecodesAssistantText() throws {
+        let data = try XCTUnwrap(#"{"success":true,"accountName":"ABC Medical","assistantText":"No recurring issues found."}"#.data(using: .utf8))
+
+        let response = try JSONDecoder().decode(FireVaultAccountBriefResponse.self, from: data)
+
+        XCTAssertEqual(response.assistantText, "No recurring issues found.")
+    }
+
+    func testAccountBriefRequestIncludesExistingAccountHistory() {
+        let account = FireVaultWorkspaceAccount(
+            id: "account-1",
+            name: "ABC Medical",
+            address: "100 Main Street",
+            category: "Medical",
+            accountId: "A-100",
+            phone: "",
+            favorite: false,
+            latitude: nil,
+            longitude: nil,
+            tags: ["pull station"],
+            notes: [
+                .init(id: "note-1", title: "Pull station trouble", text: "Checked field wiring.", date: "2026-07-01")
+            ],
+            documents: [],
+            equipment: [],
+            locations: [],
+            recent: []
+        )
+
+        let request = FireVaultAIService.makeRequest(for: account)
+
+        XCTAssertEqual(request.accountName, "ABC Medical")
+        XCTAssertTrue(request.technicianRequest.contains("A-100"))
+        XCTAssertTrue(request.technicianRequest.contains("Pull station trouble"))
+        XCTAssertTrue(request.technicianRequest.contains("Checked field wiring."))
+        XCTAssertTrue(request.technicianRequest.contains("## Quick Summary"))
+        XCTAssertTrue(request.technicianRequest.contains("each finding on its own bullet"))
+    }
+
+    func testAccountBriefDocumentParsesMarkdownSectionsAndBullets() {
+        let document = FireVaultAccountBriefDocument(
+            text: """
+            ## Quick Summary
+            - Pull station trouble was reported recently.
+
+            ## Suggested Checks
+            - Inspect field wiring before replacing the device.
+            """
+        )
+
+        XCTAssertEqual(
+            document.sections,
+            [
+                .init(title: "Quick Summary", items: ["Pull station trouble was reported recently."]),
+                .init(title: "Suggested Checks", items: ["Inspect field wiring before replacing the device."])
+            ]
+        )
+    }
+
     func testEveryHomeScreenQuickActionRoundTripsThroughItsShortcutType() {
         XCTAssertEqual(
             FireVaultQuickAction.allCases.map {

@@ -84,6 +84,11 @@ struct FieldWorkspaceView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
 
+    @State private var isShowingAccountBrief = false
+    @State private var isLoadingAccountBrief = false
+    @State private var accountBrief: String?
+    @State private var accountBriefError: String?
+
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
     private var previewCoordinate: CLLocationCoordinate2D? {
         account.coordinate ?? account.locations.compactMap(\.coordinate).first
@@ -96,6 +101,7 @@ struct FieldWorkspaceView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 18) {
                         identity
+                        accountBriefAction
                         mapPreview
                         destinations
                         recentActivity
@@ -150,6 +156,15 @@ struct FieldWorkspaceView: View {
         }
         .tint(FieldWorkspacePalette.blue)
         .preferredColorScheme(.dark)
+        .sheet(isPresented: $isShowingAccountBrief) {
+            FireVaultAccountBriefSheet(
+                accountName: account.name,
+                isLoading: isLoadingAccountBrief,
+                brief: accountBrief,
+                errorMessage: accountBriefError,
+                retry: generateAccountBrief
+            )
+        }
     }
 
     private var identity: some View {
@@ -188,6 +203,58 @@ struct FieldWorkspaceView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 4)
+    }
+
+    private var accountBriefAction: some View {
+        Button(action: generateAccountBrief) {
+            HStack(spacing: 12) {
+                Image(systemName: "sparkles")
+                    .font(.title2.bold())
+                    .foregroundStyle(FieldWorkspacePalette.blue)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Generate Account Brief")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Text("Review notes, equipment, files, and recent activity")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.secondary)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                FieldWorkspacePalette.surface,
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(FieldWorkspacePalette.blue.opacity(0.35), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(isLoadingAccountBrief)
+        .accessibilityIdentifier("generate-account-brief")
+    }
+
+    private func generateAccountBrief() {
+        guard !isLoadingAccountBrief else { return }
+        accountBrief = nil
+        accountBriefError = nil
+        isLoadingAccountBrief = true
+        isShowingAccountBrief = true
+
+        Task {
+            do {
+                accountBrief = try await FireVaultAIService.shared.generateAccountBrief(for: account)
+            } catch {
+                accountBriefError = error.localizedDescription
+            }
+            isLoadingAccountBrief = false
+        }
     }
 
     private var mapPreview: some View {

@@ -62,6 +62,10 @@ struct FireVaultAdaptiveAccountDetailsView: View {
     @State private var selectedSection: FireVaultAccountDetailSection = .notes
     @State private var addressLayer: FireVaultAccountMapLayer = .standard
     @State private var pinsLayer: FireVaultAccountMapLayer = .standard
+    @State private var isShowingAccountBrief = false
+    @State private var isLoadingAccountBrief = false
+    @State private var accountBrief: String?
+    @State private var accountBriefError: String?
 
     private var mappedPins: [FireVaultWorkspaceLocation] {
         account.locations.filter { $0.coordinate != nil }
@@ -154,6 +158,15 @@ struct FireVaultAdaptiveAccountDetailsView: View {
             pinsLayer = .standard
         }
         .accessibilityIdentifier("adaptive-account-dual-map-details")
+        .sheet(isPresented: $isShowingAccountBrief) {
+            FireVaultAccountBriefSheet(
+                accountName: account.name,
+                isLoading: isLoadingAccountBrief,
+                brief: accountBrief,
+                errorMessage: accountBriefError,
+                retry: generateAccountBrief
+            )
+        }
     }
 
     private func header(isLandscape: Bool) -> some View {
@@ -165,6 +178,13 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 .buttonStyle(.glass)
 
                 Spacer()
+
+                Button("Account Brief", systemImage: "sparkles") {
+                    generateAccountBrief()
+                }
+                .buttonStyle(.glass)
+                .disabled(isLoadingAccountBrief)
+                .accessibilityIdentifier("generate-account-brief")
 
                 Button {
                     store.toggleFavorite(account.id)
@@ -254,6 +274,23 @@ struct FireVaultAdaptiveAccountDetailsView: View {
         .padding(.horizontal, isLandscape ? 12 : 16)
         .padding(.top, isLandscape ? 8 : 18)
         .padding(.bottom, isLandscape ? 8 : 14)
+    }
+
+    private func generateAccountBrief() {
+        guard !isLoadingAccountBrief else { return }
+        accountBrief = nil
+        accountBriefError = nil
+        isLoadingAccountBrief = true
+        isShowingAccountBrief = true
+
+        Task {
+            do {
+                accountBrief = try await FireVaultAIService.shared.generateAccountBrief(for: account)
+            } catch {
+                accountBriefError = error.localizedDescription
+            }
+            isLoadingAccountBrief = false
+        }
     }
 
     private func headerBadge(_ label: String, value: String) -> some View {
