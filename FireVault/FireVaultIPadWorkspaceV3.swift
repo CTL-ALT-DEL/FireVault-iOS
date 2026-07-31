@@ -246,6 +246,7 @@ private struct FireVaultIPadPinLocationsViewV3: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
 
+    @Environment(\.colorScheme) private var colorScheme
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var focusedLocationID: String?
 
@@ -384,10 +385,11 @@ private struct FireVaultIPadPinLocationsViewV3: View {
         .id(account.id)
         .mapStyle(.hybrid(elevation: .realistic))
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(.white.opacity(0.14), lineWidth: 1)
-        }
+        .shadow(
+            color: colorScheme == .light ? .black.opacity(0.22) : .clear,
+            radius: 12,
+            y: 6
+        )
         .accessibilityIdentifier("ipad-account-hybrid-walking-map")
     }
 

@@ -13,35 +13,34 @@ import UIKit
 enum NativeSettingsCatalog {
     static let groups: [FireVaultNativeSettingsGroup] = [
         group("field", "Field Tools", "Photos, maps, GPS, and Plus Codes", "wrench.and.screwdriver", "green", [
-            item("overlay", "Photo Overlay", "Configure native field-photo labels", "camera.filters"),
+            item("overlay", "Photo Overlay", "Configure field-photo labels", "camera.filters"),
             item("gps", "GPS & Maps", "Apple Maps, accuracy, and Nearby radius", "location"),
             item("plusCodes", "Plus Codes", "Offline location-code preferences", "plus.square.dashed")
         ]),
         group("reports", "Reports", "Reports and customer email", "doc.text", "purple", [
-            item("reports", "Report Settings", "Native report defaults", "doc.text"),
+            item("reports", "Report Settings", "Trip Log report defaults", "doc.text"),
             item("email", "Email Settings", "Recipients, subject, and signature", "envelope")
         ]),
-        group("data", "Data & Security", "Native storage, import, backup, and protection", "externaldrive", "amber", [
+        group("data", "Data & Security", "Storage, import, backup, and protection", "externaldrive", "amber", [
             item("cloudFiles", "File Storage", "Photo and document destinations", "folder"),
             item("microsoftStorage", "Microsoft Storage", "OneDrive and SharePoint profile", "cloud"),
             item("sync", "Shared Vault", "Team and conflict preferences", "arrow.triangle.2.circlepath"),
             item("customerImport", "Customer CSV Import", "Import accounts using the iOS document picker", "square.and.arrow.down"),
-            item("categories", "Account Categories", "Manage native account classifications", "tag"),
-            item("backup", "Backup & Restore", "Native vault migration status", "externaldrive.badge.timemachine"),
+            item("categories", "Account Categories", "Manage account classifications", "tag"),
+            item("backup", "Backup & Restore", "Export or safely merge a vault backup", "externaldrive.badge.timemachine"),
             item("webdav", "WebDAV Backup", "Remote-server preferences", "server.rack"),
-            item("privacy", "Privacy Lock", "Native privacy preferences", "lock"),
-            item("security", "Security", "iOS sandbox and protection status", "shield.checkered")
+            item("privacy", "Privacy Lock", "Privacy preferences", "lock"),
+            item("security", "Security", "Face ID, app privacy, and data protection", "shield.checkered")
         ]),
-        group("help", "Help & About", "Native documentation and application information", "questionmark.circle", "red", [
-            item("manual", "Help & User Manual", "Native quick-start instructions", "book.closed"),
-            item("updates", "App Updates", "Installed native version", "arrow.down.circle"),
+        group("help", "Help & About", "Documentation and application information", "questionmark.circle", "red", [
+            item("manual", "Help & User Manual", "Quick-start instructions", "book.closed"),
             item("demo", "Demo Mode", "Enter, exit, or reset the fictional vault", "theatermasks"),
             item("about", "About FireVault", "Version and application information", "info.circle")
         ])
     ]
 
     private static func item(_ id: String, _ title: String, _ subtitle: String, _ symbol: String) -> FireVaultNativeSettingItem {
-        .init(id: id, title: title, subtitle: subtitle, symbol: symbol, status: "Native")
+        .init(id: id, title: title, subtitle: subtitle, symbol: symbol, status: "Ready")
     }
 
     private static func group(
@@ -52,7 +51,117 @@ enum NativeSettingsCatalog {
         _ tint: String,
         _ items: [FireVaultNativeSettingItem]
     ) -> FireVaultNativeSettingsGroup {
-        .init(id: id, title: title, subtitle: subtitle, symbol: symbol, tint: tint, status: "Native", items: items)
+        .init(id: id, title: title, subtitle: subtitle, symbol: symbol, tint: tint, status: "Ready", items: items)
+    }
+}
+
+struct NativeAppearanceSettingsView: View {
+    @ObservedObject var settings: FireVaultNativeSettingsStore
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(FireVaultAppearanceMode.allCases) { mode in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.28)) {
+                            settings.saveAppearance(mode)
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: symbol(for: mode))
+                                .font(.title3)
+                                .foregroundStyle(accent(for: mode))
+                                .frame(width: 34)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(mode.title)
+                                    .foregroundStyle(.primary)
+                                Text(detail(for: mode))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if settings.appearance == mode {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(NativeShellPalette.blue)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            } header: {
+                Text("Theme")
+            } footer: {
+                Text("Light uses FireVault's warm porcelain palette. System Default follows the iPhone appearance automatically.")
+            }
+        }
+        .navigationTitle("Appearance")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func symbol(for mode: FireVaultAppearanceMode) -> String {
+        switch mode {
+        case .dark: "moon.stars.fill"
+        case .light: "sun.max.fill"
+        case .system: "iphone"
+        }
+    }
+
+    private func accent(for mode: FireVaultAppearanceMode) -> Color {
+        switch mode {
+        case .dark: NativeShellPalette.purple
+        case .light: NativeShellPalette.amber
+        case .system: NativeShellPalette.blue
+        }
+    }
+
+    private func detail(for mode: FireVaultAppearanceMode) -> String {
+        switch mode {
+        case .dark: "Original high-contrast FireVault theme"
+        case .light: "Warm porcelain and ivory surfaces"
+        case .system: "Match the current iPhone setting"
+        }
+    }
+}
+
+struct NativeSettingsViewPreferencesView: View {
+    @ObservedObject var settings: FireVaultNativeSettingsStore
+    @State private var draft: FireVaultSettingsViewPreferences
+
+    init(settings: FireVaultNativeSettingsStore) {
+        self.settings = settings
+        _draft = State(initialValue: settings.settingsView)
+    }
+
+    var body: some View {
+        Form {
+            Section("Preferred Settings View") {
+                Picker("View", selection: $draft.mode) {
+                    ForEach(FireVaultSettingsViewMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(draft.mode.detail)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if draft.mode == .advanced {
+                Section("Advanced Layout") {
+                    Toggle("Collapsible sections", isOn: $draft.advancedCollapseSections)
+                    Toggle("Setting descriptions", isOn: $draft.advancedShowDescriptions)
+                    Toggle("Current status", isOn: $draft.advancedShowStatus)
+                    Toggle("Setting icons", isOn: $draft.advancedShowIcons)
+                    Toggle("Section descriptions", isOn: $draft.advancedShowSectionDescriptions)
+                }
+            }
+        }
+        .navigationTitle("Settings View")
+        .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: draft) { _, updated in
+            settings.saveSettingsView(updated)
+        }
     }
 }
 
@@ -385,6 +494,7 @@ struct NativeSettingsFormModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .scrollDismissesKeyboard(.interactively)
+            .contentMargins(.bottom, 96, for: .scrollContent)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .onDisappear(perform: save)

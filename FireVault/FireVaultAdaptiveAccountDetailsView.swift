@@ -54,6 +54,7 @@ private enum FireVaultAccountMapLayer: String, CaseIterable, Identifiable {
 struct FireVaultAdaptiveAccountDetailsView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
+    @Environment(\.colorScheme) private var colorScheme
     let returnTab: FireVaultShellTab
     let returnTitle: String
 
@@ -200,7 +201,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
             HStack(alignment: .center, spacing: isLandscape ? 14 : 18) {
                 VStack(alignment: .leading, spacing: isLandscape ? 5 : 8) {
                     Text(account.name)
-                        .font(.system(size: isLandscape ? 24 : 28, weight: .bold, design: .rounded))
+                        .font(.system(size: isLandscape ? 21 : 24, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .minimumScaleFactor(0.82)
@@ -270,6 +271,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(.white.opacity(0.08), lineWidth: 1)
             }
+            .shadow(color: .black.opacity(0.20), radius: 9, y: 5)
         }
         .padding(.horizontal, isLandscape ? 12 : 16)
         .padding(.top, isLandscape ? 8 : 18)
@@ -352,10 +354,11 @@ struct FireVaultAdaptiveAccountDetailsView: View {
             .accessibilityLabel("Map layers")
         }
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(.white.opacity(0.14), lineWidth: 1)
-        }
+        .shadow(
+            color: colorScheme == .light ? .black.opacity(0.22) : .clear,
+            radius: 12,
+            y: 6
+        )
     }
 
     @ViewBuilder
@@ -440,6 +443,11 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                                 lineWidth: selectedSection == section ? 1.5 : 1
                             )
                     }
+                    .shadow(
+                        color: .black.opacity(selectedSection == section ? 0.26 : 0.16),
+                        radius: selectedSection == section ? 7 : 5,
+                        y: selectedSection == section ? 4 : 3
+                    )
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(section.rawValue), \(count(for: section)) items")
@@ -502,6 +510,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
         }
         .padding(12)
         .background(NativeShellPalette.navigationBackground.opacity(0.72), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .shadow(color: .black.opacity(0.20), radius: 7, y: 4)
     }
 
     private func dataRow(title: String, subtitle: String, trailing: String, symbol: String) -> some View {
@@ -523,6 +532,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
         .padding(.vertical, 7)
         .padding(.horizontal, 9)
         .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .shadow(color: .black.opacity(0.16), radius: 5, y: 3)
     }
 
     private func emptyRow(_ message: String, symbol: String) -> some View {
@@ -532,6 +542,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
             .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
             .padding(.horizontal, 10)
             .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .shadow(color: .black.opacity(0.16), radius: 5, y: 3)
     }
 
     private func count(for section: FireVaultAccountDetailSection) -> Int {

@@ -121,14 +121,15 @@ struct FireVaultAuthGate: View {
                         .tint(NativeShellPalette.red)
                         .foregroundStyle(.secondary)
                 }
+                .preferredColorScheme(.dark)
             case .signedOut:
                 FireVaultAuthenticationView()
+                    .preferredColorScheme(.dark)
             case .signedIn:
                 ContentView()
             }
         }
         .environmentObject(authentication)
-        .preferredColorScheme(.dark)
         .onAppear {
             authentication.start()
         }

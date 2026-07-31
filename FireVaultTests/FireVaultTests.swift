@@ -87,6 +87,7 @@ final class FireVaultTests: XCTestCase {
     func testTripLogOccupiesCenterNavigationPosition() {
         XCTAssertEqual(FireVaultShellTab.allCases.count, 5)
         XCTAssertEqual(FireVaultShellTab.allCases[2], .trip)
+        XCTAssertEqual(FireVaultShellTab.trip.title, "Trip Log")
         XCTAssertEqual(FireVaultShellTab.trip.symbol, "truck.box.fill")
     }
 
@@ -171,7 +172,7 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(info.displayText.hasPrefix("Version "))
     }
 
-    func testNativeSettingsVersionStatusesUseInstalledVersion() {
+    func testAboutSettingsStatusUsesInstalledVersion() {
         let about = FireVaultNativeSettingItem(
             id: "about",
             title: "About FireVault",
@@ -179,16 +180,8 @@ final class FireVaultTests: XCTestCase {
             symbol: "info.circle",
             status: "Version 1.03.30"
         )
-        let updates = FireVaultNativeSettingItem(
-            id: "updates",
-            title: "App Updates",
-            subtitle: "Application files",
-            symbol: "arrow.down.circle",
-            status: "Build 1.03.30"
-        )
 
         XCTAssertEqual(about.displayStatus(nativeVersion: "1.08.05"), "Version 1.08.05")
-        XCTAssertEqual(updates.displayStatus(nativeVersion: "1.08.05"), "Build 1.08.05")
     }
 
     func testLegacyReportPreferencesGainSafeAutomationDefaults() throws {
@@ -331,6 +324,156 @@ final class FireVaultTests: XCTestCase {
 
         XCTAssertEqual(normalized.arrival, arrival)
         XCTAssertEqual(normalized.departure, arrival)
+    }
+
+    func testCompletedWorkdayUsesEndTimeForOpenStopDuration() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let end = start.addingTimeInterval(2 * 60 * 60)
+        let stop = FireVaultBreadcrumbStop(
+            arrival: start.addingTimeInterval(30 * 60),
+            latitude: 43.615,
+            longitude: -116.202
+        )
+        let day = FireVaultBreadcrumbDay(
+            startedAt: start,
+            endedAt: end,
+            stops: [stop]
+        )
+        let report = FireVaultBreadcrumbReport(
+            day: day,
+            technicianName: "Technician",
+            companyName: "FireVault",
+            includeCoordinates: true,
+            generatedAt: end.addingTimeInterval(7 * 24 * 60 * 60)
+        )
+
+        XCTAssertEqual(report.visits.first?.duration, 90 * 60)
+        XCTAssertEqual(report.visits.first?.departure, end)
+    }
+
+    func testMissingStopDeparturesUseNextArrivalBeforeWorkdayEnd() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let first = FireVaultBreadcrumbStop(
+            arrival: start.addingTimeInterval(30 * 60),
+            latitude: 43.615,
+            longitude: -116.202
+        )
+        let second = FireVaultBreadcrumbStop(
+            arrival: start.addingTimeInterval(75 * 60),
+            latitude: 43.617,
+            longitude: -116.204
+        )
+        let end = start.addingTimeInterval(120 * 60)
+        let day = FireVaultBreadcrumbDay(
+            startedAt: start,
+            endedAt: end,
+            stops: [first, second]
+        )
+        let report = FireVaultBreadcrumbReport(
+            day: day,
+            technicianName: "Technician",
+            companyName: "FireVault",
+            includeCoordinates: false,
+            generatedAt: end.addingTimeInterval(86_400)
+        )
+
+        XCTAssertEqual(day.stopDuration(for: first), 45 * 60)
+        XCTAssertEqual(day.stopDuration(for: second), 45 * 60)
+        XCTAssertEqual(try XCTUnwrap(report.visits.first).departure, second.arrival)
+        XCTAssertEqual(try XCTUnwrap(report.visits.first).duration, 45 * 60)
+    }
+
+    func testTripLogStopCanBeRetitledWithoutBecomingAnAccountVisit() throws {
+        var stop = FireVaultBreadcrumbStop(
+            arrival: Date(timeIntervalSince1970: 1_700_000_000),
+            latitude: 43.615,
+            longitude: -116.202
+        )
+        stop.rename("Warehouse Loading Dock")
+        let report = FireVaultBreadcrumbReport(
+            day: .init(
+                startedAt: stop.arrival,
+                endedAt: stop.arrival.addingTimeInterval(900),
+                stops: [stop]
+            ),
+            technicianName: "",
+            companyName: "",
+            includeCoordinates: false
+        )
+
+        XCTAssertEqual(stop.title, "Warehouse Loading Dock")
+        XCTAssertEqual(try XCTUnwrap(report.visits.first).title, "Warehouse Loading Dock")
+        XCTAssertEqual(try XCTUnwrap(report.visits.first).classification, .unassigned)
+    }
+
+    func testTripLogStopCanCreateMappedAccount() throws {
+        let suite = "FireVaultTests.TripLogAccount.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let stop = FireVaultBreadcrumbStop(
+            arrival: Date(timeIntervalSince1970: 1_700_000_000),
+            latitude: 43.615,
+            longitude: -116.202
+        )
+
+        let account = store.addAccount(from: stop, name: "Warehouse Loading Dock")
+
+        XCTAssertEqual(account.name, "Warehouse Loading Dock")
+        XCTAssertEqual(account.latitude, stop.latitude)
+        XCTAssertEqual(account.longitude, stop.longitude)
+        XCTAssertTrue(store.accounts.contains(where: { $0.id == account.id }))
+    }
+
+    func testRedesignedDailyPDFKeepsSixStandardStopsOnOnePage() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let stops = (0..<6).map { index in
+            let arrival = start.addingTimeInterval(Double(index * 35 * 60))
+            return FireVaultBreadcrumbStop(
+                arrival: arrival,
+                departure: arrival.addingTimeInterval(Double((index + 4) * 60)),
+                latitude: 43.615 + Double(index) * 0.002,
+                longitude: -116.202 - Double(index) * 0.002,
+                accountID: "A-\(index + 1)",
+                accountName: "Account \(index + 1)",
+                accountAddress: "\(index + 1) Main Street"
+            )
+        }
+        let day = FireVaultBreadcrumbDay(
+            startedAt: start,
+            endedAt: start.addingTimeInterval(5 * 60 * 60),
+            stops: stops
+        )
+        let report = FireVaultBreadcrumbReport(
+            day: day,
+            technicianName: "David Bannerman",
+            companyName: "Western States Fire Protection",
+            includeCoordinates: true
+        )
+        let data = FireVaultTripLogPDFRenderer.daily(
+            report: report,
+            detail: .detailed,
+            mapImage: nil
+        )
+        let document = try XCTUnwrap(
+            CGPDFDocument(CGDataProvider(data: data as CFData)!)
+        )
+
+        XCTAssertEqual(document.numberOfPages, 1)
+        let images = FireVaultTripLogImageRenderer.images(from: data)
+        let image = try XCTUnwrap(images.first)
+        XCTAssertEqual(images.count, 1)
+        XCTAssertGreaterThan(image.size.width, 600)
+        XCTAssertGreaterThan(image.size.height, 790)
+
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "com.adobe.pdf")
+        attachment.name = "FireVault-Redesigned-Daily-Trip-Log.pdf"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let imageAttachment = XCTAttachment(image: image)
+        imageAttachment.name = "FireVault-Inline-Email-JPG"
+        imageAttachment.lifetime = .keepAlways
+        add(imageAttachment)
     }
 
     func testBreadcrumbPermissionExplainsContinuousBackgroundRecording() {
@@ -796,6 +939,65 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(reloaded.preferences.webDAV.serverURL, "https://storage.example.com")
     }
 
+    func testPreferredSettingsViewAndAdvancedOptionsPersist() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = FireVaultNativeSettingsStore(defaults: defaults)
+        var view = store.settingsView
+        view.mode = .advanced
+        view.advancedCollapseSections = true
+        view.advancedShowDescriptions = false
+        view.advancedShowStatus = false
+        store.saveSettingsView(view)
+
+        let reloaded = FireVaultNativeSettingsStore(defaults: defaults)
+        XCTAssertEqual(reloaded.settingsView.mode, .advanced)
+        XCTAssertTrue(reloaded.settingsView.advancedCollapseSections)
+        XCTAssertFalse(reloaded.settingsView.advancedShowDescriptions)
+        XCTAssertFalse(reloaded.settingsView.advancedShowStatus)
+    }
+
+    func testAppearanceThemePersistsAndDefaultsToDark() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = FireVaultNativeSettingsStore(defaults: defaults)
+        XCTAssertEqual(store.appearance, .dark)
+        store.saveAppearance(.light)
+
+        let reloaded = FireVaultNativeSettingsStore(defaults: defaults)
+        XCTAssertEqual(reloaded.appearance, .light)
+    }
+
+    func testDeveloperSimpleTemplateFlagsPersistAndOnlyApplyToSimpleMode() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = FireVaultNativeSettingsStore(defaults: defaults)
+        store.setSimpleFeature("account.brief", enabled: false)
+        XCTAssertFalse(store.isFeatureVisible("account.brief"))
+
+        var view = store.settingsView
+        view.mode = .advanced
+        store.saveSettingsView(view)
+        XCTAssertTrue(store.isFeatureVisible("account.brief"))
+
+        let reloaded = FireVaultNativeSettingsStore(defaults: defaults)
+        XCTAssertFalse(reloaded.developer.isEnabled("account.brief"))
+        XCTAssertTrue(reloaded.isFeatureVisible("account.brief"))
+    }
+
+    func testDeveloperFeatureCatalogHasUniquePersistentIdentifiers() {
+        let features = FireVaultDeveloperFeatureCatalog.features
+        XCTAssertFalse(features.isEmpty)
+        XCTAssertEqual(Set(features.map(\.id)).count, features.count)
+        XCTAssertTrue(features.allSatisfy { !$0.page.isEmpty && !$0.title.isEmpty })
+    }
+
     func testNativeCSVParserSupportsQuotedCommasAndEscapedQuotes() {
         let csv = "Account Name,Address,Note\n\"Acme, Inc.\",\"12 Main St, Boise\",\"Panel says \"\"East\"\"\""
 
@@ -830,6 +1032,29 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(result.added, 1)
         XCTAssertEqual(result.skipped, 1)
         XCTAssertTrue(store.accounts.contains { $0.accountId == "NATIVE-1" })
+    }
+
+    func testBackupMergeAddsMissingAccountsWithoutOverwritingExistingAccount() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let existing = try XCTUnwrap(store.accounts.first)
+        var missing = existing
+        missing.id = UUID().uuidString
+        missing.accountId = "RESTORE-\(UUID().uuidString)"
+        missing.name = "Restored Account"
+        let originalName = existing.name
+
+        var conflicting = existing
+        conflicting.name = "Must Not Replace Existing"
+        let data = try JSONEncoder().encode([conflicting, missing])
+        let result = try store.mergeAccountsBackup(data)
+
+        XCTAssertEqual(result.added, 1)
+        XCTAssertEqual(result.preserved, 1)
+        XCTAssertEqual(store.accounts.first(where: { $0.id == existing.id })?.name, originalName)
+        XCTAssertTrue(store.accounts.contains { $0.id == missing.id })
     }
 
     func testNativeCSVImportSupportsUTF16AndCamelCaseNameHeader() throws {
@@ -878,6 +1103,81 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(result.skipped, 0)
         XCTAssertEqual(store.accounts.last?.name, "Fallback Customer")
         XCTAssertTrue(result.messages.contains { $0.contains("Organization Label") })
+    }
+
+    func testCSVImportRecognizesReorderedBOMLatLongAliases() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let csv = "\u{feff}lng,Account ID, LAT ,Account Name,Address\n-116.2023,COORD-1,43.6150,Coordinate Customer,100 Main St"
+
+        let result = try store.importAccountsCSV(Data(csv.utf8))
+        let account = try XCTUnwrap(store.accounts.first { $0.accountId == "COORD-1" })
+
+        XCTAssertEqual(result.added, 1)
+        XCTAssertEqual(try XCTUnwrap(account.latitude), 43.6150, accuracy: 0.000_001)
+        XCTAssertEqual(try XCTUnwrap(account.longitude), -116.2023, accuracy: 0.000_001)
+    }
+
+    func testCSVImportRecognizesXYCoordinatesAndQuotedPipeFields() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let csv = "Account Name|Address|x|y\n\"Acme | West\"|\"12 Main St, Boise\"|-116.21|43.62"
+
+        let result = try store.importAccountsCSV(Data(csv.utf8))
+        let account = try XCTUnwrap(store.accounts.first { $0.name == "Acme | West" })
+
+        XCTAssertEqual(result.added, 1)
+        XCTAssertEqual(try XCTUnwrap(account.latitude), 43.62, accuracy: 0.000_001)
+        XCTAssertEqual(try XCTUnwrap(account.longitude), -116.21, accuracy: 0.000_001)
+    }
+
+    func testCSVPreviewFlagsInvalidAndPartialCoordinatesForReview() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let csv = "Account Name,Latitude,Longitude\nOut of Range,95,-200\nPartial,43.61,"
+
+        let analysis = try store.previewAccountsCSV(Data(csv.utf8))
+
+        XCTAssertEqual(analysis.preview.review, 2)
+        XCTAssertTrue(analysis.records.allSatisfy { $0.latitude == nil && $0.longitude == nil })
+    }
+
+    func testCSVPreviewPromptsThenCorrectsLikelySwappedCoordinates() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let csv = "Account Name,Latitude,Longitude\nSwapped Site,-116.2023,43.6150"
+
+        let preview = try store.previewAccountsCSV(Data(csv.utf8))
+        XCTAssertEqual(preview.preview.review, 1)
+        XCTAssertTrue(preview.preview.rows[0].message.localizedCaseInsensitiveContains("swapped"))
+
+        let corrected = try store.previewAccountsCSV(Data(csv.utf8), correctSwappedCoordinates: true)
+        XCTAssertEqual(corrected.preview.successful, 1)
+        XCTAssertEqual(try XCTUnwrap(corrected.records[0].latitude), 43.6150, accuracy: 0.000_001)
+        XCTAssertEqual(try XCTUnwrap(corrected.records[0].longitude), -116.2023, accuracy: 0.000_001)
+    }
+
+    func testCSVAmbiguousHeadersRequireMappingReviewWithoutMutatingAccounts() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let csv = "Organization Label;Street Detail;Reference\nMapped Customer;500 Native Way;MAP-1"
+        let accountCountBeforePreview = store.accounts.count
+
+        let analysis = try store.previewAccountsCSV(Data(csv.utf8))
+
+        XCTAssertTrue(analysis.preview.requiresMappingReview)
+        XCTAssertEqual(store.accounts.count, accountCountBeforePreview)
+        XCTAssertEqual(analysis.preview.delimiterName, "Semicolon")
     }
 
     func testPWACompatibleCSVAddsThenUpdatesByCanonicalAccountID() throws {
@@ -1014,6 +1314,10 @@ final class FireVaultTests: XCTestCase {
         XCTAssertGreaterThan(region.span.longitudeDelta, 0)
     }
 
+    func testLiveNearbyUsesDrivingDistanceRefreshThreshold() {
+        XCTAssertEqual(FireVaultLocationService.liveNearbyDistanceFilter, 50)
+    }
+
     func testNearbyAccountCameraUsesTightAccountZoom() {
         let coordinate = CLLocationCoordinate2D(latitude: 43.6178, longitude: -116.197)
 
@@ -1050,7 +1354,7 @@ final class FireVaultTests: XCTestCase {
         let expected = Set([
             "overlay", "gps", "plusCodes", "reports", "email", "cloudFiles",
             "microsoftStorage", "sync", "customerImport", "categories", "backup",
-            "webdav", "privacy", "security", "manual", "updates", "demo", "about"
+            "webdav", "privacy", "security", "manual", "demo", "about"
         ])
 
         XCTAssertEqual(Set(NativeSettingsCatalog.groups.flatMap(\.items).map(\.id)), expected)

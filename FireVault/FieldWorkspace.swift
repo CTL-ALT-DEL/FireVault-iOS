@@ -83,13 +83,14 @@ struct FireVaultWorkspaceRecent: Codable, Identifiable, Equatable {
 struct FieldWorkspaceView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
+    @ObservedObject var settings: FireVaultNativeSettingsStore
 
     @State private var isShowingAccountBrief = false
     @State private var isLoadingAccountBrief = false
     @State private var accountBrief: String?
     @State private var accountBriefError: String?
 
-    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+    private let columns = [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)]
     private var previewCoordinate: CLLocationCoordinate2D? {
         account.coordinate ?? account.locations.compactMap(\.coordinate).first
     }
@@ -99,10 +100,14 @@ struct FieldWorkspaceView: View {
             ZStack {
                 FieldWorkspacePalette.background.ignoresSafeArea()
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 18) {
+                    LazyVStack(alignment: .leading, spacing: 14) {
                         identity
-                        accountBriefAction
-                        mapPreview
+                        if settings.isFeatureVisible("account.brief") {
+                            accountBriefAction
+                        }
+                        if settings.isFeatureVisible("account.map") {
+                            mapPreview
+                        }
                         destinations
                         recentActivity
                     }
@@ -155,7 +160,6 @@ struct FieldWorkspaceView: View {
             }
         }
         .tint(FieldWorkspacePalette.blue)
-        .preferredColorScheme(.dark)
         .sheet(isPresented: $isShowingAccountBrief) {
             FireVaultAccountBriefSheet(
                 accountName: account.name,
@@ -168,72 +172,101 @@ struct FieldWorkspaceView: View {
     }
 
     private var identity: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                if !account.category.isEmpty {
-                    Text(account.category.uppercased())
-                        .workspacePill(color: FieldWorkspacePalette.blue)
-                }
-                if !account.accountId.isEmpty {
-                    Text(account.accountId)
-                        .workspacePill(color: .secondary)
-                }
-            }
+        WorkspaceCard {
+            VStack(alignment: .leading, spacing: 13) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "building.2.crop.circle.fill")
+                        .font(.system(size: 38, weight: .semibold))
+                        .foregroundStyle(FieldWorkspacePalette.blue)
+                        .frame(width: 48, height: 48)
+                        .background(FieldWorkspacePalette.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
 
-            Text(account.name)
-                .font(.system(.largeTitle, design: .rounded, weight: .bold))
-                .foregroundStyle(.white)
-                .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(account.name)
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.82)
 
-            Label(account.address, systemImage: "mappin.and.ellipse")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if !account.tags.isEmpty {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(account.tags, id: \.self) { tag in
-                            Text(tag).workspacePill(color: FieldWorkspacePalette.green)
-                        }
+                        Label(account.address, systemImage: "mappin.and.ellipse")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .scrollIndicators(.hidden)
+
+                HStack(spacing: 8) {
+                    if !account.category.isEmpty {
+                        Text(account.category.uppercased())
+                            .workspacePill(color: FieldWorkspacePalette.blue)
+                    }
+                    if !account.accountId.isEmpty {
+                        Label(account.accountId, systemImage: "number")
+                            .workspacePill(color: .secondary)
+                    }
+                    Spacer()
+                }
+
+                HStack(spacing: 9) {
+                    if !account.phone.isEmpty {
+                        Button {
+                            store.call(account.phone)
+                        } label: {
+                            Label("Call", systemImage: "phone.fill")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    Button {
+                        store.openRoute(for: account)
+                    } label: {
+                        Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(account.coordinate == nil)
+                    Spacer()
+                }
+
+                if !account.tags.isEmpty {
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 8) {
+                            ForEach(account.tags, id: \.self) { tag in
+                                Text(tag).workspacePill(color: FieldWorkspacePalette.green)
+                            }
+                        }
+                    }
+                    .scrollIndicators(.hidden)
+                }
             }
+            .padding(15)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 4)
     }
 
     private var accountBriefAction: some View {
         Button(action: generateAccountBrief) {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Image(systemName: "sparkles")
-                    .font(.title2.bold())
+                    .font(.headline.bold())
                     .foregroundStyle(FieldWorkspacePalette.blue)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Generate Account Brief")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    Text("Review notes, equipment, files, and recent activity")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.leading)
-                }
+                Text("Generate Account Brief")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.primary)
                 Spacer()
                 Image(systemName: "chevron.right")
                     .foregroundStyle(.secondary)
             }
-            .padding(16)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 11)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 FieldWorkspacePalette.surface,
-                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(FieldWorkspacePalette.blue.opacity(0.35), lineWidth: 1)
             }
+            .shadow(color: .black.opacity(0.20), radius: 7, y: 4)
         }
         .buttonStyle(.plain)
         .disabled(isLoadingAccountBrief)
@@ -319,51 +352,51 @@ struct FieldWorkspaceView: View {
     }
 
     private var destinations: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 9) {
             WorkspaceSectionTitle(title: "FIELD WORKSPACE", subtitle: "Everything for this location")
-            LazyVGrid(columns: columns, spacing: 12) {
-                NavigationLink {
-                    NotesWorkspaceView(account: account, store: store)
-                } label: {
-                    WorkspaceDestinationTile(
-                        title: "Notes",
-                        count: account.notes.count,
-                        symbol: "note.text",
-                        color: FieldWorkspacePalette.amber
-                    )
+            LazyVGrid(columns: columns, spacing: 9) {
+                if settings.isFeatureVisible("account.notes") {
+                    NavigationLink {
+                        NotesWorkspaceView(account: account, store: store)
+                    } label: {
+                        WorkspaceDestinationTile(
+                            title: "Notes", count: account.notes.count,
+                            symbol: "note.text", color: FieldWorkspacePalette.amber
+                        )
+                    }
                 }
 
-                NavigationLink {
-                    FilesScansView(account: account, store: store)
-                } label: {
-                    WorkspaceDestinationTile(
-                        title: "Files & Scans",
-                        count: account.documents.count,
-                        symbol: "doc.viewfinder",
-                        color: FieldWorkspacePalette.blue
-                    )
+                if settings.isFeatureVisible("account.files") {
+                    NavigationLink {
+                        FilesScansView(account: account, store: store)
+                    } label: {
+                        WorkspaceDestinationTile(
+                            title: "Files & Scans", count: account.documents.count,
+                            symbol: "doc.viewfinder", color: FieldWorkspacePalette.blue
+                        )
+                    }
                 }
 
-                NavigationLink {
-                    EquipmentWorkspaceView(account: account, store: store)
-                } label: {
-                    WorkspaceDestinationTile(
-                        title: "Equipment",
-                        count: account.equipment.count,
-                        symbol: "wrench.and.screwdriver",
-                        color: FieldWorkspacePalette.green
-                    )
+                if settings.isFeatureVisible("account.equipment") {
+                    NavigationLink {
+                        EquipmentWorkspaceView(account: account, store: store)
+                    } label: {
+                        WorkspaceDestinationTile(
+                            title: "Equipment", count: account.equipment.count,
+                            symbol: "wrench.and.screwdriver", color: FieldWorkspacePalette.green
+                        )
+                    }
                 }
 
-                NavigationLink {
-                    MapArrivalView(account: account, store: store)
-                } label: {
-                    WorkspaceDestinationTile(
-                        title: "Locations",
-                        count: account.locations.count,
-                        symbol: "map.fill",
-                        color: FieldWorkspacePalette.purple
-                    )
+                if settings.isFeatureVisible("account.locations") {
+                    NavigationLink {
+                        MapArrivalView(account: account, store: store)
+                    } label: {
+                        WorkspaceDestinationTile(
+                            title: "Locations", count: account.locations.count,
+                            symbol: "map.fill", color: FieldWorkspacePalette.purple
+                        )
+                    }
                 }
             }
             .buttonStyle(.plain)
@@ -392,17 +425,25 @@ struct FieldWorkspaceView: View {
 
     private var fieldActionDock: some View {
         HStack(spacing: 6) {
-            WorkspaceDockButton(title: "Scan", symbol: "doc.viewfinder", tint: FieldWorkspacePalette.blue) {
-                store.addDocument(to: account.id, scan: true)
+            if settings.isFeatureVisible("account.action.scan") {
+                WorkspaceDockButton(title: "Scan", symbol: "doc.viewfinder", tint: FieldWorkspacePalette.blue) {
+                    store.addDocument(to: account.id, scan: true)
+                }
             }
-            WorkspaceDockButton(title: "Note", symbol: "square.and.pencil", tint: FieldWorkspacePalette.amber) {
-                store.addNote(to: account.id)
+            if settings.isFeatureVisible("account.action.note") {
+                WorkspaceDockButton(title: "Note", symbol: "square.and.pencil", tint: FieldWorkspacePalette.amber) {
+                    store.addNote(to: account.id)
+                }
             }
-            WorkspaceDockButton(title: "Camera", symbol: "camera.fill", tint: FieldWorkspacePalette.red) {
-                store.closeAccount(to: .photo)
+            if settings.isFeatureVisible("account.action.camera") {
+                WorkspaceDockButton(title: "Camera", symbol: "camera.fill", tint: FieldWorkspacePalette.red) {
+                    store.closeAccount(to: .photo)
+                }
             }
-            WorkspaceDockButton(title: "Route", symbol: "arrow.triangle.turn.up.right.diamond.fill", tint: FieldWorkspacePalette.green) {
-                store.openRoute(for: account)
+            if settings.isFeatureVisible("account.action.route") {
+                WorkspaceDockButton(title: "Route", symbol: "arrow.triangle.turn.up.right.diamond.fill", tint: FieldWorkspacePalette.green) {
+                    store.openRoute(for: account)
+                }
             }
         }
         .padding(7)
@@ -418,9 +459,15 @@ struct FieldWorkspaceView: View {
 
     private var appNavigation: some View {
         HStack(spacing: 0) {
-            WorkspaceNavButton(title: "Nearby", symbol: "location.circle") { store.closeAccount(to: .nearby) }
-            WorkspaceNavButton(title: "Accounts", symbol: "magnifyingglass") { store.closeAccount(to: .accounts) }
-            WorkspaceNavButton(title: "Photo", symbol: "photo") { store.closeAccount(to: .photo) }
+            if settings.isFeatureVisible("tab.nearby") {
+                WorkspaceNavButton(title: "Nearby", symbol: "location.circle") { store.closeAccount(to: .nearby) }
+            }
+            if settings.isFeatureVisible("tab.accounts") {
+                WorkspaceNavButton(title: "Accounts", symbol: "magnifyingglass") { store.closeAccount(to: .accounts) }
+            }
+            if settings.isFeatureVisible("tab.photo") {
+                WorkspaceNavButton(title: "Photo", symbol: "photo") { store.closeAccount(to: .photo) }
+            }
             WorkspaceNavButton(title: "Settings", symbol: "slider.horizontal.3") { store.closeAccount(to: .settings) }
         }
         .padding(.horizontal, 8)
@@ -759,6 +806,7 @@ private struct WorkspaceCard<Content: View>: View {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .stroke(.white.opacity(0.075), lineWidth: 1)
             }
+            .shadow(color: .black.opacity(0.20), radius: 9, y: 5)
     }
 }
 
@@ -782,31 +830,32 @@ private struct WorkspaceDestinationTile: View {
     let color: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Image(systemName: symbol)
-                    .font(.title3.bold())
+                    .font(.subheadline.bold())
                     .foregroundStyle(color)
-                    .frame(width: 38, height: 38)
-                    .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+                    .frame(width: 32, height: 32)
+                    .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
                 Spacer()
                 Text("\(count)")
-                    .font(.title3.bold().monospacedDigit())
+                    .font(.subheadline.bold().monospacedDigit())
                     .foregroundStyle(.secondary)
             }
             HStack {
-                Text(title).font(.headline).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.82)
+                Text(title).font(.subheadline.bold()).foregroundStyle(.primary).lineLimit(1).minimumScaleFactor(0.78)
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary)
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 112, alignment: .leading)
-        .background(FieldWorkspacePalette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
+        .background(FieldWorkspacePalette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(color.opacity(0.16), lineWidth: 1)
         }
+        .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
     }
 }
 
@@ -898,19 +947,19 @@ private extension View {
 }
 
 private enum FieldWorkspacePalette {
-    static let background = Color(red: 0.027, green: 0.043, blue: 0.061)
-    static let surface = Color(red: 0.070, green: 0.095, blue: 0.122)
-    static let surfaceRaised = Color(red: 0.092, green: 0.123, blue: 0.154)
-    static let red = Color(red: 1.00, green: 0.29, blue: 0.32)
-    static let blue = Color(red: 0.28, green: 0.66, blue: 1.00)
-    static let green = Color(red: 0.27, green: 0.86, blue: 0.57)
-    static let amber = Color(red: 1.00, green: 0.72, blue: 0.28)
-    static let purple = Color(red: 0.70, green: 0.49, blue: 1.00)
-    static let actionSurface = Color(red: 0.082, green: 0.108, blue: 0.138)
-    static let actionDivider = Color.white.opacity(0.12)
-    static let navigationBackground = Color(red: 0.045, green: 0.061, blue: 0.082)
-    static let navigationInactive = Color(red: 0.60, green: 0.65, blue: 0.72)
-    static let navigationDivider = Color.white.opacity(0.14)
+    static let background = NativeShellPalette.background
+    static let surface = NativeShellPalette.surface
+    static let surfaceRaised = NativeShellPalette.navigationBackground
+    static let red = NativeShellPalette.red
+    static let blue = NativeShellPalette.blue
+    static let green = NativeShellPalette.green
+    static let amber = NativeShellPalette.amber
+    static let purple = NativeShellPalette.purple
+    static let actionSurface = NativeShellPalette.surface
+    static let actionDivider = NativeShellPalette.navigationDivider
+    static let navigationBackground = NativeShellPalette.navigationBackground
+    static let navigationInactive = NativeShellPalette.navigationInactive
+    static let navigationDivider = NativeShellPalette.navigationDivider
 }
 
 private struct FieldWorkspaceView_Previews: PreviewProvider {
@@ -928,7 +977,8 @@ private struct FieldWorkspaceView_Previews: PreviewProvider {
                 locations: [.init(id: "l1", label: "Main Entrance", subtitle: "South doors", type: "Entrance", plusCode: "JRM3+4C", latitude: 43.6177, longitude: -116.1968)],
                 recent: [.init(id: "r1", title: "Fire alarm riser diagram", subtitle: "3-page scan added", kind: "document", date: "Today")]
             ),
-            store: FireVaultStore()
+            store: FireVaultStore(),
+            settings: FireVaultNativeSettingsStore()
         )
     }
 }

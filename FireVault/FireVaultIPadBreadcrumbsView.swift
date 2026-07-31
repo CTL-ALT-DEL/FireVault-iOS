@@ -16,13 +16,12 @@ struct FireVaultIPadBreadcrumbsView: View {
     let companyName: String
     let includeCoordinatesInReports: Bool
 
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDayID: UUID?
     @State private var selectedStop: FireVaultIPadStopSelection?
     @State private var confirmsEnd = false
     @State private var showsReport = false
-    @State private var waypointPulse = false
-    @State private var waypointPulseTask: Task<Void, Never>?
 
     private var selectedDay: FireVaultBreadcrumbDay? {
         if let selectedDayID {
@@ -41,7 +40,6 @@ struct FireVaultIPadBreadcrumbsView: View {
                 HStack(alignment: .top, spacing: 16) {
                     if let day = selectedDay {
                         VStack(alignment: .leading, spacing: 6) {
-                            gpsTelemetry(day)
                             routeMap(day)
                                 .frame(width: mapSide, height: mapSide)
                         }
@@ -106,24 +104,19 @@ struct FireVaultIPadBreadcrumbsView: View {
             }
         }
         .tint(NativeShellPalette.blue)
-        .preferredColorScheme(.dark)
         .onAppear {
             selectedDayID = breadcrumbs.today?.id ?? breadcrumbs.days.first?.id
         }
-        .onChange(of: selectedDay?.points.count ?? 0) { previousCount, newCount in
-            guard newCount > previousCount, breadcrumbs.isRecording else { return }
-            flashWaypointLED()
-        }
-        .onDisappear {
-            waypointPulseTask?.cancel()
-        }
         .sheet(item: $selectedStop) { selection in
-            FireVaultIPadStopEditor(
+            FireVaultBreadcrumbStopEditor(
                 breadcrumbs: breadcrumbs,
                 store: store,
                 dayID: selection.dayID,
                 stopID: selection.stopID
-            )
+            ) { accountID in
+                store.openAccount(accountID)
+                selectedStop = nil
+            }
         }
         .sheet(isPresented: $showsReport) {
             if let selectedDay {
@@ -133,7 +126,8 @@ struct FireVaultIPadBreadcrumbsView: View {
                         technicianName: technicianName,
                         companyName: companyName,
                         includeCoordinates: includeCoordinatesInReports
-                    )
+                    ),
+                    availableDays: breadcrumbs.days
                 )
             }
         }
@@ -149,9 +143,9 @@ struct FireVaultIPadBreadcrumbsView: View {
                         .tracking(1.1)
                         .foregroundStyle(NativeShellPalette.red)
                     Text(selectedDay?.startedAt.formatted(date: .long, time: .omitted)
-                         ?? Date().formatted(date: .long, time: .omitted))
+                        ?? Date().formatted(date: .long, time: .omitted))
                         .font(.title3.bold())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                 }
 
                 Spacer()
@@ -175,48 +169,6 @@ struct FireVaultIPadBreadcrumbsView: View {
                     .accessibilityLabel("Trip Log history")
                 }
             }
-        }
-    }
-
-    private func gpsTelemetry(_ day: FireVaultBreadcrumbDay) -> some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(NativeShellPalette.red)
-                    .frame(width: 7, height: 7)
-                    .scaleEffect(waypointPulse ? 1.65 : 1)
-                    .opacity(waypointPulse ? 1 : 0.42)
-                    .shadow(
-                        color: NativeShellPalette.red.opacity(waypointPulse ? 0.95 : 0.25),
-                        radius: waypointPulse ? 7 : 2
-                    )
-
-                Text(
-                    "\(FireVaultTripLogTelemetry.recentWaypointCount(in: day, endingAt: context.date)) WAYPOINTS / MIN"
-                )
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .tracking(0.7)
-                    .foregroundStyle(.secondary)
-                    .contentTransition(.numericText())
-            }
-            .animation(.easeOut(duration: 0.22), value: waypointPulse)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(
-                "\(FireVaultTripLogTelemetry.recentWaypointCount(in: day, endingAt: context.date)) GPS waypoints recorded in the last minute"
-            )
-        }
-        .frame(height: 10)
-        .accessibilityIdentifier("ipad-trip-log-gps-telemetry")
-    }
-
-    private func flashWaypointLED() {
-        waypointPulseTask?.cancel()
-        waypointPulse = true
-        waypointPulseTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(450))
-            guard !Task.isCancelled else { return }
-            waypointPulse = false
         }
     }
 
@@ -322,6 +274,11 @@ struct FireVaultIPadBreadcrumbsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(NativeShellPalette.surface)
             .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .shadow(
+                color: colorScheme == .light ? .black.opacity(0.22) : .clear,
+                radius: 12,
+                y: 6
+            )
         } else {
             Map(initialPosition: .automatic, interactionModes: [.pan, .zoom, .rotate]) {
                 MapPolyline(coordinates: day.points.map(\.coordinate))
@@ -361,10 +318,11 @@ struct FireVaultIPadBreadcrumbsView: View {
             }
             .mapStyle(.hybrid(elevation: .realistic))
             .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .stroke(.white.opacity(0.14), lineWidth: 1)
-            }
+            .shadow(
+                color: colorScheme == .light ? .black.opacity(0.22) : .clear,
+                radius: 12,
+                y: 6
+            )
             .overlay(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(day.startedAt.formatted(.dateTime.weekday(.wide)))
@@ -403,7 +361,7 @@ struct FireVaultIPadBreadcrumbsView: View {
                 .foregroundStyle(NativeShellPalette.blue)
             Text(value)
                 .font(.headline.monospacedDigit())
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
             Text(title)
                 .font(.caption2.bold())
                 .tracking(0.8)
@@ -437,7 +395,7 @@ struct FireVaultIPadBreadcrumbsView: View {
                         timelineRow(
                             time: stop.arrival,
                             title: stop.title,
-                            subtitle: "\(stop.subtitle) • \(duration(stop.duration))",
+                            subtitle: "\(stop.subtitle) • \(duration(day.stopDuration(for: stop)))",
                             symbol: "\(index + 1).circle.fill",
                             tint: stopTint(stop)
                         )
@@ -477,7 +435,7 @@ struct FireVaultIPadBreadcrumbsView: View {
                 HStack {
                     Text(title)
                         .font(.subheadline.bold())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                     Spacer()
                     Text(time.formatted(date: .omitted, time: .shortened))
                         .font(.caption.monospacedDigit())
@@ -514,178 +472,4 @@ private struct FireVaultIPadStopSelection: Identifiable {
     let dayID: UUID
     let stopID: UUID
     var id: UUID { stopID }
-}
-
-private struct FireVaultIPadStopEditor: View {
-    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
-    @ObservedObject var store: FireVaultStore
-    @Environment(\.dismiss) private var dismiss
-
-    let dayID: UUID
-    let stopID: UUID
-
-    @State private var arrival: Date
-    @State private var departure: Date
-    @State private var hasDeparture: Bool
-    @State private var selectedAccountID: String?
-    @State private var technicianNote: String
-    @State private var isPersonal: Bool
-    @State private var showsAccountPicker = false
-    @State private var confirmsDelete = false
-
-    init(
-        breadcrumbs: FireVaultBreadcrumbStore,
-        store: FireVaultStore,
-        dayID: UUID,
-        stopID: UUID
-    ) {
-        self.breadcrumbs = breadcrumbs
-        self.store = store
-        self.dayID = dayID
-        self.stopID = stopID
-
-        let stop = breadcrumbs.stop(dayID: dayID, stopID: stopID)
-        let arrival = stop?.arrival ?? Date()
-        _arrival = State(initialValue: arrival)
-        _departure = State(initialValue: stop?.departure ?? arrival.addingTimeInterval(15 * 60))
-        _hasDeparture = State(initialValue: stop?.departure != nil)
-        _selectedAccountID = State(initialValue: stop?.accountID)
-        _technicianNote = State(initialValue: stop?.technicianNote ?? "")
-        _isPersonal = State(initialValue: stop?.isPersonalStop ?? false)
-    }
-
-    private var stop: FireVaultBreadcrumbStop? {
-        breadcrumbs.stop(dayID: dayID, stopID: stopID)
-    }
-
-    private var selectedAccount: FireVaultWorkspaceAccount? {
-        guard let selectedAccountID else { return nil }
-        return store.accounts.first { $0.id == selectedAccountID }
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                if let stop {
-                    Section("Location") {
-                        Map(initialPosition: .region(.init(
-                            center: stop.coordinate,
-                            span: .init(latitudeDelta: 0.006, longitudeDelta: 0.006)
-                        )), interactionModes: [.pan, .zoom]) {
-                            Marker(stop.title, coordinate: stop.coordinate)
-                                .tint(NativeShellPalette.red)
-                        }
-                        .mapStyle(.hybrid(elevation: .realistic))
-                        .frame(height: 260)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    }
-                }
-
-                Section("Visit") {
-                    DatePicker("Arrival", selection: $arrival)
-                    Toggle("Departure recorded", isOn: $hasDeparture)
-                    if hasDeparture {
-                        DatePicker("Departure", selection: $departure)
-                    }
-                }
-
-                Section("Classification") {
-                    Toggle("Personal stop", isOn: $isPersonal)
-                    if !isPersonal {
-                        Button {
-                            showsAccountPicker = true
-                        } label: {
-                            LabeledContent(
-                                "Account",
-                                value: selectedAccount?.name ?? "Unrecognized"
-                            )
-                        }
-                    }
-                }
-
-                Section("Technician note") {
-                    TextEditor(text: $technicianNote)
-                        .frame(minHeight: 100)
-                }
-
-                Section {
-                    Button("Delete Stop", systemImage: "trash", role: .destructive) {
-                        confirmsDelete = true
-                    }
-                }
-            }
-            .navigationTitle("Review Stop")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
-                        .fontWeight(.semibold)
-                }
-            }
-            .sheet(isPresented: $showsAccountPicker) {
-                NavigationStack {
-                    List(store.accounts) { account in
-                        Button {
-                            selectedAccountID = account.id
-                            isPersonal = false
-                            showsAccountPicker = false
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(account.name)
-                                        .foregroundStyle(.primary)
-                                    Text(account.address)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if selectedAccountID == account.id {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(NativeShellPalette.blue)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .navigationTitle("Select Account")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") { showsAccountPicker = false }
-                        }
-                    }
-                }
-                .preferredColorScheme(.dark)
-            }
-            .confirmationDialog(
-                "Delete This Stop?",
-                isPresented: $confirmsDelete,
-                titleVisibility: .visible
-            ) {
-                Button("Delete Stop", role: .destructive) {
-                    breadcrumbs.deleteStop(dayID: dayID, stopID: stopID)
-                    dismiss()
-                }
-                Button("Cancel", role: .cancel) {}
-            }
-        }
-        .tint(NativeShellPalette.blue)
-        .preferredColorScheme(.dark)
-    }
-
-    private func save() {
-        let normalizedDeparture = hasDeparture ? max(arrival, departure) : nil
-        breadcrumbs.updateStop(
-            dayID: dayID,
-            stopID: stopID,
-            arrival: arrival,
-            departure: normalizedDeparture,
-            account: isPersonal ? nil : selectedAccount,
-            technicianNote: technicianNote,
-            isPersonal: isPersonal
-        )
-        dismiss()
-    }
 }

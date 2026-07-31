@@ -32,6 +32,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
     @ObservedObject var locationService: FireVaultLocationService
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
 
+    @Environment(\.colorScheme) private var colorScheme
     @State private var selectedID: String?
     @State private var scrollingID: String?
     @State private var cameraPosition: MapCameraPosition = .automatic
@@ -248,10 +249,11 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(.white.opacity(0.12), lineWidth: 1)
-        }
+        .shadow(
+            color: colorScheme == .light ? .black.opacity(0.22) : .clear,
+            radius: 12,
+            y: 6
+        )
         .accessibilityIdentifier("ipad-portrait-nearby-square-map")
     }
 
@@ -384,6 +386,11 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                         lineWidth: isSelected ? 1.7 : 1
                     )
             }
+            .shadow(
+                color: .black.opacity(isSelected ? 0.32 : 0.20),
+                radius: isSelected ? 9 : 6,
+                y: isSelected ? 5 : 3
+            )
             .opacity(selectedID == nil || isSelected ? 1 : 0.38)
             .animation(.easeOut(duration: 0.18), value: selectedID)
         }
@@ -408,6 +415,16 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                                     : (selected
                                         ? NativeShellPalette.blue
                                         : NativeShellPalette.navigationInactive)
+                            )
+                            .frame(width: 34, height: 28)
+                            .background(
+                                selected ? NativeShellPalette.blue.opacity(0.12) : .clear,
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            )
+                            .shadow(
+                                color: .black.opacity(selected ? 0.34 : 0.20),
+                                radius: selected ? 6 : 4,
+                                y: 3
                             )
                         Text(tab.title)
                             .font(.caption2.weight(selected ? .bold : .semibold))
@@ -436,6 +453,11 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
         haptic: Bool,
         updateScrollPosition: Bool
     ) {
+        if haptic, settings.gps.hapticsAreEnabled {
+            let feedback = UIImpactFeedbackGenerator(style: .rigid)
+            feedback.prepare()
+            feedback.impactOccurred(intensity: 0.72)
+        }
         guard selectedID != row.id else {
             if updateScrollPosition { scrollingID = row.id }
             return
@@ -445,10 +467,6 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
         if updateScrollPosition { scrollingID = row.id }
         store.selectCaptureAccount(row.account.id)
         zoomLevel = 0.72
-
-        if haptic, settings.gps.hapticsAreEnabled {
-            UISelectionFeedbackGenerator().selectionChanged()
-        }
 
         applyZoom()
     }

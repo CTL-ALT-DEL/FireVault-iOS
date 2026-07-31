@@ -52,7 +52,7 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: store.selectedAccountID)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(preferredColorScheme)
         .task {
             prepareActiveVault()
             privacyLock.configure(enabled: settings.preferences.privacy.enabled)
@@ -100,6 +100,14 @@ struct ContentView: View {
         }
     }
 
+    private var preferredColorScheme: ColorScheme? {
+        switch settings.appearance {
+        case .dark: .dark
+        case .light: .light
+        case .system: nil
+        }
+    }
+
     private func applicationContent(availableSize: CGSize) -> some View {
         let isLandscapeWindow = availableSize.width > availableSize.height
         let usesRegularIPad = horizontalSizeClass == .regular && availableSize.width >= 600
@@ -139,7 +147,7 @@ struct ContentView: View {
                     )
                     .transition(.opacity)
                 } else if let account = store.selectedAccount {
-                    FieldWorkspaceView(account: account, store: store)
+                    FieldWorkspaceView(account: account, store: store, settings: settings)
                         .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 } else if usesPortraitIPadNearby {
                     FireVaultIPadPortraitNearbyViewV2(
@@ -232,12 +240,13 @@ private struct FireVaultBrandHeader: View {
     }
 
     var body: some View {
-        HStack(spacing: 9) {
+        HStack(alignment: .top, spacing: 9) {
             Image("FireVaultLogo")
                 .resizable()
                 .scaledToFit()
                 .frame(width: 30, height: 30)
                 .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .padding(.top, 1)
                 .accessibilityHidden(true)
 
             HStack(spacing: 0) {
@@ -249,6 +258,8 @@ private struct FireVaultBrandHeader: View {
                     .tracking(1.35)
             }
             .font(.system(size: 15, weight: .bold, design: .rounded))
+            .shadow(color: .black.opacity(0.78), radius: 2, x: 0, y: 1)
+            .padding(.top, 2)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("FireVault")
 
@@ -258,6 +269,7 @@ private struct FireVaultBrandHeader: View {
                 Text(weekday)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.82), radius: 2, x: 0, y: 1)
                     .lineLimit(1)
 
                 Text(displayDate)
@@ -269,7 +281,8 @@ private struct FireVaultBrandHeader: View {
             .accessibilityLabel("Today, \(weekday), \(displayDate)")
         }
         .padding(.horizontal, 16)
-        .frame(height: 48)
+        .padding(.top, 7)
+        .frame(height: 48, alignment: .top)
         .background(NativeShellPalette.background)
         .overlay(alignment: .bottom) {
             Rectangle()
@@ -354,6 +367,7 @@ private struct FireVaultSplashView: View {
                             .tracking(0.4)
                     }
                     .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .shadow(color: .black.opacity(0.42), radius: 8, y: 4)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("FireVault")
 

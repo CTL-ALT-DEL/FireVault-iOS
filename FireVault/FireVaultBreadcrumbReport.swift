@@ -55,8 +55,8 @@ struct FireVaultBreadcrumbReport: Equatable {
 
         var timeText: String {
             let start = arrival.formatted(date: .omitted, time: .shortened)
-            guard let departure else { return "\(start)–In progress" }
-            return "\(start)–\(departure.formatted(date: .omitted, time: .shortened))"
+            guard let departure else { return "\(start) - In progress" }
+            return "\(start) - \(departure.formatted(date: .omitted, time: .shortened))"
         }
 
         var arrivalText: String {
@@ -72,7 +72,7 @@ struct FireVaultBreadcrumbReport: Equatable {
             case .account:
                 accountName.isEmpty ? "Account Visit" : accountName
             case .unassigned:
-                "Unrecognized Stop"
+                accountName.isEmpty ? "Unrecognized Stop" : accountName
             case .personal:
                 "Personal Stop"
             }
@@ -155,7 +155,7 @@ struct FireVaultBreadcrumbReport: Equatable {
                 let classification: VisitClassification
                 if stop.isPersonalStop {
                     classification = .personal
-                } else if stop.accountID != nil || stop.accountName != nil {
+                } else if stop.accountID != nil {
                     classification = .account
                 } else {
                     classification = .unassigned
@@ -166,10 +166,10 @@ struct FireVaultBreadcrumbReport: Equatable {
                     id: stop.id,
                     sequence: offset + 1,
                     arrival: stop.arrival,
-                    departure: stop.departure,
-                    duration: max(0, (stop.departure ?? generatedAt).timeIntervalSince(stop.arrival)),
+                    departure: day.effectiveDeparture(for: stop, asOf: generatedAt),
+                    duration: day.stopDuration(for: stop, asOf: generatedAt),
                     classification: classification,
-                    accountName: redactsPrivateDetails ? "" : (stop.accountName ?? ""),
+                    accountName: redactsPrivateDetails ? "" : stop.title,
                     accountAddress: redactsPrivateDetails ? "" : (stop.accountAddress ?? ""),
                     accountID: redactsPrivateDetails ? "" : (stop.accountID ?? ""),
                     technicianNote: redactsPrivateDetails ? "" : (stop.technicianNote ?? ""),
@@ -211,8 +211,8 @@ struct FireVaultBreadcrumbReport: Equatable {
 
     var workdayTimeText: String {
         let start = startedAt.formatted(date: .omitted, time: .shortened)
-        guard let endedAt else { return "\(start)–In progress" }
-        return "\(start)–\(endedAt.formatted(date: .omitted, time: .shortened))"
+        guard let endedAt else { return "\(start) - In progress" }
+        return "\(start) - \(endedAt.formatted(date: .omitted, time: .shortened))"
     }
 
     var startTimeText: String {
@@ -317,20 +317,11 @@ struct FireVaultBreadcrumbReport: Equatable {
     }
 
     var pdfData: Data {
-        let bounds = CGRect(x: 0, y: 0, width: 612, height: 792)
-        return UIGraphicsPDFRenderer(bounds: bounds).pdfData { context in
-            context.beginPage()
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.lineBreakMode = .byWordWrapping
-            (plainText as NSString).draw(
-                in: bounds.insetBy(dx: 42, dy: 42),
-                withAttributes: [
-                    .font: UIFont.systemFont(ofSize: 11),
-                    .foregroundColor: UIColor.label,
-                    .paragraphStyle: paragraph
-                ]
-            )
-        }
+        FireVaultTripLogPDFRenderer.daily(
+            report: self,
+            detail: .detailed,
+            mapImage: nil
+        )
     }
 
     static func region(for coordinates: [CLLocationCoordinate2D]) -> MKCoordinateRegion {
@@ -506,7 +497,7 @@ private enum FireVaultTripLogReportScope: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-private enum FireVaultTripLogReportDetail: String, CaseIterable, Identifiable {
+enum FireVaultTripLogReportDetail: String, CaseIterable, Identifiable {
     case detailed = "Detailed"
     case compact = "Compact"
     var id: String { rawValue }
@@ -532,6 +523,8 @@ struct FireVaultBreadcrumbReportView: View {
     @State private var showsExporter = false
     @State private var exportStatus: String?
     @State private var isGeneratingPDF = false
+    @State private var isGeneratingImages = false
+    @State private var imageSharePayload: FireVaultImageSharePayload?
 
     init(
         report: FireVaultBreadcrumbReport,
@@ -595,9 +588,16 @@ struct FireVaultBreadcrumbReportView: View {
             } message: {
                 Text(exportStatus ?? "")
             }
+            .sheet(item: $imageSharePayload) { payload in
+                FireVaultActivityView(
+                    items: [
+                        FireVaultMailSubjectItemSource(subject: payload.subject),
+                        payload.body
+                    ] + payload.images
+                )
+            }
         }
         .tint(NativeShellPalette.blue)
-        .preferredColorScheme(.dark)
     }
 
     private var reportControls: some View {
@@ -1077,6 +1077,24 @@ struct FireVaultBreadcrumbReportView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(isGeneratingPDF)
 
+                Button {
+                    Task { await shareJPG() }
+                } label: {
+                    HStack {
+                        if isGeneratingImages {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "photo.on.rectangle.angled")
+                        }
+                        Text(isGeneratingImages ? "Building Images…" : "Share JPG in Email")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                }
+                .buttonStyle(.bordered)
+                .disabled(isGeneratingImages)
+
                 ShareLink(
                     item: scope == .daily ? report.plainText : weeklyReport.plainText,
                     subject: Text(scope == .daily ? "FireVault Trip Log Daily Report" : "FireVault Trip Log Weekly Report"),
@@ -1090,7 +1108,7 @@ struct FireVaultBreadcrumbReportView: View {
                 }
                 .buttonStyle(.bordered)
 
-                Text("The exported PDF uses the selected Daily or Weekly template. Personal stops remain redacted.")
+                Text("JPG pages are shared as images so compatible email apps can display them directly in the message. Personal stops remain redacted.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1132,6 +1150,55 @@ struct FireVaultBreadcrumbReportView: View {
             exportDocument = .init(data: data)
         }
         showsExporter = true
+    }
+
+    @MainActor
+    private func shareJPG() async {
+        guard !isGeneratingImages else { return }
+        isGeneratingImages = true
+        defer { isGeneratingImages = false }
+
+        let pdfData: Data
+        if scope == .daily {
+            let mapImage = await FireVaultTripLogMapSnapshot.image(
+                routeSets: [report.routePoints],
+                stops: report.mapStops,
+                region: report.mapRegion,
+                size: .init(width: 540, height: 220)
+            )
+            pdfData = FireVaultTripLogPDFRenderer.daily(
+                report: report,
+                detail: detail,
+                mapImage: mapImage
+            )
+        } else {
+            let mapImage = await FireVaultTripLogMapSnapshot.image(
+                routeSets: weeklyReport.routeSets,
+                stops: detail == .detailed ? weeklyReport.mapStops : [],
+                region: weeklyReport.mapRegion,
+                size: .init(width: 540, height: 220)
+            )
+            pdfData = FireVaultTripLogPDFRenderer.weekly(
+                report: weeklyReport,
+                detail: detail,
+                mapImage: mapImage
+            )
+        }
+
+        let images = FireVaultTripLogImageRenderer.images(from: pdfData)
+        guard !images.isEmpty else {
+            exportStatus = "The Trip Log images could not be created."
+            return
+        }
+        imageSharePayload = .init(
+            subject: scope == .daily
+                ? "FireVault Trip Log Daily Report"
+                : "FireVault Trip Log Weekly Report",
+            body: scope == .daily
+                ? "FireVault Trip Log for \(report.dateText)"
+                : "FireVault Trip Log for \(weeklyReport.dateRangeText)",
+            images: images
+        )
     }
 }
 
@@ -1255,13 +1322,14 @@ private enum FireVaultTripLogMapSnapshot {
     }
 }
 
-private enum FireVaultTripLogPDFRenderer {
+enum FireVaultTripLogPDFRenderer {
     private static let pageBounds = CGRect(x: 0, y: 0, width: 612, height: 792)
     private static let navy = UIColor(red: 0.04, green: 0.18, blue: 0.31, alpha: 1)
     private static let blue = UIColor(red: 0.05, green: 0.35, blue: 0.68, alpha: 1)
     private static let red = UIColor(red: 0.82, green: 0.12, blue: 0.10, alpha: 1)
     private static let paleBlue = UIColor(red: 0.93, green: 0.97, blue: 1, alpha: 1)
     private static let lightLine = UIColor(white: 0.87, alpha: 1)
+    private static let paper = UIColor(red: 0.985, green: 0.988, blue: 0.992, alpha: 1)
 
     static func daily(
         report: FireVaultBreadcrumbReport,
@@ -1273,18 +1341,24 @@ private enum FireVaultTripLogPDFRenderer {
             var page = 0
             var y: CGFloat = 0
 
-            func beginPage() {
+            func beginPage(continuation: Bool = false) {
                 context.beginPage()
                 page += 1
-                y = drawHeader(
-                    title: "TRIP LOG DAILY REPORT",
-                    dateTitle: report.monthText,
-                    dateMain: report.dayText,
-                    dateFooter: report.yearText,
-                    technician: report.technicianName,
-                    company: report.companyName,
-                    page: page
-                )
+                y = continuation
+                    ? drawContinuationHeader(
+                        title: "TRIP LOG DAILY REPORT",
+                        date: report.dateText,
+                        page: page
+                    )
+                    : drawHeader(
+                        title: "TRIP LOG DAILY REPORT",
+                        dateTitle: report.monthText,
+                        dateMain: report.dayText,
+                        dateFooter: report.yearText,
+                        technician: report.technicianName,
+                        company: report.companyName,
+                        page: page
+                    )
             }
 
             beginPage()
@@ -1298,9 +1372,9 @@ private enum FireVaultTripLogPDFRenderer {
                 ],
                 y: y
             )
-            y += 15
+            y += 12
             y = drawMap(mapImage, y: y)
-            y += 18
+            y += 14
             y = drawSectionTitle("STOP DETAILS", y: y)
             y = drawStopTableHeader(y: y)
 
@@ -1311,9 +1385,9 @@ private enum FireVaultTripLogPDFRenderer {
                 for visit in visits {
                     let notes = detail == .detailed ? visit.technicianNote : ""
                     let rowHeight = stopRowHeight(visit: visit, note: notes)
-                    if y + rowHeight > 742 {
-                        beginPage()
-                        y = drawSectionTitle("STOP DETAILS — CONTINUED", y: y)
+                    if y + rowHeight > 748 {
+                        beginPage(continuation: true)
+                        y = drawSectionTitle("STOP DETAILS - CONTINUED", y: y)
                         y = drawStopTableHeader(y: y)
                     }
                     y = drawStopRow(visit, note: notes, y: y, height: rowHeight)
@@ -1342,18 +1416,24 @@ private enum FireVaultTripLogPDFRenderer {
             var page = 0
             var y: CGFloat = 0
 
-            func beginPage() {
+            func beginPage(continuation: Bool = false) {
                 context.beginPage()
                 page += 1
-                y = drawHeader(
-                    title: "TRIP LOG WEEKLY REPORT",
-                    dateTitle: "WEEK OF",
-                    dateMain: report.weekStart.formatted(.dateTime.month(.abbreviated).day()),
-                    dateFooter: report.weekEnd.formatted(.dateTime.month(.abbreviated).day().year()),
-                    technician: report.technicianName,
-                    company: report.companyName,
-                    page: page
-                )
+                y = continuation
+                    ? drawContinuationHeader(
+                        title: "TRIP LOG WEEKLY REPORT",
+                        date: "\(report.weekStart.formatted(date: .abbreviated, time: .omitted)) - \(report.weekEnd.formatted(date: .abbreviated, time: .omitted))",
+                        page: page
+                    )
+                    : drawHeader(
+                        title: "TRIP LOG WEEKLY REPORT",
+                        dateTitle: "WEEK OF",
+                        dateMain: report.weekStart.formatted(.dateTime.month(.abbreviated).day()),
+                        dateFooter: report.weekEnd.formatted(.dateTime.month(.abbreviated).day().year()),
+                        technician: report.technicianName,
+                        company: report.companyName,
+                        page: page
+                    )
             }
 
             beginPage()
@@ -1374,9 +1454,9 @@ private enum FireVaultTripLogPDFRenderer {
             y = drawWeeklyHeader(y: y)
 
             for day in report.dailyReports {
-                if y + 34 > 742 {
-                    beginPage()
-                    y = drawSectionTitle("WEEKLY SUMMARY — CONTINUED", y: y)
+                if y + 34 > 748 {
+                    beginPage(continuation: true)
+                    y = drawSectionTitle("WEEKLY SUMMARY - CONTINUED", y: y)
                     y = drawWeeklyHeader(y: y)
                 }
                 y = drawWeeklyRow(day, y: y)
@@ -1407,9 +1487,9 @@ private enum FireVaultTripLogPDFRenderer {
                     } else {
                         for visit in day.visits {
                             let rowHeight = stopRowHeight(visit: visit, note: visit.technicianNote)
-                            if y + rowHeight > 742 {
-                                beginPage()
-                                y = drawSectionTitle("DAILY STOP DETAILS — CONTINUED", y: y)
+                            if y + rowHeight > 748 {
+                                beginPage(continuation: true)
+                                y = drawSectionTitle("DAILY STOP DETAILS - CONTINUED", y: y)
                                 y = drawStopTableHeader(y: y)
                             }
                             y = drawStopRow(visit, note: visit.technicianNote, y: y, height: rowHeight)
@@ -1429,62 +1509,79 @@ private enum FireVaultTripLogPDFRenderer {
         company: String,
         page: Int
     ) -> CGFloat {
-        let brandY: CGFloat = 30
-        drawText("FIRE", font: .systemFont(ofSize: 22, weight: .black), color: red, x: 42, y: brandY, width: 48)
-        drawText("VAULT", font: .systemFont(ofSize: 22, weight: .black), color: navy, x: 86, y: brandY, width: 72)
+        paper.setFill()
+        pageBounds.fill()
 
-        let pill = CGRect(x: 42, y: 61, width: 190, height: 25)
+        let masthead = CGRect(x: 24, y: 22, width: 564, height: 112)
         navy.setFill()
-        UIBezierPath(roundedRect: pill, cornerRadius: 12.5).fill()
-        drawCenteredText(title, font: .systemFont(ofSize: 9, weight: .bold), color: .white, rect: pill)
+        UIBezierPath(roundedRect: masthead, cornerRadius: 18).fill()
 
-        var detailY: CGFloat = 93
-        if !company.isEmpty {
-            detailY += drawText(company, font: .systemFont(ofSize: 9, weight: .semibold), color: navy, x: 42, y: detailY, width: 380) + 2
+        let logoRect = CGRect(x: 42, y: 40, width: 58, height: 58)
+        if let logo = UIImage(named: "FireVaultLogo") {
+            roundedLogo(logo, size: logoRect.size, cornerRadius: 13).draw(in: logoRect)
+        } else {
+            UIColor.black.withAlphaComponent(0.42).setFill()
+            UIBezierPath(roundedRect: logoRect, cornerRadius: 13).fill()
+            drawCenteredText("FV", font: .systemFont(ofSize: 19, weight: .black), color: .white, rect: logoRect)
         }
-        _ = drawText(
-            technician.isEmpty ? "Technician not configured" : technician,
-            font: .systemFont(ofSize: 9),
-            color: .darkGray,
-            x: 42,
-            y: detailY,
-            width: 380
-        )
 
-        let badge = CGRect(x: 482, y: 28, width: 88, height: 74)
+        drawText("FIRE", font: .systemFont(ofSize: 23, weight: .black), color: red, x: 116, y: 39, width: 62)
+        drawText("VAULT", font: .systemFont(ofSize: 23, weight: .black), color: .white, x: 178, y: 39, width: 82)
+        drawText(title, font: .systemFont(ofSize: 10, weight: .bold), color: .white, x: 116, y: 70, width: 300)
+
+        let identity = [
+            company,
+            technician.isEmpty ? "Technician not configured" : technician
+        ].filter { !$0.isEmpty }.joined(separator: "  |  ")
+        drawText(identity, font: .systemFont(ofSize: 8.5, weight: .medium), color: UIColor.white.withAlphaComponent(0.72), x: 116, y: 91, width: 340)
+
+        let badge = CGRect(x: 476, y: 37, width: 90, height: 80)
         UIColor.white.setFill()
-        UIBezierPath(roundedRect: badge, cornerRadius: 10).fill()
-        blue.setStroke()
+        UIBezierPath(roundedRect: badge, cornerRadius: 13).fill()
+        UIColor.white.withAlphaComponent(0.35).setStroke()
         let badgeOutline = UIBezierPath(roundedRect: badge, cornerRadius: 10)
         badgeOutline.lineWidth = 1
         badgeOutline.stroke()
-        let cap = CGRect(x: badge.minX, y: badge.minY, width: badge.width, height: 22)
-        blue.setFill()
-        UIBezierPath(roundedRect: cap, byRoundingCorners: [.topLeft, .topRight], cornerRadii: .init(width: 10, height: 10)).fill()
-        drawCenteredText(dateTitle.uppercased(), font: .systemFont(ofSize: 8, weight: .bold), color: .white, rect: cap)
-        drawCenteredText(dateMain, font: .systemFont(ofSize: 15, weight: .bold), color: navy, rect: CGRect(x: badge.minX, y: badge.minY + 25, width: badge.width, height: 24))
-        drawCenteredText(dateFooter, font: .systemFont(ofSize: 7.5, weight: .bold), color: navy, rect: CGRect(x: badge.minX, y: badge.minY + 51, width: badge.width, height: 15))
+        let cap = CGRect(x: badge.minX, y: badge.minY, width: badge.width, height: 24)
+        red.setFill()
+        UIBezierPath(roundedRect: cap, byRoundingCorners: [.topLeft, .topRight], cornerRadii: .init(width: 13, height: 13)).fill()
+        drawCenteredText(dateTitle.uppercased(), font: .systemFont(ofSize: 8.5, weight: .bold), color: .white, rect: cap)
+        drawCenteredText(dateMain, font: .systemFont(ofSize: 17, weight: .bold), color: navy, rect: CGRect(x: badge.minX, y: badge.minY + 28, width: badge.width, height: 25))
+        drawCenteredText(dateFooter, font: .systemFont(ofSize: 8, weight: .bold), color: navy, rect: CGRect(x: badge.minX, y: badge.minY + 56, width: badge.width, height: 15))
 
-        lightLine.setStroke()
-        let separator = UIBezierPath()
-        separator.move(to: .init(x: 42, y: 126))
-        separator.addLine(to: .init(x: 570, y: 126))
-        separator.lineWidth = 0.8
-        separator.stroke()
+        red.setFill()
+        CGRect(x: masthead.minX + 18, y: masthead.maxY - 3, width: 88, height: 3).fill()
+        drawFooter(page: page)
+        return 151
+    }
 
-        drawText("Generated by FireVault  •  Page \(page)", font: .systemFont(ofSize: 7.5), color: .gray, x: 42, y: 766, width: 528)
-        return 142
+    private static func drawContinuationHeader(title: String, date: String, page: Int) -> CGFloat {
+        paper.setFill()
+        pageBounds.fill()
+        let bar = CGRect(x: 24, y: 22, width: 564, height: 58)
+        navy.setFill()
+        UIBezierPath(roundedRect: bar, cornerRadius: 16).fill()
+        if let logo = UIImage(named: "FireVaultLogo") {
+            let rect = CGRect(x: 38, y: 31, width: 40, height: 40)
+            roundedLogo(logo, size: rect.size, cornerRadius: 9).draw(in: rect)
+        }
+        drawText("FIRE", font: .systemFont(ofSize: 16, weight: .black), color: red, x: 90, y: 33, width: 43)
+        drawText("VAULT", font: .systemFont(ofSize: 16, weight: .black), color: .white, x: 133, y: 33, width: 62)
+        drawText(title, font: .systemFont(ofSize: 8.5, weight: .bold), color: UIColor.white.withAlphaComponent(0.78), x: 90, y: 55, width: 220)
+        drawText(date, font: .systemFont(ofSize: 8.5, weight: .semibold), color: .white, x: 352, y: 45, width: 214, alignment: .right)
+        drawFooter(page: page)
+        return 97
     }
 
     private static func drawMetrics(_ metrics: [(String, String)], y: CGFloat) -> CGFloat {
-        let rect = CGRect(x: 42, y: y, width: 528, height: 58)
+        let rect = CGRect(x: 42, y: y, width: 528, height: 54)
         paleBlue.setFill()
         UIBezierPath(roundedRect: rect, cornerRadius: 10).fill()
         let width = rect.width / CGFloat(metrics.count)
         for (index, metric) in metrics.enumerated() {
             let metricRect = CGRect(x: rect.minX + CGFloat(index) * width, y: rect.minY, width: width, height: rect.height)
-            drawCenteredText(metric.1, font: .systemFont(ofSize: 11, weight: .bold), color: navy, rect: CGRect(x: metricRect.minX + 4, y: metricRect.minY + 13, width: metricRect.width - 8, height: 18))
-            drawCenteredText(metric.0, font: .systemFont(ofSize: 6.8, weight: .bold), color: .darkGray, rect: CGRect(x: metricRect.minX + 4, y: metricRect.minY + 34, width: metricRect.width - 8, height: 14))
+            drawCenteredText(metric.1, font: .systemFont(ofSize: 11, weight: .bold), color: navy, rect: CGRect(x: metricRect.minX + 4, y: metricRect.minY + 10, width: metricRect.width - 8, height: 18))
+            drawCenteredText(metric.0, font: .systemFont(ofSize: 6.8, weight: .bold), color: .darkGray, rect: CGRect(x: metricRect.minX + 4, y: metricRect.minY + 31, width: metricRect.width - 8, height: 14))
             if index < metrics.count - 1 {
                 lightLine.setStroke()
                 let line = UIBezierPath()
@@ -1500,13 +1597,16 @@ private enum FireVaultTripLogPDFRenderer {
     private static func drawMap(_ image: UIImage?, y: CGFloat) -> CGFloat {
         _ = drawSectionTitle("ROUTE MAP", y: y)
         let imageY = y + 19
-        let rect = CGRect(x: 42, y: imageY, width: 528, height: 215)
+        let rect = CGRect(x: 42, y: imageY, width: 528, height: image == nil ? 62 : 140)
         if let image {
+            UIGraphicsGetCurrentContext()?.saveGState()
+            UIBezierPath(roundedRect: rect, cornerRadius: 12).addClip()
             image.draw(in: rect)
+            UIGraphicsGetCurrentContext()?.restoreGState()
         } else {
             paleBlue.setFill()
             UIBezierPath(roundedRect: rect, cornerRadius: 10).fill()
-            drawCenteredText("No route points recorded", font: .systemFont(ofSize: 11), color: .darkGray, rect: rect)
+            drawCenteredText("No GPS route points were recorded", font: .systemFont(ofSize: 10, weight: .medium), color: .darkGray, rect: rect)
         }
         lightLine.setStroke()
         let outline = UIBezierPath(roundedRect: rect, cornerRadius: 10)
@@ -1516,26 +1616,56 @@ private enum FireVaultTripLogPDFRenderer {
     }
 
     private static func drawSectionTitle(_ title: String, y: CGFloat) -> CGFloat {
-        let height = drawText(title.uppercased(), font: .systemFont(ofSize: 9, weight: .bold), color: navy, x: 42, y: y, width: 528)
-        return y + height + 7
+        red.setFill()
+        UIBezierPath(roundedRect: CGRect(x: 42, y: y + 1, width: 4, height: 12), cornerRadius: 2).fill()
+        let height = drawText(title.uppercased(), font: .systemFont(ofSize: 9, weight: .bold), color: navy, x: 54, y: y, width: 516)
+        return y + height + 8
     }
 
     private static func drawStopTableHeader(y: CGFloat) -> CGFloat {
         let rect = CGRect(x: 42, y: y, width: 528, height: 24)
-        paleBlue.setFill()
+        navy.setFill()
         rect.fill()
-        drawText("#", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 48, y: y + 7, width: 20)
-        drawText("TIME", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 70, y: y + 7, width: 58)
-        drawText("LOCATION / ACCOUNT", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 132, y: y + 7, width: 315)
-        drawText("DURATION", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 492, y: y + 7, width: 70)
+        drawText("#", font: .systemFont(ofSize: 7, weight: .bold), color: .white, x: 48, y: y + 7, width: 20)
+        drawText("TIME RANGE", font: .systemFont(ofSize: 7, weight: .bold), color: .white, x: 76, y: y + 7, width: 88)
+        drawText("LOCATION / ACCOUNT", font: .systemFont(ofSize: 7, weight: .bold), color: .white, x: 170, y: y + 7, width: 305)
+        drawText("STOP DURATION", font: .systemFont(ofSize: 7, weight: .bold), color: .white, x: 488, y: y + 7, width: 76)
         return rect.maxY
     }
 
+    private static func drawFooter(page: Int) {
+        lightLine.setStroke()
+        let line = UIBezierPath()
+        line.move(to: .init(x: 42, y: 758))
+        line.addLine(to: .init(x: 570, y: 758))
+        line.lineWidth = 0.7
+        line.stroke()
+        drawText("FIREVAULT FIELD OPERATIONS", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 42, y: 766, width: 250)
+        drawText("PAGE \(page)", font: .monospacedSystemFont(ofSize: 7, weight: .semibold), color: .gray, x: 470, y: 766, width: 100, alignment: .right)
+    }
+
+    private static func roundedLogo(
+        _ image: UIImage,
+        size: CGSize,
+        cornerRadius: CGFloat
+    ) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            UIBezierPath(
+                roundedRect: CGRect(origin: .zero, size: size),
+                cornerRadius: cornerRadius
+            ).addClip()
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+
     private static func stopRowHeight(visit: FireVaultBreadcrumbReport.Visit, note: String) -> CGFloat {
-        var height: CGFloat = 39
-        if !visit.addressText.isEmpty { height += 9 }
-        if !note.isEmpty { height += min(24, CGFloat(note.count / 60 + 1) * 9) }
-        if visit.coordinateText != nil { height += 9 }
+        var height: CGFloat = 34
+        if !visit.addressText.isEmpty { height += 8 }
+        if !note.isEmpty { height += min(22, CGFloat(note.count / 70 + 1) * 8) }
+        if visit.coordinateText != nil { height += 8 }
         return height
     }
 
@@ -1545,20 +1675,32 @@ private enum FireVaultTripLogPDFRenderer {
         y: CGFloat,
         height: CGFloat
     ) -> CGFloat {
-        drawText("\(visit.sequence)", font: .systemFont(ofSize: 8.5), color: .darkGray, x: 48, y: y + 10, width: 20)
-        drawText(visit.arrivalText, font: .monospacedSystemFont(ofSize: 8, weight: .regular), color: .darkGray, x: 70, y: y + 10, width: 58)
-        var locationY = y + 8
-        locationY += drawText(visit.title, font: .systemFont(ofSize: 9, weight: .semibold), color: navy, x: 132, y: locationY, width: 345) + 2
+        if visit.sequence.isMultiple(of: 2) {
+            UIColor(red: 0.975, green: 0.985, blue: 0.995, alpha: 1).setFill()
+            CGRect(x: 42, y: y, width: 528, height: height).fill()
+        }
+
+        let badge = CGRect(x: 48, y: y + 8, width: 18, height: 18)
+        blue.setFill()
+        UIBezierPath(ovalIn: badge).fill()
+        drawCenteredText("\(visit.sequence)", font: .systemFont(ofSize: 7.5, weight: .bold), color: .white, rect: badge)
+
+        drawText(visit.timeText, font: .monospacedSystemFont(ofSize: 7.2, weight: .regular), color: .darkGray, x: 76, y: y + 10, width: 88)
+        var locationY = y + 7
+        locationY += drawText(visit.title, font: .systemFont(ofSize: 9, weight: .semibold), color: navy, x: 170, y: locationY, width: 305) + 1
         if !visit.addressText.isEmpty {
-            locationY += drawText(visit.addressText, font: .systemFont(ofSize: 7.5), color: .darkGray, x: 132, y: locationY, width: 345) + 2
+            locationY += drawText(visit.addressText, font: .systemFont(ofSize: 7.3), color: .darkGray, x: 170, y: locationY, width: 305) + 1
         }
         if !note.isEmpty {
-            locationY += drawText("Note: \(note)", font: .italicSystemFont(ofSize: 7.5), color: .darkGray, x: 132, y: locationY, width: 345) + 2
+            locationY += drawText("Note: \(note)", font: .italicSystemFont(ofSize: 7.2), color: .darkGray, x: 170, y: locationY, width: 305) + 1
         }
         if let coordinates = visit.coordinateText {
-            _ = drawText("GPS: \(coordinates)", font: .monospacedSystemFont(ofSize: 7, weight: .regular), color: .gray, x: 132, y: locationY, width: 345)
+            _ = drawText("GPS: \(coordinates)", font: .monospacedSystemFont(ofSize: 6.7, weight: .regular), color: .gray, x: 170, y: locationY, width: 305)
         }
-        drawText(visit.durationText, font: .monospacedSystemFont(ofSize: 8, weight: .semibold), color: navy, x: 492, y: y + 10, width: 70)
+        let durationRect = CGRect(x: 492, y: y + 8, width: 68, height: 20)
+        paleBlue.setFill()
+        UIBezierPath(roundedRect: durationRect, cornerRadius: 10).fill()
+        drawCenteredText(visit.durationText, font: .monospacedSystemFont(ofSize: 8, weight: .semibold), color: navy, rect: durationRect)
 
         lightLine.setStroke()
         let line = UIBezierPath()
@@ -1602,10 +1744,12 @@ private enum FireVaultTripLogPDFRenderer {
         color: UIColor,
         x: CGFloat,
         y: CGFloat,
-        width: CGFloat
+        width: CGFloat,
+        alignment: NSTextAlignment = .left
     ) -> CGFloat {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = 1.5
+        paragraph.alignment = alignment
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: color,
@@ -1659,6 +1803,82 @@ struct FireVaultBreadcrumbExportDocument: FileDocument {
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         FileWrapper(regularFileWithContents: data)
+    }
+}
+
+struct FireVaultImageSharePayload: Identifiable {
+    let id = UUID()
+    let subject: String
+    let body: String
+    let images: [UIImage]
+}
+
+enum FireVaultTripLogImageRenderer {
+    static func images(from pdfData: Data) -> [UIImage] {
+        guard let provider = CGDataProvider(data: pdfData as CFData),
+              let document = CGPDFDocument(provider) else {
+            return []
+        }
+
+        return (1...document.numberOfPages).compactMap { pageNumber in
+            guard let page = document.page(at: pageNumber) else { return nil }
+            let bounds = page.getBoxRect(.mediaBox)
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 2
+            format.opaque = true
+            let image = UIGraphicsImageRenderer(size: bounds.size, format: format).image { context in
+                UIColor.white.setFill()
+                context.fill(CGRect(origin: .zero, size: bounds.size))
+                context.cgContext.saveGState()
+                context.cgContext.translateBy(x: 0, y: bounds.height)
+                context.cgContext.scaleBy(x: 1, y: -1)
+                context.cgContext.drawPDFPage(page)
+                context.cgContext.restoreGState()
+            }
+            guard let jpeg = image.jpegData(compressionQuality: 0.9) else { return image }
+            return UIImage(data: jpeg) ?? image
+        }
+    }
+}
+
+struct FireVaultActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(
+        _ uiViewController: UIActivityViewController,
+        context: Context
+    ) {}
+}
+
+final class FireVaultMailSubjectItemSource: NSObject, UIActivityItemSource {
+    private let subject: String
+
+    init(subject: String) {
+        self.subject = subject
+    }
+
+    func activityViewControllerPlaceholderItem(
+        _ activityViewController: UIActivityViewController
+    ) -> Any {
+        ""
+    }
+
+    func activityViewController(
+        _ activityViewController: UIActivityViewController,
+        itemForActivityType activityType: UIActivity.ActivityType?
+    ) -> Any? {
+        nil
+    }
+
+    func activityViewController(
+        _ activityViewController: UIActivityViewController,
+        subjectForActivityType activityType: UIActivity.ActivityType?
+    ) -> String {
+        subject
     }
 }
 

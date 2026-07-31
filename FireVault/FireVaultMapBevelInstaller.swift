@@ -91,53 +91,9 @@ private enum FireVaultMapBevel {
         mapView.layer.cornerRadius = cornerRadius
         mapView.layer.cornerCurve = .continuous
         mapView.layer.masksToBounds = true
-        mapView.layer.borderWidth = 1.5
-        mapView.layer.borderColor = UIColor.black.withAlphaComponent(0.82).cgColor
-
-        let container = layer(named: containerName, in: mapView.layer) ?? {
-            let layer = CALayer()
-            layer.name = containerName
-            layer.zPosition = 10_000
-            layer.masksToBounds = true
-            mapView.layer.addSublayer(layer)
-            return layer
-        }()
-
-        container.frame = mapView.bounds
-        container.cornerRadius = cornerRadius
-        container.cornerCurve = .continuous
-
-        let outerStroke = shapeLayer(named: outerStrokeName, in: container)
-        outerStroke.frame = container.bounds
-        outerStroke.path = roundedPath(in: container.bounds.insetBy(dx: 1.5, dy: 1.5), radius: cornerRadius - 1.5)
-        outerStroke.fillColor = UIColor.clear.cgColor
-        outerStroke.strokeColor = UIColor.black.withAlphaComponent(0.78).cgColor
-        outerStroke.lineWidth = 3
-
-        let innerShadow = shapeLayer(named: innerShadowName, in: container)
-        innerShadow.frame = container.bounds
-        innerShadow.path = roundedPath(in: container.bounds.insetBy(dx: 4, dy: 4), radius: cornerRadius - 4)
-        innerShadow.fillColor = UIColor.clear.cgColor
-        innerShadow.strokeColor = UIColor.black.withAlphaComponent(0.48).cgColor
-        innerShadow.lineWidth = 5
-
-        let topLeftShade = shapeLayer(named: topLeftShadeName, in: container)
-        topLeftShade.frame = container.bounds
-        topLeftShade.path = topLeftPath(in: container.bounds, radius: cornerRadius)
-        topLeftShade.fillColor = UIColor.clear.cgColor
-        topLeftShade.strokeColor = UIColor.black.withAlphaComponent(0.88).cgColor
-        topLeftShade.lineWidth = 3.2
-        topLeftShade.lineCap = .round
-        topLeftShade.lineJoin = .round
-
-        let bottomRightHighlight = shapeLayer(named: bottomRightHighlightName, in: container)
-        bottomRightHighlight.frame = container.bounds
-        bottomRightHighlight.path = bottomRightPath(in: container.bounds, radius: cornerRadius)
-        bottomRightHighlight.fillColor = UIColor.clear.cgColor
-        bottomRightHighlight.strokeColor = UIColor.white.withAlphaComponent(0.27).cgColor
-        bottomRightHighlight.lineWidth = 1.4
-        bottomRightHighlight.lineCap = .round
-        bottomRightHighlight.lineJoin = .round
+        mapView.layer.borderWidth = 0
+        mapView.layer.borderColor = nil
+        layer(named: containerName, in: mapView.layer)?.removeFromSuperlayer()
 
         CATransaction.commit()
     }

@@ -252,6 +252,92 @@ struct FireVaultSyncPreferences: Codable, Equatable { var organization = ""; var
 struct FireVaultWebDAVPreferences: Codable, Equatable { var enabled = false; var serverURL = ""; var username = ""; var folder = "/FireVault" }
 struct FireVaultPrivacyPreferences: Codable, Equatable { var enabled = false; var autoLockMinutes = 5; var lockOnBackground = true; var hideInAppSwitcher = true }
 
+enum FireVaultSettingsViewMode: String, Codable, CaseIterable, Identifiable {
+    case compact
+    case simple
+    case advanced
+
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+
+    var detail: String {
+        switch self {
+        case .compact: "Sections stay collapsed until opened."
+        case .simple: "Shows every setting without descriptions."
+        case .advanced: "Choose exactly how the Settings list is displayed."
+        }
+    }
+}
+
+enum FireVaultAppearanceMode: String, Codable, CaseIterable, Identifiable {
+    case dark
+    case light
+    case system
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .dark: "Dark"
+        case .light: "Light"
+        case .system: "System Default"
+        }
+    }
+}
+
+struct FireVaultSettingsViewPreferences: Codable, Equatable {
+    var mode: FireVaultSettingsViewMode = .simple
+    var advancedCollapseSections = false
+    var advancedShowDescriptions = true
+    var advancedShowStatus = true
+    var advancedShowIcons = true
+    var advancedShowSectionDescriptions = true
+}
+
+struct FireVaultDeveloperFeature: Identifiable, Equatable {
+    let id: String
+    let page: String
+    let title: String
+}
+
+enum FireVaultDeveloperFeatureCatalog {
+    static let features: [FireVaultDeveloperFeature] = [
+        .init(id: "tab.nearby", page: "Main Navigation", title: "Nearby"),
+        .init(id: "tab.accounts", page: "Main Navigation", title: "Accounts"),
+        .init(id: "tab.trip", page: "Main Navigation", title: "Trip Log"),
+        .init(id: "tab.photo", page: "Main Navigation", title: "Photo"),
+        .init(id: "nearby.map", page: "Nearby", title: "Map"),
+        .init(id: "nearby.list", page: "Nearby", title: "Nearby Account List"),
+        .init(id: "account.brief", page: "Account Detail", title: "Generate Account Brief"),
+        .init(id: "account.map", page: "Account Detail", title: "Map & Arrival"),
+        .init(id: "account.notes", page: "Account Detail", title: "Notes"),
+        .init(id: "account.files", page: "Account Detail", title: "Files & Scans"),
+        .init(id: "account.equipment", page: "Account Detail", title: "Equipment"),
+        .init(id: "account.locations", page: "Account Detail", title: "Locations"),
+        .init(id: "account.action.scan", page: "Account Detail", title: "Scan Action"),
+        .init(id: "account.action.note", page: "Account Detail", title: "Note Action"),
+        .init(id: "account.action.camera", page: "Account Detail", title: "Camera Action"),
+        .init(id: "account.action.route", page: "Account Detail", title: "Route Action"),
+        .init(id: "settings.field", page: "Settings", title: "Field Tools"),
+        .init(id: "settings.reports", page: "Settings", title: "Reports"),
+        .init(id: "settings.data", page: "Settings", title: "Data & Security"),
+        .init(id: "settings.help", page: "Settings", title: "Help & About")
+    ]
+
+    static var pages: [String] {
+        features.map(\.page).reduce(into: []) { result, page in
+            if !result.contains(page) { result.append(page) }
+        }
+    }
+}
+
+struct FireVaultDeveloperPreferences: Codable, Equatable {
+    var simpleFeatureVisibility: [String: Bool] = [:]
+
+    func isEnabled(_ id: String) -> Bool {
+        simpleFeatureVisibility[id] ?? true
+    }
+}
+
 struct FireVaultNativePreferences: Codable, Equatable {
     var technician = FireVaultTechnicianPreferences()
     var overlay = FireVaultOverlayPreferences()
@@ -276,8 +362,16 @@ struct FireVaultNativePreferences: Codable, Equatable {
 
 @MainActor
 final class FireVaultNativeSettingsStore: ObservableObject {
-    private enum Key { static let preferences = "firevault.native.settings.all.v2" }
+    private enum Key {
+        static let preferences = "firevault.native.settings.all.v2"
+        static let settingsView = "firevault.native.settings.view.v1"
+        static let developer = "firevault.native.settings.developer.v1"
+        static let appearance = "firevault.native.settings.appearance.v1"
+    }
     @Published private(set) var preferences: FireVaultNativePreferences
+    @Published private(set) var settingsView: FireVaultSettingsViewPreferences
+    @Published private(set) var developer: FireVaultDeveloperPreferences
+    @Published private(set) var appearance: FireVaultAppearanceMode
     var gps: FireVaultGPSPreferences { preferences.gps }
     private let defaults: UserDefaults
     private let encoder = JSONEncoder()
@@ -285,6 +379,20 @@ final class FireVaultNativeSettingsStore: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        if let data = defaults.data(forKey: Key.settingsView),
+           let saved = try? decoder.decode(FireVaultSettingsViewPreferences.self, from: data) {
+            settingsView = saved
+        } else {
+            settingsView = FireVaultSettingsViewPreferences()
+        }
+        if let data = defaults.data(forKey: Key.developer),
+           let saved = try? decoder.decode(FireVaultDeveloperPreferences.self, from: data) {
+            developer = saved
+        } else {
+            developer = FireVaultDeveloperPreferences()
+        }
+        appearance = defaults.string(forKey: Key.appearance)
+            .flatMap(FireVaultAppearanceMode.init(rawValue:)) ?? .dark
         if let data = defaults.data(forKey: Key.preferences), let saved = try? decoder.decode(FireVaultNativePreferences.self, from: data) {
             preferences = saved.normalized
         } else {
@@ -301,6 +409,36 @@ final class FireVaultNativeSettingsStore: ObservableObject {
 
     func saveGPS(_ updated: FireVaultGPSPreferences) {
         var next = preferences; next.gps = updated; save(next)
+    }
+
+    func saveSettingsView(_ updated: FireVaultSettingsViewPreferences) {
+        settingsView = updated
+        guard let data = try? encoder.encode(updated) else { return }
+        defaults.set(data, forKey: Key.settingsView)
+    }
+
+    func saveAppearance(_ updated: FireVaultAppearanceMode) {
+        appearance = updated
+        defaults.set(updated.rawValue, forKey: Key.appearance)
+    }
+
+    func isFeatureVisible(_ id: String) -> Bool {
+        settingsView.mode != .simple || developer.isEnabled(id)
+    }
+
+    func setSimpleFeature(_ id: String, enabled: Bool) {
+        developer.simpleFeatureVisibility[id] = enabled
+        persistDeveloper()
+    }
+
+    func resetSimpleFeatures() {
+        developer = FireVaultDeveloperPreferences()
+        persistDeveloper()
+    }
+
+    private func persistDeveloper() {
+        guard let data = try? encoder.encode(developer) else { return }
+        defaults.set(data, forKey: Key.developer)
     }
 
     private func persist() {

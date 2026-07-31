@@ -15,6 +15,8 @@ struct FireVaultIPadPortraitNearbyView: View {
     @ObservedObject var locationService: FireVaultLocationService
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
 
+    @Environment(\.colorScheme) private var colorScheme
+
     @State private var selectedID: String?
     @State private var cameraPosition: MapCameraPosition = .automatic
 
@@ -214,10 +216,11 @@ struct FireVaultIPadPortraitNearbyView: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(.white.opacity(0.12), lineWidth: 1)
-        }
+        .shadow(
+            color: colorScheme == .light ? .black.opacity(0.22) : .clear,
+            radius: 12,
+            y: 6
+        )
         .accessibilityIdentifier("ipad-portrait-nearby-square-map")
     }
 
@@ -253,6 +256,11 @@ struct FireVaultIPadPortraitNearbyView: View {
     private func accountRow(_ row: FireVaultNativeNearbyAccount, index: Int) -> some View {
         HStack(spacing: 10) {
             Button {
+                if settings.gps.hapticsAreEnabled {
+                    let feedback = UIImpactFeedbackGenerator(style: .rigid)
+                    feedback.prepare()
+                    feedback.impactOccurred(intensity: 0.72)
+                }
                 select(row)
             } label: {
                 HStack(spacing: 11) {
@@ -306,6 +314,11 @@ struct FireVaultIPadPortraitNearbyView: View {
                     lineWidth: selectedID == row.id ? 1.5 : 1
                 )
         }
+        .shadow(
+            color: .black.opacity(selectedID == row.id ? 0.32 : 0.20),
+            radius: selectedID == row.id ? 9 : 6,
+            y: selectedID == row.id ? 5 : 3
+        )
     }
 
     private var bottomNavigation: some View {
@@ -330,6 +343,16 @@ struct FireVaultIPadPortraitNearbyView: View {
                                     : (selected
                                         ? NativeShellPalette.blue
                                         : NativeShellPalette.navigationInactive)
+                            )
+                            .frame(width: 34, height: 28)
+                            .background(
+                                selected ? NativeShellPalette.blue.opacity(0.12) : .clear,
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            )
+                            .shadow(
+                                color: .black.opacity(selected ? 0.34 : 0.20),
+                                radius: selected ? 6 : 4,
+                                y: 3
                             )
                         Text(tab.title)
                             .font(.caption2.weight(selected ? .bold : .semibold))

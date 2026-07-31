@@ -109,7 +109,7 @@ enum FireVaultShellTab: String, CaseIterable, Identifiable {
         switch self {
         case .nearby: "Nearby"
         case .accounts: "Accounts"
-        case .trip: "Trip"
+        case .trip: "Trip Log"
         case .photo: "Photo"
         case .settings: "Settings"
         }
@@ -173,7 +173,6 @@ struct NativeAppShellView: View {
             }
         }
         .tint(NativeShellPalette.blue)
-        .preferredColorScheme(.dark)
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             withAnimation(.easeOut(duration: 0.18)) { keyboardVisible = true }
         }
@@ -184,8 +183,9 @@ struct NativeAppShellView: View {
 
     private var nativeNavigation: some View {
         HStack(spacing: 0) {
-            ForEach(FireVaultShellTab.allCases) { tab in
+            ForEach(FireVaultShellTab.allCases.filter(isTabVisible)) { tab in
                 let isSelected = store.selectedTab == tab
+                let isTripRecording = tab == .trip && breadcrumbs.isRecording
                 Button {
                     if tab == .nearby {
                         store.requestNearbyReset()
@@ -197,16 +197,23 @@ struct NativeAppShellView: View {
                     }
                     withAnimation(.snappy(duration: 0.25)) { store.selectedTab = tab }
                 } label: {
-                    VStack(spacing: 4) {
+                    VStack(spacing: 1) {
                         Image(systemName: tab.symbol)
                             .font(.system(size: 20, weight: isSelected ? .bold : .semibold))
                             .symbolVariant(isSelected ? .fill : .none)
                             .foregroundStyle(
-                                tab == .trip && breadcrumbs.isRecording
+                                isTripRecording
                                     ? NativeShellPalette.green
                                     : (isSelected
                                         ? NativeShellPalette.blue
                                         : NativeShellPalette.navigationInactive)
+                            )
+                            .frame(width: 34, height: 26)
+                            .shadow(
+                                color: .black.opacity(isSelected || isTripRecording ? 0.52 : 0.18),
+                                radius: isSelected || isTripRecording ? 2.5 : 1.5,
+                                x: 0,
+                                y: isSelected || isTripRecording ? 3 : 2
                             )
                         Text(tab.title)
                             .font(.caption2.weight(isSelected ? .bold : .semibold))
@@ -219,7 +226,8 @@ struct NativeAppShellView: View {
                             )
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(minHeight: 58)
+                    .frame(minHeight: 48)
+                    .offset(y: 3)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -229,9 +237,9 @@ struct NativeAppShellView: View {
                 .accessibilityIdentifier("main-navigation-\(tab.rawValue)")
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 5)
-        .padding(.bottom, 2)
+        .padding(.horizontal, 6)
+        .padding(.top, 2)
+        .padding(.bottom, 0)
         .background(NativeShellPalette.navigationBackground.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) {
             Rectangle()
@@ -242,6 +250,16 @@ struct NativeAppShellView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Main navigation")
         .accessibilityIdentifier("main-navigation")
+    }
+
+    private func isTabVisible(_ tab: FireVaultShellTab) -> Bool {
+        switch tab {
+        case .nearby: settings.isFeatureVisible("tab.nearby")
+        case .accounts: settings.isFeatureVisible("tab.accounts")
+        case .trip: settings.isFeatureVisible("tab.trip")
+        case .photo: settings.isFeatureVisible("tab.photo")
+        case .settings: true
+        }
     }
 }
 
@@ -275,6 +293,7 @@ private struct NativeNearbyView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+    @Environment(\.colorScheme) private var colorScheme
     @State private var selectedID: String?
     @State private var showGeocodingConsent = false
     @State private var showMappingDetails = false
@@ -283,6 +302,9 @@ private struct NativeNearbyView: View {
     @State private var accountScrollWasActive = false
     @State private var mapLayer: FireVaultMapLayer = .standard
     @State private var mapIs3D = false
+    @State private var hasCenteredOnInitialLiveLocation = false
+    @State private var radiusPickerExpanded = false
+    @State private var radiusCollapseTask: Task<Void, Never>?
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -351,21 +373,34 @@ private struct NativeNearbyView: View {
                     .padding(.horizontal, 16)
             }
 
-            map
-                .padding(.horizontal, 16)
+            if settings.isFeatureVisible("nearby.map") {
+                map
+                    .padding(.horizontal, 16)
+            }
 
-            accountList
+            if settings.isFeatureVisible("nearby.list") {
+                accountList
+            }
         }
         .padding(.top, 4)
         .task {
             scrollAccountID = nearbyRows.first?.id
             if payload.demoMode {
                 cameraPosition = overviewCameraPosition
-            } else if locationService.coordinate != nil {
-                centerMapOnUser()
             } else {
-                locationService.requestMapRecenter(highAccuracy: settings.gps.highAccuracy)
+                if locationService.coordinate != nil {
+                    centerMapOnUser()
+                    hasCenteredOnInitialLiveLocation = true
+                }
+                locationService.startLiveNearbyUpdates(
+                    highAccuracy: settings.gps.highAccuracy
+                )
             }
+        }
+        .onDisappear {
+            radiusCollapseTask?.cancel()
+            guard !payload.demoMode else { return }
+            locationService.stopLiveNearbyUpdates()
         }
         .onChange(of: store.nearbyResetRequestID) { _, _ in
             resetNearby()
@@ -373,6 +408,13 @@ private struct NativeNearbyView: View {
         .onChange(of: locationService.mapRecenterRequestID) { _, _ in
             guard !payload.demoMode else { return }
             resetNearby()
+        }
+        .onChange(of: locationService.coordinate?.latitude) { _, latitude in
+            guard !payload.demoMode,
+                  latitude != nil,
+                  !hasCenteredOnInitialLiveLocation else { return }
+            hasCenteredOnInitialLiveLocation = true
+            centerMapOnUser()
         }
         .onChange(of: store.geocodingProgress?.phase) { _, phase in
             if phase == .complete {
@@ -394,20 +436,31 @@ private struct NativeNearbyView: View {
     }
 
     private var statusHeader: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(payload.demoMode ? "DEMO VAULT" : "FIELD VAULT")
-                    .font(.caption2.bold()).tracking(1.2)
-                    .foregroundStyle(payload.demoMode ? NativeShellPalette.amber : NativeShellPalette.green)
-                Text(payload.locationStatus).font(.subheadline).foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(tripLogStatusText)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(tripLogStatusTint)
+                .lineLimit(1)
             Spacer()
-
-            FVHorizontalRadiusPicker(selection: nearbyRadiusBinding)
+            Text(payload.locationStatus)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .multilineTextAlignment(.trailing)
         }
+    }
+
+    private var tripLogStatusText: String {
+        if breadcrumbs.isRecording { return "Trip Log - Recording" }
+        if breadcrumbs.activeDay?.isPaused == true { return "Trip Log - Paused" }
+        return "Trip Log - Stopped"
+    }
+
+    private var tripLogStatusTint: Color {
+        if breadcrumbs.isRecording { return NativeShellPalette.green }
+        if breadcrumbs.activeDay?.isPaused == true { return NativeShellPalette.amber }
+        return .secondary
     }
 
     private var locationAccessSetup: some View {
@@ -501,7 +554,11 @@ private struct NativeNearbyView: View {
                 styledMap
                 .frame(height: 270)
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.white.opacity(0.10), lineWidth: 1) }
+                .shadow(
+                    color: colorScheme == .light ? .black.opacity(0.22) : .clear,
+                    radius: 12,
+                    y: 6
+                )
                 .overlay(alignment: .topLeading) {
                     if let selected {
                         VStack(alignment: .leading, spacing: 3) {
@@ -665,6 +722,7 @@ private struct NativeNearbyView: View {
 
     private func updateNearbyRadius(_ radius: Double) {
         guard radius != settings.gps.nearbyRadiusMiles else { return }
+        scheduleRadiusCollapse()
 
         var updated = settings.gps
         updated.nearbyRadiusMiles = radius
@@ -706,12 +764,15 @@ private struct NativeNearbyView: View {
 
     private var accountList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("NEARBY ACCOUNTS • \(settings.gps.nearbyRadiusMiles.formatted(.number.precision(.fractionLength(0...2)))) MI")
-                    .font(.caption.bold()).tracking(1.2).foregroundStyle(.secondary)
-                Spacer()
-                Text("\(nearbyRows.count)").foregroundStyle(.secondary)
-            }
+            Text(
+                "\(nearbyRows.count) NEARBY ACCOUNT\(nearbyRows.count == 1 ? "" : "S") • " +
+                "\(settings.gps.nearbyRadiusMiles.formatted(.number.precision(.fractionLength(0...2)))) MI RANGE"
+            )
+            .font(.caption.bold())
+            .tracking(1.05)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .multilineTextAlignment(.center)
             .padding(.horizontal, 16)
 
             if nearbyRows.isEmpty {
@@ -759,14 +820,6 @@ private struct NativeNearbyView: View {
                             focusScrolledAccount()
                         }
                     }
-                    .onChange(of: scrollAccountID) { _, newID in
-                        guard accountScrollWasActive,
-                              let newID,
-                              let row = nearbyRows.first(where: { $0.id == newID }) else {
-                            return
-                        }
-                        selectAccount(row, scrollToCard: false, haptic: true)
-                    }
                     .accessibilityIdentifier("nearby-account-scroll")
                 }
             }
@@ -778,7 +831,7 @@ private struct NativeNearbyView: View {
         _ row: FireVaultNativeNearbyAccount,
         index: Int
     ) -> some View {
-        Button {
+        return Button {
             selectAccount(row, scrollToCard: true, haptic: true)
         } label: {
             HStack(alignment: .top, spacing: 10) {
@@ -852,6 +905,11 @@ private struct NativeNearbyView: View {
                         lineWidth: selectedID == row.id ? 1.5 : 1
                     )
             }
+            .shadow(
+                color: .black.opacity(selectedID == row.id ? 0.32 : 0.20),
+                radius: selectedID == row.id ? 9 : 6,
+                y: selectedID == row.id ? 5 : 3
+            )
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -881,6 +939,25 @@ private struct NativeNearbyView: View {
         .accessibilityIdentifier("nearby-account-\(row.id)")
     }
 
+    private func expandRadiusPicker() {
+        radiusCollapseTask?.cancel()
+        withAnimation(.snappy(duration: 0.24)) {
+            radiusPickerExpanded = true
+        }
+        scheduleRadiusCollapse()
+    }
+
+    private func scheduleRadiusCollapse() {
+        radiusCollapseTask?.cancel()
+        radiusCollapseTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            withAnimation(.snappy(duration: 0.24)) {
+                radiusPickerExpanded = false
+            }
+        }
+    }
+
     private func focusScrolledAccount() {
         guard let scrollAccountID,
               selectedID != scrollAccountID,
@@ -895,19 +972,18 @@ private struct NativeNearbyView: View {
         scrollToCard: Bool,
         haptic: Bool = false
     ) {
+        if haptic, settings.gps.hapticsAreEnabled {
+            let feedback = UIImpactFeedbackGenerator(style: .rigid)
+            feedback.prepare()
+            feedback.impactOccurred(intensity: 0.72)
+        }
         guard let coordinate = row.account.coordinate else { return }
-        let selectionChanged = selectedID != row.id
         selectedID = row.id
         store.selectCaptureAccount(row.account.id)
         if scrollToCard {
             // Update the scroll anchor without animating through intermediate
             // cards, which previously let the old top card reclaim selection.
             scrollAccountID = row.id
-        }
-        if selectionChanged, haptic, settings.gps.hapticsAreEnabled {
-            let feedback = UISelectionFeedbackGenerator()
-            feedback.prepare()
-            feedback.selectionChanged()
         }
         withAnimation(.easeInOut(duration: 0.3)) {
             cameraPosition = accountCameraPosition(coordinate)
@@ -1082,6 +1158,7 @@ private struct NativeAccountsView: View {
                                             RoundedRectangle(cornerRadius: 17, style: .continuous)
                                                 .stroke(.white.opacity(0.07), lineWidth: 1)
                                         }
+                                        .shadow(color: .black.opacity(0.20), radius: 7, y: 4)
                                 }
                                 .buttonStyle(.plain)
                                 .id(account.id)
@@ -1735,11 +1812,36 @@ private struct NativeSettingsView: View {
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var search = ""
+    @State private var expandedSettingGroups: Set<String> = []
     private let versionInfo = FireVaultVersionInfo()
+
+    private var viewPreferences: FireVaultSettingsViewPreferences { settings.settingsView }
+    private var usesCollapsibleSections: Bool {
+        search.isEmpty && (
+            viewPreferences.mode == .compact
+                || (viewPreferences.mode == .advanced && viewPreferences.advancedCollapseSections)
+        )
+    }
+    private var showsDescriptions: Bool {
+        viewPreferences.mode == .advanced && viewPreferences.advancedShowDescriptions
+    }
+    private var showsStatus: Bool {
+        viewPreferences.mode != .simple
+            && (viewPreferences.mode != .advanced || viewPreferences.advancedShowStatus)
+    }
+    private var showsIcons: Bool {
+        viewPreferences.mode != .simple
+            && (viewPreferences.mode != .advanced || viewPreferences.advancedShowIcons)
+    }
+    private var showsSectionDescriptions: Bool {
+        viewPreferences.mode == .advanced && viewPreferences.advancedShowSectionDescriptions
+    }
 
     private var groups: [FireVaultNativeSettingsGroup] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let nativeGroups = NativeSettingsCatalog.groups
+        let nativeGroups = NativeSettingsCatalog.groups.filter {
+            settings.isFeatureVisible("settings.\($0.id)")
+        }
         guard !query.isEmpty else { return nativeGroups }
 
         return nativeGroups.compactMap { group in
@@ -1773,7 +1875,11 @@ private struct NativeSettingsView: View {
                         .listRowSeparator(.hidden)
                 } else {
                     ForEach(groups) { group in
-                        settingsSection(group)
+                        if usesCollapsibleSections {
+                            collapsibleSettingsSection(group)
+                        } else {
+                            settingsSection(group)
+                        }
                     }
                 }
 
@@ -1782,6 +1888,7 @@ private struct NativeSettingsView: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(NativeShellPalette.background)
+            .contentMargins(.bottom, 96, for: .scrollContent)
             .searchable(text: $search, prompt: "Search settings")
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
@@ -1821,6 +1928,68 @@ private struct NativeSettingsView: View {
             .accessibilityValue(payload.demoMode ? "Demo Mode" : "Field technician profile")
             .accessibilityElement(children: .combine)
             .accessibilityHint("Opens technician profile settings")
+
+            NavigationLink {
+                NativeSettingsViewPreferencesView(settings: settings)
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Preferred Settings View")
+                        Text(settings.settingsView.mode.title)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "rectangle.3.group")
+                        .foregroundStyle(NativeShellPalette.blue)
+                }
+            }
+            .accessibilityValue(settings.settingsView.mode.title)
+            .accessibilityHint("Choose Compact, Simple, or Advanced Settings")
+
+            NavigationLink {
+                NativeAppearanceSettingsView(settings: settings)
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Appearance")
+                        Text(settings.appearance.title)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: settings.appearance == .light ? "sun.max.fill" : "circle.lefthalf.filled")
+                        .foregroundStyle(NativeShellPalette.amber)
+                }
+            }
+            .accessibilityValue(settings.appearance.title)
+            .accessibilityHint("Choose Dark, Light, or System Default")
+        }
+    }
+
+    private func collapsibleSettingsSection(_ group: FireVaultNativeSettingsGroup) -> some View {
+        Section {
+            DisclosureGroup(
+                isExpanded: Binding(
+                    get: { expandedSettingGroups.contains(group.id) },
+                    set: { isExpanded in
+                        if isExpanded {
+                            expandedSettingGroups.insert(group.id)
+                        } else {
+                            expandedSettingGroups.remove(group.id)
+                        }
+                    }
+                )
+            ) {
+                ForEach(group.items) { item in
+                    let status = item.displayStatus(nativeVersion: versionInfo.version)
+                    settingsRow(item, group: group, status: status)
+                }
+            } label: {
+                Label(group.title, systemImage: group.symbol)
+                    .font(.headline)
+                    .foregroundStyle(NativeShellPalette.tint(group.tint))
+            }
         }
     }
 
@@ -1834,7 +2003,7 @@ private struct NativeSettingsView: View {
             Label(group.title, systemImage: group.symbol)
                 .foregroundStyle(NativeShellPalette.tint(group.tint))
         } footer: {
-            if !group.subtitle.isEmpty {
+            if showsSectionDescriptions && !group.subtitle.isEmpty {
                 Text(group.subtitle)
             }
         }
@@ -1848,8 +2017,10 @@ private struct NativeSettingsView: View {
     ) -> some View {
         let row = FVSettingsRow(
             item: item,
-            status: nativeStatus(for: item, fallback: status),
-            tint: NativeShellPalette.tint(group.tint)
+            status: showsStatus ? nativeStatus(for: item, fallback: status) : "",
+            tint: NativeShellPalette.tint(group.tint),
+            showsSubtitle: showsDescriptions,
+            showsIcon: showsIcons
         )
 
         NavigationLink {
@@ -1857,7 +2028,7 @@ private struct NativeSettingsView: View {
         } label: { row }
             .accessibilityLabel(item.accessibilityLabel)
             .accessibilityValue(nativeStatus(for: item, fallback: status))
-            .accessibilityHint("Opens native \(item.title)")
+            .accessibilityHint("Opens \(item.title)")
     }
 
     private func nativeStatus(for item: FireVaultNativeSettingItem, fallback: String) -> String {
@@ -1866,14 +2037,13 @@ private struct NativeSettingsView: View {
         case "tech": settings.preferences.technician.name.isEmpty ? "Not configured" : settings.preferences.technician.name
         case "email": settings.preferences.email.defaultTo.isEmpty ? "Not configured" : "Configured"
         case "reports": settings.preferences.reports.format.capitalized
-        case "overlay": "Native"
+        case "overlay": "Configured"
         case "plusCodes": settings.preferences.plusCodes.enabled ? "On" : "Off"
         case "webdav": settings.preferences.webDAV.enabled ? "Configured" : "Off"
         case "privacy": settings.preferences.privacy.enabled ? "On" : "Off"
-        case "customerImport": "Native CSV"
+        case "customerImport": "CSV"
         case "demo": store.demoMode ? "Active" : "Off"
         case "about": "Version \(versionInfo.version)"
-        case "updates": "Build \(versionInfo.version)"
         default: fallback
         }
     }
@@ -1892,15 +2062,24 @@ private struct NativeSettingsView: View {
         case "sync": NativeSyncSettingsView(settings: settings)
         case "customerImport": NativeCSVImportView(store: store)
         case "categories": NativeCategoriesSettingsView(settings: settings)
-        case "backup": NativeMigrationStatusView(title: "Backup & Restore", symbol: "externaldrive.badge.timemachine", message: "Native full-vault backup will be enabled after accounts, media, notes, and equipment share the native repository.")
+        case "backup": NativeBackupRestoreView(store: store)
         case "webdav": NativeWebDAVSettingsView(settings: settings)
         case "privacy": NativePrivacySettingsView(settings: settings)
-        case "security": NativeMigrationStatusView(title: "Security", symbol: "shield.checkered", message: "FireVault uses the iOS application sandbox and can require Face ID to unlock a signed-in workspace. Configure Face ID under Privacy Lock.")
+        case "security": NativeSecuritySettingsView(settings: settings)
         case "manual": NativeManualView()
-        case "updates": NativeUpdatesView(versionInfo: versionInfo)
         case "demo": NativeDemoSettingsView(store: store)
-        case "about": NativeAboutFireVaultView(versionInfo: versionInfo)
-        default: NativeMigrationStatusView(title: "Native Settings", symbol: "gearshape", message: "This setting has moved out of the web application and is being rebuilt for iOS.")
+        case "about":
+            NativeAboutFireVaultView(
+                versionInfo: versionInfo,
+                payload: payload,
+                store: store,
+                settings: settings
+            )
+        default: NativeMigrationStatusView(
+            title: "Setting Unavailable",
+            symbol: "gearshape",
+            message: "This setting is not available."
+        )
         }
     }
 
@@ -1956,7 +2135,7 @@ private struct NativeGPSSettingsView: View {
             } header: {
                 Text("Map Preferences")
             } footer: {
-                Text("This native distance controls the accounts displayed on the Nearby map and list.")
+                Text("This distance controls the accounts displayed on the Nearby map and list.")
             }
 
             Section("GPS Tools") {
@@ -2037,8 +2216,9 @@ private struct FVRadiusWheelPicker: View {
     }
 }
 
-private struct FVHorizontalRadiusPicker: View {
+struct FVHorizontalRadiusPicker: View {
     @Binding var selection: Double
+    var hapticsEnabled = true
     @State private var centeredRadius: Double?
 
     private var options: [Double] {
@@ -2051,13 +2231,10 @@ private struct FVHorizontalRadiusPicker: View {
     var body: some View {
         VStack(spacing: 2) {
             HStack(spacing: 5) {
-                Image(systemName: "airplane")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(NativeShellPalette.amber)
                 Text("RANGE • MI")
                     .font(.system(size: 9, weight: .bold, design: .rounded))
                     .tracking(1.05)
-                    .foregroundStyle(.white.opacity(0.76))
+                    .foregroundStyle(NativeShellPalette.amber.opacity(0.86))
             }
                 .accessibilityHidden(true)
 
@@ -2080,12 +2257,12 @@ private struct FVHorizontalRadiusPicker: View {
                                 Text(FireVaultGPSPreferences.radiusWheelLabel(radius))
                                     .font(.system(size: 15, weight: radius == selection ? .bold : .semibold, design: .rounded))
                                     .monospacedDigit()
-                                    .foregroundStyle(radius == selection ? .black : .white.opacity(0.62))
+                                    .foregroundStyle(NativeShellPalette.amber.opacity(radius == selection ? 1 : 0.62))
                                     .frame(minWidth: 32, minHeight: 28)
                                     .background {
                                         if radius == selection {
-                                            Capsule()
-                                                .fill(NativeShellPalette.amber)
+                                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                                .stroke(NativeShellPalette.amber, lineWidth: 1.5)
                                                 .shadow(color: NativeShellPalette.amber.opacity(0.45), radius: 5)
                                         }
                                     }
@@ -2118,7 +2295,7 @@ private struct FVHorizontalRadiusPicker: View {
                 }
 
                 Capsule()
-                    .fill(NativeShellPalette.amber.opacity(0.75))
+                    .fill(NativeShellPalette.amber)
                     .frame(width: 2, height: 5)
                     .offset(y: 15)
                     .allowsHitTesting(false)
@@ -2129,21 +2306,23 @@ private struct FVHorizontalRadiusPicker: View {
         .background {
             LinearGradient(
                 colors: [
-                    Color(red: 0.10, green: 0.23, blue: 0.34),
-                    Color(red: 0.07, green: 0.14, blue: 0.22),
-                    NativeShellPalette.blue.opacity(0.30)
+                    Color(red: 0.12, green: 0.09, blue: 0.035),
+                    Color(red: 0.035, green: 0.042, blue: 0.050),
+                    Color.black.opacity(0.94)
                 ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                startPoint: .top,
+                endPoint: .bottom
             )
             .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
         }
         .overlay {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(NativeShellPalette.blue.opacity(0.42), lineWidth: 1)
+                .stroke(NativeShellPalette.amber.opacity(0.46), lineWidth: 1)
         }
-        .shadow(color: NativeShellPalette.blue.opacity(0.14), radius: 6, y: 3)
-        .sensoryFeedback(.selection, trigger: selection)
+        .shadow(color: NativeShellPalette.amber.opacity(0.14), radius: 6, y: 3)
+        .sensoryFeedback(.selection, trigger: selection) { oldValue, newValue in
+            hapticsEnabled && oldValue != newValue
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Nearby radius")
         .accessibilityValue(FireVaultGPSPreferences.radiusLabel(selection))
@@ -2174,53 +2353,319 @@ private struct FVHorizontalRadiusPicker: View {
 
 private struct NativeAboutFireVaultView: View {
     let versionInfo: FireVaultVersionInfo
+    let payload: FireVaultAppPayload
+    @ObservedObject var store: FireVaultStore
+    @ObservedObject var settings: FireVaultNativeSettingsStore
+    @State private var showsDeveloperCenter = false
 
     var body: some View {
         List {
             Section {
                 VStack(spacing: 14) {
-                    Image(systemName: "shield.lefthalf.filled")
-                        .font(.system(size: 52, weight: .semibold))
-                        .foregroundStyle(NativeShellPalette.red)
+                    Image("FireVaultLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 82, height: 82)
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .shadow(color: .black.opacity(0.24), radius: 10, y: 5)
                         .accessibilityHidden(true)
                     Text("FireVault")
                         .font(.largeTitle.bold())
-                    Text("A field workspace for fire alarm technicians, combining account information, notes, files, document scans, photos, equipment records, and site mapping.")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
+                    Text("Built for the field")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(NativeShellPalette.red)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 22)
                 .accessibilityElement(children: .combine)
             }
 
+            Section("Built for Fire Alarm Technicians") {
+                FireVaultJustifiedText(
+                    "FireVault is a field-first workspace for fire alarm technicians. It brings nearby accounts, site history, service notes, photographs, document scans, equipment, locations, and Trip Log reporting into one focused application so the important details are ready when you need them."
+                )
+
+                FireVaultJustifiedText(
+                    "Designed for fire alarm technicians by a fire alarm technician, FireVault is shaped around real service calls, site visits, inspections, troubleshooting, and follow-up work. Its purpose is simple: reduce the time spent hunting for information and leave behind clearer records after every visit."
+                )
+            }
+
+            Section("Developer") {
+                LabeledContent("Designed and developed by", value: "David Bannerman")
+                Link("David@Bannerman.us", destination: URL(string: "mailto:David@Bannerman.us")!)
+                Text("A fire alarm technician building practical tools for the fire alarm field.")
+                    .font(.custom("Snell Roundhand", size: 18))
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Application") {
                 LabeledContent("Version", value: versionInfo.version)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 4) {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        showsDeveloperCenter = true
+                    }
+                    .accessibilityHint("Version information")
                 LabeledContent("Build", value: versionInfo.build)
             }
         }
+        .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("About FireVault")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(isPresented: $showsDeveloperCenter) {
+            FireVaultDeveloperCenterView(
+                versionInfo: versionInfo,
+                payload: payload,
+                store: store,
+                settings: settings
+            )
+        }
     }
 }
 
-private struct NativeUpdatesView: View {
+private struct FireVaultJustifiedText: UIViewRepresentable {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.isEditable = false
+        view.isScrollEnabled = false
+        view.isSelectable = false
+        view.backgroundColor = .clear
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.adjustsFontForContentSizeCategory = true
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .justified
+        paragraph.lineSpacing = 2
+        view.attributedText = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: UIFont.preferredFont(forTextStyle: .body),
+                .foregroundColor: UIColor.secondaryLabel,
+                .paragraphStyle: paragraph
+            ]
+        )
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: UITextView,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width else { return nil }
+        let size = uiView.sizeThatFits(
+            CGSize(width: width, height: .greatestFiniteMagnitude)
+        )
+        return CGSize(width: width, height: size.height)
+    }
+}
+
+private struct FireVaultDeveloperCenterView: View {
     let versionInfo: FireVaultVersionInfo
+    let payload: FireVaultAppPayload
+    @ObservedObject var store: FireVaultStore
+    @ObservedObject var settings: FireVaultNativeSettingsStore
+    @StateObject private var runner = FireVaultDiagnosticRunner()
+    @State private var copiedDiagnostics = false
+    @State private var confirmsAITest = false
+
+    private var enabledFeatureCount: Int {
+        FireVaultDeveloperFeatureCatalog.features.filter {
+            settings.developer.isEnabled($0.id)
+        }.count
+    }
+
+    private var diagnosticHeader: String {
+        return """
+        FireVault \(versionInfo.displayText)
+        Mode: \(payload.demoMode ? "Demo" : "Production")
+        Settings view: \(settings.settingsView.mode.title)
+        Accounts: \(store.accounts.count)
+        Selected tab: \(store.selectedTab.title)
+        Location: \(payload.locationStatus)
+        Simple features: \(enabledFeatureCount)/\(FireVaultDeveloperFeatureCatalog.features.count) enabled
+        """
+    }
 
     var body: some View {
         List {
             Section {
-                Label("FireVault is installed", systemImage: "checkmark.seal.fill")
-                    .foregroundStyle(NativeShellPalette.green)
-                LabeledContent("Version", value: versionInfo.version)
-                LabeledContent("Build", value: versionInfo.build)
+                Button {
+                    Task {
+                        await runner.runSafeChecks(
+                            accounts: store.accounts,
+                            preferences: settings.preferences
+                        )
+                    }
+                } label: {
+                    Label(
+                        runner.isRunning ? "Running Diagnostics…" : "Run All Safe Diagnostics",
+                        systemImage: runner.isRunning ? "hourglass" : "stethoscope"
+                    )
+                }
+                .disabled(runner.isRunning)
+
+                Button("Test AI Edge Function", systemImage: "sparkles") {
+                    confirmsAITest = true
+                }
+                .disabled(runner.isRunning)
+            } header: {
+                Text("Test Console")
             } footer: {
-                Text("Native FireVault updates are delivered with the installed iOS application. This screen no longer manages PWA files or browser caches.")
+                Text("Safe diagnostics test the local vault, account integrity, storage, authentication, and read access to both Supabase Trip Log tables.")
+            }
+
+            if runner.results.isEmpty {
+                Section {
+                    ContentUnavailableView(
+                        "No Test Results",
+                        systemImage: "waveform.path.ecg",
+                        description: Text("Run diagnostics to test FireVault's local vault and connected services.")
+                    )
+                }
+            } else {
+                Section("Results") {
+                    ForEach(runner.results) { result in
+                        FireVaultDiagnosticResultRow(result: result)
+                    }
+                }
+            }
+
+            Section("Runtime") {
+                LabeledContent("Version", value: versionInfo.displayText)
+                LabeledContent("Environment", value: payload.demoMode ? "Demo" : "Production")
+                LabeledContent("Accounts loaded", value: "\(store.accounts.count)")
+                LabeledContent("Settings view", value: settings.settingsView.mode.title)
+                LabeledContent("Mapped accounts", value: "\(store.mappedAccountCount)")
+                LabeledContent("Unmapped accounts", value: "\(store.unmappedAccountCount)")
+
+                Button(copiedDiagnostics ? "Diagnostics Copied" : "Copy Diagnostics", systemImage: copiedDiagnostics ? "checkmark" : "doc.on.doc") {
+                    UIPasteboard.general.string = diagnosticHeader + "\n\n" + runner.report
+                    copiedDiagnostics = true
+                }
+            }
+
+            Section {
+                NavigationLink {
+                    FireVaultSimpleTemplateDeveloperView(settings: settings)
+                } label: {
+                    Label("Simple Mode Template", systemImage: "switch.2")
+                }
+
+                Button("Clear Test Results", systemImage: "clear") {
+                    runner.clear()
+                }
+                .disabled(runner.results.isEmpty || runner.isRunning)
+            } header: {
+                Text("Developer Tools")
+            } footer: {
+                Text("A production database write test will require a dedicated diagnostic table migration. FireVault does not write test records into customer or Trip Log tables.")
             }
         }
-        .navigationTitle("App Updates")
+        .contentMargins(.bottom, 96, for: .scrollContent)
+        .navigationTitle("Developer Center")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Run AI Endpoint Test?", isPresented: $confirmsAITest) {
+            Button("Cancel", role: .cancel) {}
+            Button("Run Test") {
+                Task { await runner.runAIEndpointCheck() }
+            }
+        } message: {
+            Text("This sends a diagnostic request containing no customer data. It uses a small amount of OpenAI API credit.")
+        }
+    }
+}
+
+private struct FireVaultSimpleTemplateDeveloperView: View {
+    @ObservedObject var settings: FireVaultNativeSettingsStore
+    @State private var showsResetConfirmation = false
+
+    var body: some View {
+        List {
+            ForEach(FireVaultDeveloperFeatureCatalog.pages, id: \.self) { page in
+                Section(page) {
+                    ForEach(FireVaultDeveloperFeatureCatalog.features.filter { $0.page == page }) { feature in
+                        developerFeatureToggle(feature)
+                    }
+                }
+            }
+
+            Section {
+                Button("Reset Simple Template", systemImage: "arrow.counterclockwise", role: .destructive) {
+                    showsResetConfirmation = true
+                }
+            } footer: {
+                Text("Resetting enables every Simple-mode feature without deleting FireVault data.")
+            }
+        }
+        .contentMargins(.bottom, 96, for: .scrollContent)
+        .navigationTitle("Simple Template")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Reset Simple Template?", isPresented: $showsResetConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) { settings.resetSimpleFeatures() }
+        } message: {
+            Text("Every feature will be enabled in Simple mode.")
+        }
+    }
+
+    private func developerFeatureToggle(_ feature: FireVaultDeveloperFeature) -> some View {
+        let enabled = Binding<Bool>(
+            get: { settings.developer.isEnabled(feature.id) },
+            set: { newValue in
+                settings.setSimpleFeature(feature.id, enabled: newValue)
+            }
+        )
+        return Toggle(feature.title, isOn: enabled)
+    }
+}
+
+private struct FireVaultDiagnosticResultRow: View {
+    let result: FireVaultDiagnosticResult
+
+    private var color: Color {
+        switch result.status {
+        case .running: NativeShellPalette.blue
+        case .passed: NativeShellPalette.green
+        case .warning: NativeShellPalette.amber
+        case .failed: NativeShellPalette.red
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: result.status.symbol)
+                .foregroundStyle(color)
+                .frame(width: 24)
+                .symbolEffect(.pulse, isActive: result.status == .running)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(result.title)
+                        .font(.subheadline.bold())
+                    Spacer()
+                    if result.durationMilliseconds > 0 {
+                        Text("\(result.durationMilliseconds) ms")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                Text(result.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(.vertical, 3)
     }
 }
 
@@ -2228,21 +2673,25 @@ private struct FVSettingsRow: View {
     let item: FireVaultNativeSettingItem
     let status: String
     let tint: Color
+    let showsSubtitle: Bool
+    let showsIcon: Bool
 
     var body: some View {
         HStack(spacing: 13) {
-            Image(systemName: item.symbol)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 30, height: 30)
-                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .accessibilityHidden(true)
+            if showsIcon {
+                Image(systemName: item.symbol)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 30, height: 30)
+                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityHidden(true)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
                     .font(.body)
                     .foregroundStyle(.primary)
-                if !item.subtitle.isEmpty {
+                if showsSubtitle && !item.subtitle.isEmpty {
                     Text(item.subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -2282,6 +2731,7 @@ struct NativeShellCard<Content: View>: View {
         content.padding(16).frame(maxWidth: .infinity, alignment: .leading)
             .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay { RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.08), lineWidth: 1) }
+            .shadow(color: .black.opacity(0.20), radius: 8, y: 4)
     }
 }
 
@@ -2292,16 +2742,52 @@ private extension View {
 }
 
 enum NativeShellPalette {
-    static let background = Color(red: 0.028, green: 0.043, blue: 0.061)
-    static let surface = Color(red: 0.070, green: 0.095, blue: 0.125)
-    static let blue = Color(red: 0.24, green: 0.67, blue: 1.0)
-    static let green = Color(red: 0.23, green: 0.86, blue: 0.58)
-    static let amber = Color(red: 1.0, green: 0.69, blue: 0.26)
-    static let red = Color(red: 1.0, green: 0.34, blue: 0.40)
-    static let purple = Color(red: 0.68, green: 0.48, blue: 1.0)
-    static let navigationBackground = Color(red: 0.045, green: 0.061, blue: 0.082)
-    static let navigationInactive = Color(red: 0.60, green: 0.65, blue: 0.72)
-    static let navigationDivider = Color.white.opacity(0.14)
+    static let background = adaptive(
+        light: UIColor(red: 0.957, green: 0.941, blue: 0.902, alpha: 1),
+        dark: UIColor(red: 0.028, green: 0.043, blue: 0.061, alpha: 1)
+    )
+    static let surface = adaptive(
+        light: UIColor(red: 1.000, green: 0.992, blue: 0.965, alpha: 1),
+        dark: UIColor(red: 0.070, green: 0.095, blue: 0.125, alpha: 1)
+    )
+    static let blue = adaptive(
+        light: UIColor(red: 0.08, green: 0.39, blue: 0.68, alpha: 1),
+        dark: UIColor(red: 0.24, green: 0.67, blue: 1.0, alpha: 1)
+    )
+    static let green = adaptive(
+        light: UIColor(red: 0.08, green: 0.48, blue: 0.31, alpha: 1),
+        dark: UIColor(red: 0.23, green: 0.86, blue: 0.58, alpha: 1)
+    )
+    static let amber = adaptive(
+        light: UIColor(red: 0.66, green: 0.39, blue: 0.04, alpha: 1),
+        dark: UIColor(red: 1.0, green: 0.69, blue: 0.26, alpha: 1)
+    )
+    static let red = adaptive(
+        light: UIColor(red: 0.76, green: 0.12, blue: 0.16, alpha: 1),
+        dark: UIColor(red: 1.0, green: 0.34, blue: 0.40, alpha: 1)
+    )
+    static let purple = adaptive(
+        light: UIColor(red: 0.42, green: 0.23, blue: 0.68, alpha: 1),
+        dark: UIColor(red: 0.68, green: 0.48, blue: 1.0, alpha: 1)
+    )
+    static let navigationBackground = adaptive(
+        light: UIColor(red: 0.925, green: 0.894, blue: 0.835, alpha: 1),
+        dark: UIColor(red: 0.045, green: 0.061, blue: 0.082, alpha: 1)
+    )
+    static let navigationInactive = adaptive(
+        light: UIColor(red: 0.36, green: 0.34, blue: 0.30, alpha: 1),
+        dark: UIColor(red: 0.60, green: 0.65, blue: 0.72, alpha: 1)
+    )
+    static let navigationDivider = adaptive(
+        light: UIColor(red: 0.45, green: 0.39, blue: 0.31, alpha: 0.22),
+        dark: UIColor(white: 1, alpha: 0.14)
+    )
+
+    private static func adaptive(light: UIColor, dark: UIColor) -> Color {
+        Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark ? dark : light
+        })
+    }
     static func tint(_ name: String) -> Color {
         switch name { case "green": green; case "amber": amber; case "red": red; case "purple": purple; default: blue }
     }

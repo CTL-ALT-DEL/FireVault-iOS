@@ -17,6 +17,7 @@ struct FireVaultTripLogPortraitView: View {
     var showsCloseButton = true
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var selectedDayID: UUID?
     @State private var editingStop: FireVaultTripLogPortraitStopSelection?
     @State private var confirmsEnd = false
@@ -38,8 +39,6 @@ struct FireVaultTripLogPortraitView: View {
                     if let day = selectedDay {
                         let availableWidth = max(0, geometry.size.width - 28)
                         let mapHeight = min(availableWidth, max(190, geometry.size.height * 0.34))
-
-                        gpsTelemetry(day)
 
                         squareMap(day)
                             .frame(height: mapHeight)
@@ -86,7 +85,6 @@ struct FireVaultTripLogPortraitView: View {
             }
         }
         .tint(NativeShellPalette.blue)
-        .preferredColorScheme(.dark)
         .onAppear {
             selectedDayID = breadcrumbs.today?.id ?? breadcrumbs.days.first?.id
         }
@@ -98,12 +96,15 @@ struct FireVaultTripLogPortraitView: View {
             waypointPulseTask?.cancel()
         }
         .sheet(item: $editingStop) { selection in
-            FireVaultTripLogPortraitStopEditorBridge(
+            FireVaultBreadcrumbStopEditor(
                 breadcrumbs: breadcrumbs,
                 store: store,
                 dayID: selection.dayID,
                 stopID: selection.stopID
-            )
+            ) { accountID in
+                store.openAccount(accountID)
+                editingStop = nil
+            }
         }
         .sheet(isPresented: $showsReport) {
             if let selectedDay {
@@ -113,42 +114,11 @@ struct FireVaultTripLogPortraitView: View {
                         technicianName: technicianName,
                         companyName: companyName,
                         includeCoordinates: includeCoordinatesInReports
-                    )
+                    ),
+                    availableDays: breadcrumbs.days
                 )
             }
         }
-    }
-
-    private func gpsTelemetry(_ day: FireVaultBreadcrumbDay) -> some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(NativeShellPalette.red)
-                    .frame(width: 7, height: 7)
-                    .scaleEffect(waypointPulse ? 1.65 : 1)
-                    .opacity(waypointPulse ? 1 : 0.42)
-                    .shadow(
-                        color: NativeShellPalette.red.opacity(waypointPulse ? 0.95 : 0.25),
-                        radius: waypointPulse ? 7 : 2
-                    )
-
-                Text(
-                    "\(FireVaultTripLogTelemetry.recentWaypointCount(in: day, endingAt: context.date)) WAYPOINTS / MIN"
-                )
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .tracking(0.7)
-                    .foregroundStyle(.secondary)
-                    .contentTransition(.numericText())
-            }
-            .animation(.easeOut(duration: 0.22), value: waypointPulse)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(
-                "\(FireVaultTripLogTelemetry.recentWaypointCount(in: day, endingAt: context.date)) GPS waypoints recorded in the last minute"
-            )
-        }
-        .frame(height: 10)
-        .accessibilityIdentifier("trip-log-gps-telemetry")
     }
 
     private func flashWaypointLED() {
@@ -222,10 +192,11 @@ struct FireVaultTripLogPortraitView: View {
             }
             .frame(width: width, height: height)
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(.white.opacity(0.10), lineWidth: 1)
-            }
+            .shadow(
+                color: colorScheme == .light ? .black.opacity(0.22) : .clear,
+                radius: 12,
+                y: 6
+            )
             .overlay(alignment: .topLeading) {
                 compactMapDate(day)
                     .padding(12)
@@ -470,7 +441,7 @@ struct FireVaultTripLogPortraitView: View {
                 .foregroundStyle(NativeShellPalette.blue)
             Text(value)
                 .font(.headline.monospacedDigit())
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             Text(title)
@@ -505,7 +476,7 @@ struct FireVaultTripLogPortraitView: View {
                             portraitTimelineRow(
                                 time: stop.arrival,
                                 title: stop.title,
-                                subtitle: "\(stop.subtitle) • \(stop.duration.tripLogDuration)",
+                                subtitle: "\(stop.subtitle) • \(day.stopDuration(for: stop).tripLogDuration)",
                                 symbol: "\(index + 1).circle.fill",
                                 tint: stopTint(stop),
                                 showsDisclosure: true
@@ -550,7 +521,7 @@ struct FireVaultTripLogPortraitView: View {
                     .foregroundStyle(.secondary)
                 Text(title)
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 Text(subtitle)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -570,12 +541,115 @@ struct FireVaultTripLogPortraitView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView(
-            "No Trip Log Yet",
-            systemImage: "point.topleft.down.to.point.bottomright.curvepath",
-            description: Text("Start a Trip Log to record today’s route and account stops.")
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(alignment: .leading, spacing: 12) {
+            ZStack {
+                NativeShellPalette.surface
+                ContentUnavailableView(
+                    "Ready to Start",
+                    systemImage: "point.topleft.down.to.point.bottomright.curvepath",
+                    description: Text("Start Trip Log to record today’s route and account stops.")
+                )
+                .padding(24)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 250)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .shadow(
+                color: colorScheme == .light ? .black.opacity(0.22) : .clear,
+                radius: 12,
+                y: 6
+            )
+
+            emptyControlDock
+
+            NativeShellCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Trip Log Features", systemImage: "truck.box.fill")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Label("Pause and resume route recording during the workday.", systemImage: "pause.circle")
+                    Label("Review detected account stops and daily history.", systemImage: "calendar.badge.clock")
+                    Label("Preview and export completed Trip Log reports.", systemImage: "doc.text")
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .accessibilityIdentifier("trip-log-empty-workspace")
+    }
+
+    private var emptyControlDock: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 7) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("READY")
+                        .font(.caption.bold())
+                        .tracking(0.8)
+                        .foregroundStyle(NativeShellPalette.blue)
+                    Text("Tap Start to begin today’s route")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: 145, alignment: .leading)
+
+                Spacer(minLength: 2)
+
+                compactTripAction(
+                    title: "START",
+                    symbol: "play.fill",
+                    tint: NativeShellPalette.green
+                ) {
+                    breadcrumbs.startWorkday(accounts: store.accounts)
+                    selectedDayID = breadcrumbs.activeDay?.id
+                }
+
+                compactTripAction(
+                    title: "STOP",
+                    symbol: "stop.fill",
+                    tint: NativeShellPalette.red
+                ) {}
+                .disabled(true)
+                .opacity(0.38)
+
+                historyMenu
+                reportButton
+            }
+
+            if breadcrumbs.permissionState.requiresSettings {
+                Button("Open Location Settings", systemImage: "gearshape") {
+                    breadcrumbs.openLocationSettings()
+                }
+                .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text("History and report controls become available after a Trip Log has been created.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(9)
+        .background {
+            LinearGradient(
+                colors: [
+                    NativeShellPalette.blue.opacity(0.16),
+                    NativeShellPalette.surface,
+                    NativeShellPalette.green.opacity(0.08)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(NativeShellPalette.blue.opacity(0.34), lineWidth: 1)
+        }
+        .accessibilityIdentifier("trip-log-empty-controls")
     }
 
     private func stopTint(_ stop: FireVaultBreadcrumbStop) -> Color {
@@ -588,22 +662,6 @@ private struct FireVaultTripLogPortraitStopSelection: Identifiable {
     let dayID: UUID
     let stopID: UUID
     var id: UUID { stopID }
-}
-
-private struct FireVaultTripLogPortraitStopEditorBridge: View {
-    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
-    @ObservedObject var store: FireVaultStore
-    let dayID: UUID
-    let stopID: UUID
-
-    var body: some View {
-        ContentUnavailableView(
-            "Review Stop",
-            systemImage: "mappin.and.ellipse",
-            description: Text("Stop editing remains available from the current Trip Log screen until this portrait workspace is connected as the active compact layout.")
-        )
-        .presentationDetents([.medium])
-    }
 }
 
 private extension Double {

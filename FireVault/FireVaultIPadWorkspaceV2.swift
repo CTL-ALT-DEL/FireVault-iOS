@@ -53,7 +53,6 @@ struct FireVaultIPadWorkspaceV2: View {
         }
         .background(NativeShellPalette.background)
         .tint(NativeShellPalette.blue)
-        .preferredColorScheme(.dark)
         .accessibilityIdentifier("ipad-adaptive-workspace")
     }
 

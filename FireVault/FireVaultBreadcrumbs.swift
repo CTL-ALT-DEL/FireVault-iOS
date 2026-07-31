@@ -42,6 +42,7 @@ struct FireVaultBreadcrumbStop: Codable, Identifiable, Equatable {
     var accountID: String?
     var accountName: String?
     var accountAddress: String?
+    var customTitle: String?
     var technicianNote: String?
     var isPersonal: Bool?
 
@@ -51,7 +52,7 @@ struct FireVaultBreadcrumbStop: Codable, Identifiable, Equatable {
 
     var title: String {
         if isPersonalStop { return "Personal Stop" }
-        return accountName ?? "Unrecognized Stop"
+        return accountName ?? normalizedCustomTitle ?? "Unrecognized Stop"
     }
 
     var subtitle: String {
@@ -60,7 +61,11 @@ struct FireVaultBreadcrumbStop: Codable, Identifiable, Equatable {
     }
 
     var duration: TimeInterval {
-        max(0, (departure ?? Date()).timeIntervalSince(arrival))
+        duration(asOf: Date())
+    }
+
+    func duration(asOf referenceDate: Date) -> TimeInterval {
+        max(0, (departure ?? referenceDate).timeIntervalSince(arrival))
     }
 
     var isPersonalStop: Bool {
@@ -72,6 +77,9 @@ struct FireVaultBreadcrumbStop: Codable, Identifiable, Equatable {
         accountID = account?.id
         accountName = account?.name
         accountAddress = account?.address
+        if account != nil {
+            customTitle = nil
+        }
     }
 
     mutating func markPersonal(_ personal: Bool) {
@@ -80,6 +88,12 @@ struct FireVaultBreadcrumbStop: Codable, Identifiable, Equatable {
         accountID = nil
         accountName = nil
         accountAddress = nil
+        customTitle = nil
+    }
+
+    mutating func rename(_ title: String) {
+        let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        customTitle = normalized.isEmpty ? nil : normalized
     }
 
     mutating func updateVisit(
@@ -95,6 +109,11 @@ struct FireVaultBreadcrumbStop: Codable, Identifiable, Equatable {
         self.departure = interval.departure
         let trimmedNote = technicianNote.trimmingCharacters(in: .whitespacesAndNewlines)
         self.technicianNote = trimmedNote.isEmpty ? nil : trimmedNote
+    }
+
+    private var normalizedCustomTitle: String? {
+        let normalized = customTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return normalized.isEmpty ? nil : normalized
     }
 }
 
@@ -116,6 +135,28 @@ struct FireVaultBreadcrumbDay: Codable, Identifiable, Equatable {
 
     var elapsedTime: TimeInterval {
         max(0, (endedAt ?? Date()).timeIntervalSince(startedAt))
+    }
+
+    func effectiveDeparture(
+        for stop: FireVaultBreadcrumbStop,
+        asOf referenceDate: Date = Date()
+    ) -> Date {
+        if let departure = stop.departure {
+            return max(stop.arrival, departure)
+        }
+        let nextArrival = stops
+            .lazy
+            .filter { $0.id != stop.id && $0.arrival > stop.arrival }
+            .map(\.arrival)
+            .min()
+        return max(stop.arrival, nextArrival ?? endedAt ?? referenceDate)
+    }
+
+    func stopDuration(
+        for stop: FireVaultBreadcrumbStop,
+        asOf referenceDate: Date = Date()
+    ) -> TimeInterval {
+        max(0, effectiveDeparture(for: stop, asOf: referenceDate).timeIntervalSince(stop.arrival))
     }
 }
 
@@ -397,6 +438,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         arrival: Date,
         departure: Date?,
         account: FireVaultWorkspaceAccount?,
+        customTitle: String,
         technicianNote: String,
         isPersonal: Bool
     ) -> Bool {
@@ -415,6 +457,9 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             stop.markPersonal(true)
         } else {
             stop.assign(to: account)
+            if account == nil {
+                stop.rename(customTitle)
+            }
         }
         days[dayIndex].stops[stopIndex] = stop
         days[dayIndex].stops.sort { $0.arrival < $1.arrival }
@@ -781,7 +826,6 @@ struct FireVaultBreadcrumbsView: View {
             }
         }
         .tint(NativeShellPalette.blue)
-        .preferredColorScheme(.dark)
         .onAppear {
             selectedDayID = breadcrumbs.today?.id ?? breadcrumbs.days.first?.id
         }
@@ -1087,7 +1131,10 @@ struct FireVaultBreadcrumbsView: View {
     }
 
     private func stopTimelineSubtitle(_ stop: FireVaultBreadcrumbStop) -> String {
-        var parts = [stop.subtitle, stop.duration.fireVaultDuration]
+        var parts = [
+            stop.subtitle,
+            (selectedDay?.stopDuration(for: stop) ?? stop.duration).fireVaultDuration
+        ]
         if stop.technicianNote?.isEmpty == false {
             parts.append("Note added")
         }
@@ -1101,7 +1148,7 @@ private struct BreadcrumbStopSelection: Identifiable {
     var id: UUID { stopID }
 }
 
-private struct FireVaultBreadcrumbStopEditor: View {
+struct FireVaultBreadcrumbStopEditor: View {
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @ObservedObject var store: FireVaultStore
     @Environment(\.dismiss) private var dismiss
@@ -1114,6 +1161,7 @@ private struct FireVaultBreadcrumbStopEditor: View {
     @State private var departure: Date
     @State private var hasDeparture: Bool
     @State private var selectedAccountID: String?
+    @State private var customTitle: String
     @State private var technicianNote: String
     @State private var isPersonal: Bool
     @State private var showsAccountPicker = false
@@ -1138,6 +1186,7 @@ private struct FireVaultBreadcrumbStopEditor: View {
         _departure = State(initialValue: stop?.departure ?? arrival.addingTimeInterval(15 * 60))
         _hasDeparture = State(initialValue: stop?.departure != nil)
         _selectedAccountID = State(initialValue: stop?.accountID)
+        _customTitle = State(initialValue: stop?.customTitle ?? "")
         _technicianNote = State(initialValue: stop?.technicianNote ?? "")
         _isPersonal = State(initialValue: stop?.isPersonalStop ?? false)
     }
@@ -1200,7 +1249,6 @@ private struct FireVaultBreadcrumbStopEditor: View {
             }
         }
         .tint(NativeShellPalette.blue)
-        .preferredColorScheme(.dark)
     }
 
     private var visitSection: some View {
@@ -1245,6 +1293,16 @@ private struct FireVaultBreadcrumbStopEditor: View {
             if isPersonal {
                 LabeledContent("Account", value: "Not associated")
             } else {
+                if selectedAccount == nil {
+                    TextField("Stop title", text: $customTitle)
+                        .textInputAutocapitalization(.words)
+
+                    Button("Add as New Account", systemImage: "building.2.crop.circle.badge.plus") {
+                        createAccountFromStop()
+                    }
+                    .disabled(normalizedCustomTitle.isEmpty)
+                }
+
                 Button {
                     showsAccountPicker = true
                 } label: {
@@ -1316,7 +1374,7 @@ private struct FireVaultBreadcrumbStopEditor: View {
         } header: {
             Text("Technician Activity")
         } footer: {
-            Text("Current native records for \(account.name).")
+            Text("Current records for \(account.name).")
         }
     }
 
@@ -1356,9 +1414,31 @@ private struct FireVaultBreadcrumbStopEditor: View {
 
     private var previewDuration: TimeInterval {
         guard hasDeparture else {
-            return max(0, Date().timeIntervalSince(arrival))
+            guard let day = breadcrumbs.days.first(where: { $0.id == dayID }),
+                  let stop = day.stops.first(where: { $0.id == stopID }) else {
+                return max(0, Date().timeIntervalSince(arrival))
+            }
+            return day.stopDuration(for: stop)
         }
         return max(0, departure.timeIntervalSince(arrival))
+    }
+
+    private var normalizedCustomTitle: String {
+        customTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func createAccountFromStop() {
+        guard !normalizedCustomTitle.isEmpty,
+              let stop = breadcrumbs.stop(dayID: dayID, stopID: stopID) else {
+            return
+        }
+        let account = store.addAccount(
+            from: stop,
+            name: normalizedCustomTitle
+        )
+        selectedAccountID = account.id
+        isPersonal = false
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 
     private func save(openingAccount accountID: String? = nil) {
@@ -1368,6 +1448,7 @@ private struct FireVaultBreadcrumbStopEditor: View {
             arrival: arrival,
             departure: hasDeparture ? departure : nil,
             account: isPersonal ? nil : selectedAccount,
+            customTitle: isPersonal || selectedAccount != nil ? "" : normalizedCustomTitle,
             technicianNote: technicianNote,
             isPersonal: isPersonal
         )
@@ -1451,7 +1532,6 @@ private struct FireVaultBreadcrumbAccountPicker: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
         .tint(NativeShellPalette.blue)
     }
 

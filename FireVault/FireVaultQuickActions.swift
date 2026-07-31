@@ -61,7 +61,11 @@ final class FireVaultQuickActionCenter: ObservableObject {
     @Published private(set) var pendingAction: FireVaultQuickAction?
 
     func receive(_ shortcutItem: UIApplicationShortcutItem) -> Bool {
-        guard let action = FireVaultQuickAction(shortcutType: shortcutItem.type) else {
+        return receive(shortcutType: shortcutItem.type)
+    }
+
+    func receive(shortcutType: String) -> Bool {
+        guard let action = FireVaultQuickAction(shortcutType: shortcutType) else {
             return false
         }
         pendingAction = action
@@ -92,10 +96,6 @@ final class FireVaultAppDelegate: NSObject, UIApplicationDelegate {
     ) -> Bool {
         Task { @MainActor in
             FireVaultQuickActionCenter.shared.installShortcutItems(on: application)
-            if #unavailable(iOS 26.0),
-               let shortcutItem = launchOptions?[.shortcutItem] as? UIApplicationShortcutItem {
-                _ = FireVaultQuickActionCenter.shared.receive(shortcutItem)
-            }
         }
         return true
     }
@@ -163,12 +163,13 @@ final class FireVaultSceneDelegate: NSObject, UIWindowSceneDelegate {
         }
     }
 
-    func windowScene(
+    nonisolated func windowScene(
         _ windowScene: UIWindowScene,
         performActionFor shortcutItem: UIApplicationShortcutItem
     ) async -> Bool {
-        await MainActor.run {
-            FireVaultQuickActionCenter.shared.receive(shortcutItem)
+        let shortcutType = shortcutItem.type
+        return await MainActor.run {
+            FireVaultQuickActionCenter.shared.receive(shortcutType: shortcutType)
         }
     }
 }
