@@ -14,15 +14,19 @@ enum FireVaultQuickAction: String, CaseIterable, Equatable {
     case photo
     case scan
 
-    private static let typePrefix = "com.davidbannerman.FireVault.quick-action."
+    private static let typePrefix = "us.bannerman.firevault.quick-action."
+    private static let legacyTypePrefix = "com.davidbannerman.FireVault.quick-action."
 
     var shortcutType: String {
         Self.typePrefix + rawValue
     }
 
     init?(shortcutType: String) {
-        guard shortcutType.hasPrefix(Self.typePrefix) else { return nil }
-        self.init(rawValue: String(shortcutType.dropFirst(Self.typePrefix.count)))
+        let prefix = [Self.typePrefix, Self.legacyTypePrefix].first {
+            shortcutType.hasPrefix($0)
+        }
+        guard let prefix else { return nil }
+        self.init(rawValue: String(shortcutType.dropFirst(prefix.count)))
     }
 
     var title: String {

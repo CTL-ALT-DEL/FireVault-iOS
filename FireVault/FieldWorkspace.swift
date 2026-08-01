@@ -86,6 +86,7 @@ struct FieldWorkspaceView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
 
     @State private var isShowingAccountBrief = false
+    @State private var isShowingAccountEditor = false
     @State private var isLoadingAccountBrief = false
     @State private var accountBrief: String?
     @State private var accountBriefError: String?
@@ -140,6 +141,9 @@ struct FieldWorkspaceView: View {
                     .accessibilityLabel(account.favorite ? "Remove Favorite" : "Add Favorite")
 
                     Menu {
+                        Button("Edit Account", systemImage: "pencil") {
+                            isShowingAccountEditor = true
+                        }
                         if !account.phone.isEmpty {
                             Button("Call", systemImage: "phone") { store.call(account.phone) }
                         }
@@ -168,6 +172,18 @@ struct FieldWorkspaceView: View {
                 errorMessage: accountBriefError,
                 retry: generateAccountBrief
             )
+        }
+        .sheet(isPresented: $isShowingAccountEditor) {
+            FireVaultEditAccountSheet(account: account) { draft in
+                store.updateAccount(
+                    id: account.id,
+                    name: draft.name,
+                    address: draft.address,
+                    category: draft.category,
+                    accountId: draft.accountId,
+                    phone: draft.phone
+                )
+            }
         }
     }
 
@@ -483,6 +499,92 @@ struct FieldWorkspaceView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Main navigation")
         .accessibilityIdentifier("workspace-main-navigation")
+    }
+}
+
+struct FireVaultAccountEditDraft: Equatable {
+    var name: String
+    var address: String
+    var category: String
+    var accountId: String
+    var phone: String
+}
+
+struct FireVaultEditAccountSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    private let accountID: String
+    private let save: (FireVaultAccountEditDraft) -> Bool
+
+    @State private var name: String
+    @State private var address: String
+    @State private var category: String
+    @State private var accountId: String
+    @State private var phone: String
+
+    init(
+        account: FireVaultWorkspaceAccount,
+        save: @escaping (FireVaultAccountEditDraft) -> Bool
+    ) {
+        accountID = account.id
+        self.save = save
+        _name = State(initialValue: account.name)
+        _address = State(initialValue: account.address)
+        _category = State(initialValue: account.category)
+        _accountId = State(initialValue: account.accountId)
+        _phone = State(initialValue: account.phone)
+    }
+
+    private var normalizedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Account") {
+                    TextField("Account name", text: $name)
+                        .textContentType(.organizationName)
+                    TextField("Address", text: $address, axis: .vertical)
+                        .textContentType(.fullStreetAddress)
+                        .lineLimit(2...4)
+                    TextField("Category", text: $category)
+                    TextField("Account ID", text: $accountId)
+                    TextField("Phone number", text: $phone)
+                        .textContentType(.telephoneNumber)
+                        .keyboardType(.phonePad)
+                }
+
+                Section {
+                    Text("Editing these details will not change this account's map coordinates, field records, files, equipment, or history.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Edit Account")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let draft = FireVaultAccountEditDraft(
+                            name: name,
+                            address: address,
+                            category: category,
+                            accountId: accountId,
+                            phone: phone
+                        )
+                        if save(draft) { dismiss() }
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(normalizedName.isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .accessibilityIdentifier("edit-account-\(accountID)")
     }
 }
 

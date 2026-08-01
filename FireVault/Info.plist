@@ -58,7 +58,7 @@
 			<key>UIApplicationShortcutItemTitle</key>
 			<string>Start Log</string>
 			<key>UIApplicationShortcutItemType</key>
-			<string>com.davidbannerman.FireVault.quick-action.start-log</string>
+			<string>us.bannerman.firevault.quick-action.start-log</string>
 		</dict>
 		<dict>
 			<key>UIApplicationShortcutItemIconType</key>
@@ -66,7 +66,7 @@
 			<key>UIApplicationShortcutItemTitle</key>
 			<string>Stop Log</string>
 			<key>UIApplicationShortcutItemType</key>
-			<string>com.davidbannerman.FireVault.quick-action.stop-log</string>
+			<string>us.bannerman.firevault.quick-action.stop-log</string>
 		</dict>
 		<dict>
 			<key>UIApplicationShortcutItemIconType</key>
@@ -74,7 +74,7 @@
 			<key>UIApplicationShortcutItemTitle</key>
 			<string>Photo</string>
 			<key>UIApplicationShortcutItemType</key>
-			<string>com.davidbannerman.FireVault.quick-action.photo</string>
+			<string>us.bannerman.firevault.quick-action.photo</string>
 		</dict>
 		<dict>
 			<key>UIApplicationShortcutItemIconType</key>
@@ -82,7 +82,7 @@
 			<key>UIApplicationShortcutItemTitle</key>
 			<string>Scan</string>
 			<key>UIApplicationShortcutItemType</key>
-			<string>com.davidbannerman.FireVault.quick-action.scan</string>
+			<string>us.bannerman.firevault.quick-action.scan</string>
 		</dict>
 	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

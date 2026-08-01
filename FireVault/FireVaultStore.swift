@@ -348,28 +348,53 @@ final class FireVaultStore: ObservableObject {
         persist()
     }
 
-    func addAccount() {
-        let number = accounts.count + 1
-        accounts.append(
-            .init(
-                id: UUID().uuidString,
-                name: demoMode ? "Demo Account \(number)" : "New Account \(number)",
-                address: demoMode ? "\(100 + number) Demo Way, Boise, ID 83702" : "Address not entered",
-                category: demoMode ? "Commercial" : "Uncategorized",
-                accountId: "\(demoMode ? "DEMO" : "NEW")-\(number.formatted(.number.precision(.integerLength(2))))",
-                phone: demoMode ? "20855501\(number.formatted(.number.precision(.integerLength(2))))" : "",
-                favorite: false,
-                latitude: demoMode ? 43.615 + Double(number) * 0.002 : nil,
-                longitude: demoMode ? -116.202 + Double(number) * 0.002 : nil,
-                tags: demoMode ? ["Demo"] : [],
-                notes: [],
-                documents: [],
-                equipment: [],
-                locations: [],
-                recent: []
-            )
-        )
+    @discardableResult
+    func updateAccount(
+        id: String,
+        name: String,
+        address: String,
+        category: String,
+        accountId: String,
+        phone: String
+    ) -> Bool {
+        guard let index = accounts.firstIndex(where: { $0.id == id }) else { return false }
+
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedName.isEmpty else { return false }
+
+        accounts[index].name = normalizedName
+        accounts[index].address = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        accounts[index].category = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        accounts[index].accountId = accountId.trimmingCharacters(in: .whitespacesAndNewlines)
+        accounts[index].phone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
         persist()
+        return true
+    }
+
+    @discardableResult
+    func addAccount() -> FireVaultWorkspaceAccount {
+        let number = accounts.count + 1
+        let account = FireVaultWorkspaceAccount(
+            id: UUID().uuidString,
+            name: demoMode ? "Demo Account \(number)" : "New Account \(number)",
+            address: demoMode ? "\(100 + number) Demo Way, Boise, ID 83702" : "",
+            category: demoMode ? "Commercial" : "Uncategorized",
+            accountId: demoMode ? "DEMO-\(number.formatted(.number.precision(.integerLength(2))))" : "",
+            phone: demoMode ? "20855501\(number.formatted(.number.precision(.integerLength(2))))" : "",
+            favorite: false,
+            latitude: demoMode ? 43.615 + Double(number) * 0.002 : nil,
+            longitude: demoMode ? -116.202 + Double(number) * 0.002 : nil,
+            tags: demoMode ? ["Demo"] : [],
+            notes: [],
+            documents: [],
+            equipment: [],
+            locations: [],
+            recent: []
+        )
+        accounts.append(account)
+        openAccount(account.id)
+        persist()
+        return account
     }
 
     @discardableResult

@@ -1,10 +1,24 @@
 # FireVault Current Build
 
-**Latest tested build: 1.08.41 (99)**
+**Latest tested build: 1.08.42 (101)**
+
+Build 1.08.42 (101) became the official latest tested build after the iPhone
+target compiled and the FireVault unit-test suite passed locally. Future build
+candidates must meet the same build-and-test requirement before replacing it.
 
 This is the only number to use when deciding whether an installed copy is current.
 In FireVault, open **Settings → About FireVault** and compare the displayed version
 and build with the number above.
+
+## Included in 1.08.42 (101)
+
+- Fixed the Accounts add action so a new account is immediately selected and opened
+- Added production-safe blank defaults without fabricated coordinates
+- Added Edit Account for name, address, category, account ID, and phone number
+- Preserved account identity, favorites, coordinates, field records, files, equipment,
+  saved locations, and recent history while editing account details
+- Migrated Home Screen quick actions to the `us.bannerman.firevault` namespace while
+  retaining compatibility with legacy installed shortcuts
 
 ## Included in 1.08.39 (97)
 
@@ -65,6 +79,12 @@ and build with the number above.
 - Added David@Bannerman.us to About FireVault
 - Replaced selected-navigation glow with a darker 3D-style shadow; the Trip Log truck is bright green while recording
 - Simplified the About FireVault email and styled the supporting developer message in script
+
+## Roadmap
+
+- Future: optional photo/report QR overlay that encodes the captured image's
+  Plus Code or exact map-location URL so a recipient can scan the photo or
+  report and open the precise location.
 
 ## Simple release rule
 

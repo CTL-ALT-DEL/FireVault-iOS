@@ -64,6 +64,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
     @State private var addressLayer: FireVaultAccountMapLayer = .standard
     @State private var pinsLayer: FireVaultAccountMapLayer = .standard
     @State private var isShowingAccountBrief = false
+    @State private var isShowingAccountEditor = false
     @State private var isLoadingAccountBrief = false
     @State private var accountBrief: String?
     @State private var accountBriefError: String?
@@ -168,6 +169,18 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 retry: generateAccountBrief
             )
         }
+        .sheet(isPresented: $isShowingAccountEditor) {
+            FireVaultEditAccountSheet(account: account) { draft in
+                store.updateAccount(
+                    id: account.id,
+                    name: draft.name,
+                    address: draft.address,
+                    category: draft.category,
+                    accountId: draft.accountId,
+                    phone: draft.phone
+                )
+            }
+        }
     }
 
     private func header(isLandscape: Bool) -> some View {
@@ -196,6 +209,23 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 }
                 .buttonStyle(.glass)
                 .accessibilityLabel("Favorite account")
+
+                Menu {
+                    Button("Edit Account", systemImage: "pencil") {
+                        isShowingAccountEditor = true
+                    }
+                    if hasPhone {
+                        Button("Call", systemImage: "phone") {
+                            store.call(account.phone)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.title3.bold())
+                        .frame(width: isLandscape ? 42 : 46, height: isLandscape ? 42 : 46)
+                }
+                .buttonStyle(.glass)
+                .accessibilityLabel("Account actions")
             }
 
             HStack(alignment: .center, spacing: isLandscape ? 14 : 18) {

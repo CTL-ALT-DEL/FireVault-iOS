@@ -82,6 +82,79 @@ final class FireVaultTests: XCTestCase {
             FireVaultQuickAction.allCases.map(\.title),
             ["Start Log", "Stop Log", "Photo", "Scan"]
         )
+        XCTAssertTrue(FireVaultQuickAction.startLog.shortcutType.hasPrefix("us.bannerman.firevault.quick-action."))
+        XCTAssertEqual(
+            FireVaultQuickAction(shortcutType: "com.davidbannerman.FireVault.quick-action.photo"),
+            .photo
+        )
+    }
+
+    func testAddingProductionAccountSelectsItWithoutFakeLocationData() throws {
+        let suite = "FireVaultTests.AddProductionAccount.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+
+        let account = store.addAccount()
+
+        XCTAssertEqual(store.selectedAccountID, account.id)
+        XCTAssertEqual(store.selectedAccount?.id, account.id)
+        XCTAssertEqual(account.name, "New Account 1")
+        XCTAssertEqual(account.address, "")
+        XCTAssertEqual(account.accountId, "")
+        XCTAssertNil(account.latitude)
+        XCTAssertNil(account.longitude)
+    }
+
+    func testUpdatingAccountDetailsPreservesFieldDataAndPersists() throws {
+        let suite = "FireVaultTests.UpdateAccount.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let account = store.addAccount()
+        let index = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        store.accounts[index].favorite = true
+        store.accounts[index].latitude = 43.615
+        store.accounts[index].longitude = -116.202
+        store.accounts[index].tags = ["Priority"]
+        store.accounts[index].notes = [.init(id: "note-1", title: "Panel", text: "Lobby", date: "Today")]
+        store.accounts[index].documents = [.init(id: "doc-1", title: "Report", subtitle: "Annual", kind: "PDF", date: "Today")]
+        store.accounts[index].equipment = [.init(id: "equipment-1", title: "FACP", subtitle: "Lobby", status: "Normal")]
+        store.accounts[index].locations = [.init(id: "location-1", label: "Panel", subtitle: "Lobby", type: "Equipment", plusCode: "", latitude: 43.615, longitude: -116.202)]
+        store.accounts[index].recent = [.init(id: "recent-1", title: "Created", subtitle: "Test", kind: "account", date: "Today")]
+
+        XCTAssertTrue(
+            store.updateAccount(
+                id: account.id,
+                name: "  Acme Fire Protection  ",
+                address: "  100 Main Street  ",
+                category: "  Commercial  ",
+                accountId: "  ACME-100  ",
+                phone: "  307-555-0100  "
+            )
+        )
+
+        let updated = try XCTUnwrap(store.selectedAccount)
+        XCTAssertEqual(updated.name, "Acme Fire Protection")
+        XCTAssertEqual(updated.address, "100 Main Street")
+        XCTAssertEqual(updated.category, "Commercial")
+        XCTAssertEqual(updated.accountId, "ACME-100")
+        XCTAssertEqual(updated.phone, "307-555-0100")
+        XCTAssertTrue(updated.favorite)
+        XCTAssertEqual(updated.latitude, 43.615)
+        XCTAssertEqual(updated.longitude, -116.202)
+        XCTAssertEqual(updated.tags, ["Priority"])
+        XCTAssertEqual(updated.notes.map(\.id), ["note-1"])
+        XCTAssertEqual(updated.documents.map(\.id), ["doc-1"])
+        XCTAssertEqual(updated.equipment.map(\.id), ["equipment-1"])
+        XCTAssertEqual(updated.locations.map(\.id), ["location-1"])
+        XCTAssertEqual(updated.recent.map(\.id), ["recent-1"])
+
+        let reloadedStore = FireVaultStore(defaults: defaults)
+        let persisted = try XCTUnwrap(reloadedStore.accounts.first(where: { $0.id == account.id }))
+        XCTAssertEqual(persisted, updated)
     }
 
     func testTripLogOccupiesCenterNavigationPosition() {
