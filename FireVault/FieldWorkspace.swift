@@ -626,6 +626,7 @@ struct FireVaultEditAccountSheet: View {
     @State private var category: String
     @State private var accountId: String
     @State private var phone: String
+    @FocusState private var isTextInputFocused: Bool
 
     init(
         account: FireVaultWorkspaceAccount,
@@ -650,14 +651,19 @@ struct FireVaultEditAccountSheet: View {
                 Section("Account") {
                     TextField("Account name", text: $name)
                         .textContentType(.organizationName)
+                        .focused($isTextInputFocused)
                     TextField("Address", text: $address, axis: .vertical)
                         .textContentType(.fullStreetAddress)
                         .lineLimit(2...4)
+                        .focused($isTextInputFocused)
                     TextField("Category", text: $category)
+                        .focused($isTextInputFocused)
                     TextField("Account ID", text: $accountId)
+                        .focused($isTextInputFocused)
                     TextField("Phone number", text: $phone)
                         .textContentType(.telephoneNumber)
                         .keyboardType(.phonePad)
+                        .focused($isTextInputFocused)
                 }
 
                 Section {
@@ -668,6 +674,7 @@ struct FireVaultEditAccountSheet: View {
             }
             .navigationTitle("Edit Account")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -685,6 +692,10 @@ struct FireVaultEditAccountSheet: View {
                     }
                     .fontWeight(.semibold)
                     .disabled(normalizedName.isEmpty)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { isTextInputFocused = false }
                 }
             }
         }
@@ -1349,6 +1360,7 @@ struct FireVaultNoteEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var title: String
     @State private var text: String
+    @FocusState private var isTextInputFocused: Bool
 
     init(
         accountName: String,
@@ -1375,12 +1387,15 @@ struct FireVaultNoteEditorSheet: View {
                 }
                 Section("Note") {
                     TextField("Title (optional)", text: $title)
+                        .focused($isTextInputFocused)
                     TextField("Field note", text: $text, axis: .vertical)
                         .lineLimit(6...14)
+                        .focused($isTextInputFocused)
                 }
             }
             .navigationTitle(note == nil ? "New Note" : "Edit Note")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -1392,6 +1407,10 @@ struct FireVaultNoteEditorSheet: View {
                         }
                     }
                     .disabled(!canSave)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { isTextInputFocused = false }
                 }
             }
         }
