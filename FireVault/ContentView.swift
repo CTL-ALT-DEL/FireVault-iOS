@@ -133,6 +133,7 @@ struct ContentView: View {
                     FireVaultAdaptiveAccountDetailsView(
                         account: account,
                         store: store,
+                        locationService: locationService,
                         returnTab: store.selectedTab,
                         returnTitle: store.selectedTab == .nearby ? "Nearby" : "Account List"
                     )
@@ -147,7 +148,12 @@ struct ContentView: View {
                     )
                     .transition(.opacity)
                 } else if let account = store.selectedAccount {
-                    FieldWorkspaceView(account: account, store: store, settings: settings)
+                    FieldWorkspaceView(
+                        account: account,
+                        store: store,
+                        settings: settings,
+                        locationService: locationService
+                    )
                         .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 } else if usesPortraitIPadNearby {
                     FireVaultIPadPortraitNearbyViewV2(

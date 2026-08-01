@@ -54,6 +54,7 @@ private enum FireVaultAccountMapLayer: String, CaseIterable, Identifiable {
 struct FireVaultAdaptiveAccountDetailsView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
+    @ObservedObject var locationService: FireVaultLocationService
     @Environment(\.colorScheme) private var colorScheme
     let returnTab: FireVaultShellTab
     let returnTitle: String
@@ -69,6 +70,8 @@ struct FireVaultAdaptiveAccountDetailsView: View {
     @State private var isShowingNoteEditor = false
     @State private var editingEquipment: FireVaultWorkspaceEquipment?
     @State private var isShowingEquipmentEditor = false
+    @State private var editingLocation: FireVaultWorkspaceLocation?
+    @State private var isShowingLocationEditor = false
     @State private var isLoadingAccountBrief = false
     @State private var accountBrief: String?
     @State private var accountBriefError: String?
@@ -214,6 +217,36 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     title: draft.title,
                     subtitle: draft.subtitle,
                     status: draft.status
+                ) != nil
+            }
+        }
+        .sheet(isPresented: $isShowingLocationEditor) {
+            FireVaultLocationEditorSheet(
+                accountName: account.name,
+                accountCoordinate: account.coordinate,
+                location: editingLocation,
+                locationService: locationService
+            ) { draft in
+                if let editingLocation {
+                    return store.updateLocation(
+                        accountID: account.id,
+                        locationID: editingLocation.id,
+                        label: draft.label,
+                        subtitle: draft.subtitle,
+                        type: draft.type,
+                        plusCode: draft.plusCode,
+                        latitude: draft.latitude,
+                        longitude: draft.longitude
+                    )
+                }
+                return store.addLocation(
+                    to: account.id,
+                    label: draft.label,
+                    subtitle: draft.subtitle,
+                    type: draft.type,
+                    plusCode: draft.plusCode,
+                    latitude: draft.latitude,
+                    longitude: draft.longitude
                 ) != nil
             }
         }
@@ -541,6 +574,12 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                         isShowingEquipmentEditor = true
                     }
                     .buttonStyle(.glass)
+                } else if selectedSection == .locations {
+                    Button("Add Location", systemImage: "plus") {
+                        editingLocation = nil
+                        isShowingLocationEditor = true
+                    }
+                    .buttonStyle(.glass)
                 }
                 Text("\(count(for: selectedSection)) total")
                     .font(.subheadline.monospacedDigit())
@@ -599,12 +638,23 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     emptyRow("No locations saved", symbol: "mappin.slash")
                 } else {
                     ForEach(account.locations) { location in
-                        dataRow(
-                            title: location.label,
-                            subtitle: [location.subtitle, location.plusCode].filter { !$0.isEmpty }.joined(separator: " • "),
-                            trailing: location.type,
-                            symbol: "mappin.circle.fill"
-                        )
+                        Button {
+                            editingLocation = location
+                            isShowingLocationEditor = true
+                        } label: {
+                            dataRow(
+                                title: location.label,
+                                subtitle: [location.subtitle, location.plusCode].filter { !$0.isEmpty }.joined(separator: " • "),
+                                trailing: location.type,
+                                symbol: "mappin.circle.fill"
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Delete Location", systemImage: "trash", role: .destructive) {
+                                store.deleteLocation(accountID: account.id, locationID: location.id)
+                            }
+                        }
                     }
                 }
             }

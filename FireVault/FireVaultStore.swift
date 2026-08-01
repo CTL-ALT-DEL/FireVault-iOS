@@ -673,21 +673,78 @@ final class FireVaultStore: ObservableObject {
         }
     }
 
-    func addLocation(to accountID: String) {
-        guard let index = accounts.firstIndex(where: { $0.id == accountID }) else { return }
-        let account = accounts[index]
-        accounts[index].locations.append(
-            .init(
-                id: UUID().uuidString,
-                label: "New location",
-                subtitle: account.address,
-                type: "Other",
-                plusCode: "",
-                latitude: account.latitude,
-                longitude: account.longitude
-            )
+    @discardableResult
+    func addLocation(
+        to accountID: String,
+        label: String = "New location",
+        subtitle: String = "",
+        type: String = "Other",
+        plusCode: String = "",
+        latitude: Double? = nil,
+        longitude: Double? = nil
+    ) -> FireVaultWorkspaceLocation? {
+        guard let index = accounts.firstIndex(where: { $0.id == accountID }),
+              Self.isValidCoordinatePair(latitude: latitude, longitude: longitude) else { return nil }
+        let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedLabel.isEmpty else { return nil }
+        let location = FireVaultWorkspaceLocation(
+            id: UUID().uuidString,
+            label: trimmedLabel,
+            subtitle: subtitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            type: type.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Other"
+                : type.trimmingCharacters(in: .whitespacesAndNewlines),
+            plusCode: plusCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+            latitude: latitude,
+            longitude: longitude
         )
+        accounts[index].locations.append(location)
         persist()
+        return location
+    }
+
+    @discardableResult
+    func updateLocation(
+        accountID: String,
+        locationID: String,
+        label: String,
+        subtitle: String,
+        type: String,
+        plusCode: String,
+        latitude: Double?,
+        longitude: Double?
+    ) -> Bool {
+        guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
+              let locationIndex = accounts[accountIndex].locations.firstIndex(where: { $0.id == locationID }),
+              Self.isValidCoordinatePair(latitude: latitude, longitude: longitude) else { return false }
+        let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedLabel.isEmpty else { return false }
+        accounts[accountIndex].locations[locationIndex].label = trimmedLabel
+        accounts[accountIndex].locations[locationIndex].subtitle = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedType = type.trimmingCharacters(in: .whitespacesAndNewlines)
+        accounts[accountIndex].locations[locationIndex].type = trimmedType.isEmpty ? "Other" : trimmedType
+        accounts[accountIndex].locations[locationIndex].plusCode = plusCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        accounts[accountIndex].locations[locationIndex].latitude = latitude
+        accounts[accountIndex].locations[locationIndex].longitude = longitude
+        persist()
+        return true
+    }
+
+    @discardableResult
+    func deleteLocation(accountID: String, locationID: String) -> Bool {
+        guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
+              let locationIndex = accounts[accountIndex].locations.firstIndex(where: { $0.id == locationID }) else {
+            return false
+        }
+        accounts[accountIndex].locations.remove(at: locationIndex)
+        persist()
+        return true
+    }
+
+    private static func isValidCoordinatePair(latitude: Double?, longitude: Double?) -> Bool {
+        if latitude == nil && longitude == nil { return true }
+        guard let latitude, let longitude else { return false }
+        return CLLocationCoordinate2DIsValid(.init(latitude: latitude, longitude: longitude))
     }
 
     func openRoute(for account: FireVaultWorkspaceAccount) {

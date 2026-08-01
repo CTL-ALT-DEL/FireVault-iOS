@@ -84,6 +84,7 @@ struct FieldWorkspaceView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var locationService: FireVaultLocationService
 
     @State private var isShowingAccountBrief = false
     @State private var isShowingAccountEditor = false
@@ -314,7 +315,7 @@ struct FieldWorkspaceView: View {
 
     private var mapPreview: some View {
         NavigationLink {
-            MapArrivalView(account: account, store: store)
+            MapArrivalView(account: account, store: store, locationService: locationService)
         } label: {
             WorkspaceCard {
                 ZStack(alignment: .bottomLeading) {
@@ -412,7 +413,7 @@ struct FieldWorkspaceView: View {
 
                 if settings.isFeatureVisible("account.locations") {
                     NavigationLink {
-                        MapArrivalView(account: account, store: store)
+                        MapArrivalView(account: account, store: store, locationService: locationService)
                     } label: {
                         WorkspaceDestinationTile(
                             title: "Locations", count: account.locations.count,
@@ -597,6 +598,9 @@ struct FireVaultEditAccountSheet: View {
 private struct MapArrivalView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
+    @ObservedObject var locationService: FireVaultLocationService
+    @State private var editingLocation: FireVaultWorkspaceLocation?
+    @State private var isShowingEditor = false
 
     var body: some View {
         List {
@@ -618,14 +622,8 @@ private struct MapArrivalView: View {
                 } else {
                     ForEach(account.locations) { location in
                         Button {
-                            if let coordinate = location.coordinate {
-                                let item = MKMapItem(
-                                    location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude),
-                                    address: nil
-                                )
-                                item.name = location.label
-                                item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
-                            }
+                            editingLocation = location
+                            isShowingEditor = true
                         } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: locationSymbol(location.type))
@@ -649,6 +647,19 @@ private struct MapArrivalView: View {
                             .padding(.vertical, 4)
                         }
                         .buttonStyle(.plain)
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            if let coordinate = location.coordinate {
+                                Button("Route", systemImage: "arrow.triangle.turn.up.right.diamond") {
+                                    openRoute(to: coordinate, named: location.label)
+                                }
+                                .tint(FieldWorkspacePalette.blue)
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button("Delete", systemImage: "trash", role: .destructive) {
+                                store.deleteLocation(accountID: account.id, locationID: location.id)
+                            }
+                        }
                     }
                 }
             }
@@ -659,7 +670,10 @@ private struct MapArrivalView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 10) {
-                Button("Add Location", systemImage: "plus") { store.addLocation(to: account.id) }
+                Button("Add Location", systemImage: "plus") {
+                    editingLocation = nil
+                    isShowingEditor = true
+                }
                     .buttonStyle(.glass)
                 Button("Route", systemImage: "arrow.triangle.turn.up.right.diamond.fill") { store.openRoute(for: account) }
                     .buttonStyle(.glassProminent)
@@ -667,6 +681,42 @@ private struct MapArrivalView: View {
             .padding(12)
             .glassEffect()
         }
+        .sheet(isPresented: $isShowingEditor) {
+            FireVaultLocationEditorSheet(
+                accountName: account.name,
+                accountCoordinate: account.coordinate,
+                location: editingLocation,
+                locationService: locationService
+            ) { draft in
+                if let editingLocation {
+                    return store.updateLocation(
+                        accountID: account.id,
+                        locationID: editingLocation.id,
+                        label: draft.label,
+                        subtitle: draft.subtitle,
+                        type: draft.type,
+                        plusCode: draft.plusCode,
+                        latitude: draft.latitude,
+                        longitude: draft.longitude
+                    )
+                }
+                return store.addLocation(
+                    to: account.id,
+                    label: draft.label,
+                    subtitle: draft.subtitle,
+                    type: draft.type,
+                    plusCode: draft.plusCode,
+                    latitude: draft.latitude,
+                    longitude: draft.longitude
+                ) != nil
+            }
+        }
+    }
+
+    private func openRoute(to coordinate: CLLocationCoordinate2D, named name: String) {
+        let item = MKMapItem(location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude), address: nil)
+        item.name = name
+        item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
     }
 
     private func locationSymbol(_ type: String) -> String {
@@ -676,6 +726,157 @@ private struct MapArrivalView: View {
         if value.contains("panel") { return "rectangle.3.group.bubble.left" }
         if value.contains("riser") || value.contains("pump") { return "drop.fill" }
         return "mappin"
+    }
+}
+
+struct FireVaultLocationDraft: Equatable {
+    var label: String
+    var subtitle: String
+    var type: String
+    var plusCode: String
+    var latitude: Double?
+    var longitude: Double?
+}
+
+struct FireVaultLocationEditorSheet: View {
+    let accountName: String
+    let accountCoordinate: CLLocationCoordinate2D?
+    let location: FireVaultWorkspaceLocation?
+    @ObservedObject var locationService: FireVaultLocationService
+    let save: (FireVaultLocationDraft) -> Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var label: String
+    @State private var subtitle: String
+    @State private var type: String
+    @State private var plusCode: String
+    @State private var latitudeText: String
+    @State private var longitudeText: String
+
+    init(
+        accountName: String,
+        accountCoordinate: CLLocationCoordinate2D?,
+        location: FireVaultWorkspaceLocation?,
+        locationService: FireVaultLocationService,
+        save: @escaping (FireVaultLocationDraft) -> Bool
+    ) {
+        self.accountName = accountName
+        self.accountCoordinate = accountCoordinate
+        self.location = location
+        self.locationService = locationService
+        self.save = save
+        _label = State(initialValue: location?.label ?? "")
+        _subtitle = State(initialValue: location?.subtitle ?? "")
+        _type = State(initialValue: location?.type ?? "Other")
+        _plusCode = State(initialValue: location?.plusCode ?? "")
+        _latitudeText = State(initialValue: location?.latitude.map { String($0) } ?? "")
+        _longitudeText = State(initialValue: location?.longitude.map { String($0) } ?? "")
+    }
+
+    private var parsedCoordinates: (Double?, Double?)? {
+        let latitudeValue = latitudeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let longitudeValue = longitudeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if latitudeValue.isEmpty && longitudeValue.isEmpty { return (nil, nil) }
+        guard let latitude = Double(latitudeValue), let longitude = Double(longitudeValue),
+              CLLocationCoordinate2DIsValid(.init(latitude: latitude, longitude: longitude)) else { return nil }
+        return (latitude, longitude)
+    }
+
+    private var canSave: Bool {
+        !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && parsedCoordinates != nil
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Account") {
+                    Text(accountName).foregroundStyle(.secondary)
+                }
+                Section("Location") {
+                    TextField("Location name", text: $label)
+                    TextField("Details", text: $subtitle, axis: .vertical).lineLimit(2...4)
+                    TextField("Type (Entrance, Panel, Riser…)", text: $type)
+                    TextField("Plus Code", text: $plusCode)
+                        .textInputAutocapitalization(.characters)
+                }
+                Section("Exact Coordinates") {
+                    TextField("Latitude", text: $latitudeText)
+                        .keyboardType(.numbersAndPunctuation)
+                    TextField("Longitude", text: $longitudeText)
+                        .keyboardType(.numbersAndPunctuation)
+                    if parsedCoordinates == nil {
+                        Text("Enter both valid coordinates, or leave both blank.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+                Section("Coordinate Shortcuts") {
+                    Button("Use Current Location", systemImage: "location.fill") {
+                        if let coordinate = locationService.coordinate {
+                            apply(coordinate)
+                        }
+                        locationService.requestCurrentLocation(highAccuracy: true)
+                    }
+                    if locationService.isLocating {
+                        HStack {
+                            ProgressView()
+                            Text(locationService.statusText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if locationService.authorizationStatus == .denied {
+                        Button("Open Location Settings", systemImage: "gear") {
+                            locationService.openAppSettings()
+                        }
+                    }
+
+                    Button("Use Account Location", systemImage: "building.2.fill") {
+                        if let accountCoordinate {
+                            apply(accountCoordinate)
+                        }
+                    }
+                    .disabled(accountCoordinate == nil)
+
+                    if accountCoordinate == nil {
+                        Text("This account does not have saved coordinates yet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle(location == nil ? "New Location" : "Edit Location")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        guard let coordinates = parsedCoordinates else { return }
+                        if save(.init(
+                            label: label,
+                            subtitle: subtitle,
+                            type: type,
+                            plusCode: plusCode,
+                            latitude: coordinates.0,
+                            longitude: coordinates.1
+                        )) {
+                            dismiss()
+                        }
+                    }
+                    .disabled(!canSave)
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .onReceive(locationService.$coordinate.compactMap { $0 }) { coordinate in
+            apply(coordinate)
+        }
+    }
+
+    private func apply(_ coordinate: CLLocationCoordinate2D) {
+        latitudeText = String(format: "%.6f", coordinate.latitude)
+        longitudeText = String(format: "%.6f", coordinate.longitude)
     }
 }
 
@@ -1270,7 +1471,8 @@ private struct FieldWorkspaceView_Previews: PreviewProvider {
                 recent: [.init(id: "r1", title: "Fire alarm riser diagram", subtitle: "3-page scan added", kind: "document", date: "Today")]
             ),
             store: FireVaultStore(),
-            settings: FireVaultNativeSettingsStore()
+            settings: FireVaultNativeSettingsStore(),
+            locationService: FireVaultLocationService()
         )
     }
 }

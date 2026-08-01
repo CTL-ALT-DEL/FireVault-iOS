@@ -257,6 +257,76 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(reloadedStore.accounts.first(where: { $0.id == account.id })?.equipment.contains(where: { $0.id == equipment.id }) ?? true)
     }
 
+    func testAccountLocationLifecycleValidatesCoordinatesAndPreservesOtherData() throws {
+        let suite = "FireVaultTests.LocationLifecycle.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let account = store.addAccount()
+        let accountIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        store.accounts[accountIndex].favorite = true
+        store.accounts[accountIndex].equipment = [
+            .init(id: "equipment-1", title: "FACP", subtitle: "Lobby", status: "Active")
+        ]
+
+        XCTAssertNil(
+            store.addLocation(
+                to: account.id,
+                label: "Invalid pin",
+                latitude: 43.615,
+                longitude: nil
+            )
+        )
+
+        let location = try XCTUnwrap(
+            store.addLocation(
+                to: account.id,
+                label: "  Main Entrance  ",
+                subtitle: "  South doors  ",
+                type: "  Entrance  ",
+                plusCode: "  85m5jr93+4c  ",
+                latitude: 43.6177,
+                longitude: -116.1968
+            )
+        )
+        XCTAssertEqual(location.label, "Main Entrance")
+        XCTAssertEqual(location.plusCode, "85M5JR93+4C")
+
+        XCTAssertTrue(
+            store.updateLocation(
+                accountID: account.id,
+                locationID: location.id,
+                label: "  Fire Panel  ",
+                subtitle: "  Electrical room  ",
+                type: "  Panel  ",
+                plusCode: "  85m5jr94+5d  ",
+                latitude: 43.618,
+                longitude: -116.197
+            )
+        )
+
+        let updatedAccount = try XCTUnwrap(store.accounts.first(where: { $0.id == account.id }))
+        let updatedLocation = try XCTUnwrap(updatedAccount.locations.first(where: { $0.id == location.id }))
+        XCTAssertEqual(updatedLocation.label, "Fire Panel")
+        XCTAssertEqual(updatedLocation.subtitle, "Electrical room")
+        XCTAssertEqual(updatedLocation.type, "Panel")
+        XCTAssertEqual(updatedLocation.plusCode, "85M5JR94+5D")
+        XCTAssertEqual(updatedLocation.latitude, 43.618)
+        XCTAssertEqual(updatedLocation.longitude, -116.197)
+        XCTAssertTrue(updatedAccount.favorite)
+        XCTAssertEqual(updatedAccount.equipment.map(\.id), ["equipment-1"])
+
+        let reloadedStore = FireVaultStore(defaults: defaults)
+        let persisted = try XCTUnwrap(reloadedStore.accounts.first(where: { $0.id == account.id }))
+        XCTAssertEqual(persisted.locations.first(where: { $0.id == location.id }), updatedLocation)
+        XCTAssertTrue(persisted.favorite)
+        XCTAssertEqual(persisted.equipment.map(\.id), ["equipment-1"])
+
+        XCTAssertTrue(reloadedStore.deleteLocation(accountID: account.id, locationID: location.id))
+        XCTAssertFalse(reloadedStore.accounts.first(where: { $0.id == account.id })?.locations.contains(where: { $0.id == location.id }) ?? true)
+    }
+
     func testTripLogOccupiesCenterNavigationPosition() {
         XCTAssertEqual(FireVaultShellTab.allCases.count, 5)
         XCTAssertEqual(FireVaultShellTab.allCases[2], .trip)
