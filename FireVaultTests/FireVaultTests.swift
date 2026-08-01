@@ -355,6 +355,31 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(reloadedStore.accounts.first(where: { $0.id == account.id })?.locations.contains(where: { $0.id == location.id }) ?? true)
     }
 
+    func testLocationCSVImportMapsFieldLocationColumns() throws {
+        let csv = """
+        NAME,TYPE,DETAILS,PLUSCODE,LATITUDE,LONGITUDE,COLOR
+        Main Entrance,Entrance,South doors,85M5JR93+4C,43.617700,-116.196800,Blue
+        Riser Room,Riser,Mechanical room,,43.618000,-116.197000,Red
+        Bad Coordinates,Panel,Missing longitude,,43.619000,,Green
+        """
+
+        let result = try FireVaultLocationCSVImporter.records(
+            from: try XCTUnwrap(csv.data(using: .utf8))
+        )
+
+        XCTAssertEqual(result.records.count, 2)
+        XCTAssertEqual(result.skipped, 1)
+        XCTAssertEqual(result.records[0].name, "Main Entrance")
+        XCTAssertEqual(result.records[0].type, "Entrance")
+        XCTAssertEqual(result.records[0].details, "South doors")
+        XCTAssertEqual(result.records[0].plusCode, "85M5JR93+4C")
+        XCTAssertEqual(result.records[0].latitude, 43.617700)
+        XCTAssertEqual(result.records[0].longitude, -116.196800)
+        XCTAssertEqual(result.records[0].color, "Blue")
+        XCTAssertEqual(result.records[1].name, "Riser Room")
+        XCTAssertEqual(result.records[1].color, "Red")
+    }
+
     func testTripLogOccupiesCenterNavigationPosition() {
         XCTAssertEqual(FireVaultShellTab.allCases.count, 5)
         XCTAssertEqual(FireVaultShellTab.allCases[2], .trip)

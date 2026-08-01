@@ -699,6 +699,8 @@ private struct MapArrivalView: View {
     @ObservedObject var locationService: FireVaultLocationService
     @State private var editingLocation: FireVaultWorkspaceLocation?
     @State private var isShowingEditor = false
+    @State private var isImportingCSV = false
+    @State private var importNotice: FireVaultLocationImportNotice?
 
     var body: some View {
         List {
@@ -768,6 +770,10 @@ private struct MapArrivalView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 10) {
+                Button("Import CSV", systemImage: "square.and.arrow.down") {
+                    isImportingCSV = true
+                }
+                    .buttonStyle(.glass)
                 Button("Add Location", systemImage: "plus") {
                     editingLocation = nil
                     isShowingEditor = true
@@ -811,12 +817,55 @@ private struct MapArrivalView: View {
                 ) != nil
             }
         }
+        .fileImporter(
+            isPresented: $isImportingCSV,
+            allowedContentTypes: [.commaSeparatedText, .plainText, .data],
+            allowsMultipleSelection: false
+        ) { selection in
+            importLocations(from: selection)
+        }
+        .alert(item: $importNotice) { notice in
+            Alert(
+                title: Text("Locations CSV Import"),
+                message: Text(notice.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
     }
 
     private func openRoute(to coordinate: CLLocationCoordinate2D, named name: String) {
         let item = MKMapItem(location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude), address: nil)
         item.name = name
         item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
+    }
+
+    private func importLocations(from selection: Result<[URL], Error>) {
+        do {
+            guard let url = try selection.get().first else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            let result = try FireVaultLocationCSVImporter.records(from: data)
+            var imported = 0
+            for record in result.records {
+                if store.addLocation(
+                    to: account.id,
+                    label: record.name,
+                    subtitle: record.details,
+                    type: record.type,
+                    plusCode: record.plusCode,
+                    latitude: record.latitude,
+                    longitude: record.longitude,
+                    pinColor: record.color
+                ) != nil {
+                    imported += 1
+                }
+            }
+            let skippedText = result.skipped == 0 ? "" : " \(result.skipped) row(s) were skipped because NAME was blank or coordinates were incomplete."
+            importNotice = .init(message: "Imported \(imported) location record(s).\(skippedText)")
+        } catch {
+            importNotice = .init(message: error.localizedDescription)
+        }
     }
 
     private func locationSymbol(_ type: String) -> String {
@@ -827,6 +876,99 @@ private struct MapArrivalView: View {
         if value.contains("riser") || value.contains("pump") { return "drop.fill" }
         return "mappin"
     }
+}
+
+struct FireVaultLocationCSVRecord {
+    let name: String
+    let details: String
+    let type: String
+    let plusCode: String
+    let latitude: Double?
+    let longitude: Double?
+    let color: String
+}
+
+enum FireVaultLocationCSVError: LocalizedError {
+    case unreadable
+    case empty
+    case missingNameColumn
+    case noValidRows
+
+    var errorDescription: String? {
+        switch self {
+        case .unreadable: "The selected CSV file could not be read."
+        case .empty: "The selected CSV file is empty."
+        case .missingNameColumn: "The CSV needs a NAME or LOCATION column."
+        case .noValidRows: "No location rows with a name were found."
+        }
+    }
+}
+
+struct FireVaultLocationCSVImporter {
+    static func records(from data: Data) throws -> (records: [FireVaultLocationCSVRecord], skipped: Int) {
+        guard let source = String(data: data, encoding: .utf8)
+            ?? String(data: data, encoding: .utf16) else { throw FireVaultLocationCSVError.unreadable }
+        let table = FireVaultStore.parseCSV(source)
+        guard let headers = table.first, !headers.isEmpty else { throw FireVaultLocationCSVError.empty }
+        let normalized = headers.map(normalize)
+
+        guard let nameIndex = column(in: normalized, aliases: ["name", "location", "label", "locationname"]) else {
+            throw FireVaultLocationCSVError.missingNameColumn
+        }
+        let detailsIndex = column(in: normalized, aliases: ["details", "detail", "description", "notes", "subtitle"])
+        let typeIndex = column(in: normalized, aliases: ["type", "locationtype", "category"])
+        let plusCodeIndex = column(in: normalized, aliases: ["pluscode", "googlepluscode"])
+        let latitudeIndex = column(in: normalized, aliases: ["latitude", "lat"])
+        let longitudeIndex = column(in: normalized, aliases: ["longitude", "long", "lng", "lon"])
+        let colorIndex = column(in: normalized, aliases: ["color", "pincolor", "pin"])
+
+        var records: [FireVaultLocationCSVRecord] = []
+        var skipped = 0
+        for row in table.dropFirst() where row.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            let name = value(at: nameIndex, in: row)
+            guard !name.isEmpty else {
+                skipped += 1
+                continue
+            }
+
+            let latitude = latitudeIndex.flatMap { Double(value(at: $0, in: row)) }
+            let longitude = longitudeIndex.flatMap { Double(value(at: $0, in: row)) }
+            guard (latitude == nil && longitude == nil) || (latitude != nil && longitude != nil) else {
+                skipped += 1
+                continue
+            }
+
+            records.append(.init(
+                name: name,
+                details: detailsIndex.map { value(at: $0, in: row) } ?? "",
+                type: typeIndex.map { value(at: $0, in: row) } ?? "Other",
+                plusCode: plusCodeIndex.map { value(at: $0, in: row) } ?? "",
+                latitude: latitude,
+                longitude: longitude,
+                color: colorIndex.map { value(at: $0, in: row) } ?? FireVaultMapPinColor.purple.rawValue
+            ))
+        }
+        guard !records.isEmpty else { throw FireVaultLocationCSVError.noValidRows }
+        return (records, skipped)
+    }
+
+    private static func column(in headers: [String], aliases: Set<String>) -> Int? {
+        headers.firstIndex(where: aliases.contains)
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value.lowercased().filter(\.isLetter)
+    }
+
+    private static func value(at index: Int, in row: [String]) -> String {
+        guard row.indices.contains(index) else { return "" }
+        return row[index].trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private struct FireVaultLocationImportNotice: Identifiable {
+    let id = UUID()
+    let message: String
 }
 
 struct FireVaultLocationDraft: Equatable {
