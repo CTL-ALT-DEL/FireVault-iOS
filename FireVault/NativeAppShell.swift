@@ -2086,7 +2086,7 @@ private struct NativeSettingsView: View {
     private var aboutFooter: some View {
         Section {
             HStack {
-                Text("FireVault")
+                Text("FireVault Pro")
                 Spacer()
                 Text(versionInfo.displayText)
                     .foregroundStyle(.secondary)
@@ -2362,15 +2362,9 @@ private struct NativeAboutFireVaultView: View {
         List {
             Section {
                 VStack(spacing: 14) {
-                    Image("FireVaultLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 82, height: 82)
-                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                        .shadow(color: .black.opacity(0.24), radius: 10, y: 5)
-                        .accessibilityHidden(true)
-                    Text("FireVault")
-                        .font(.largeTitle.bold())
+                    FireVaultBrandMark()
+                        .scaleEffect(1.45)
+                        .padding(.vertical, 10)
                     Text("Built for the field")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(NativeShellPalette.red)
@@ -2382,7 +2376,7 @@ private struct NativeAboutFireVaultView: View {
 
             Section("Built for Fire Alarm Technicians") {
                 FireVaultJustifiedText(
-                    "FireVault is a field-first workspace for fire alarm technicians. It brings nearby accounts, site history, service notes, photographs, document scans, equipment, locations, and Trip Log reporting into one focused application so the important details are ready when you need them."
+                    "FireVault Pro is a field-first workspace for fire alarm technicians. It brings nearby accounts, site history, service notes, photographs, document scans, equipment, locations, and Trip Log reporting into one focused application so the important details are ready when you need them."
                 )
 
                 FireVaultJustifiedText(
@@ -2410,7 +2404,7 @@ private struct NativeAboutFireVaultView: View {
             }
         }
         .contentMargins(.bottom, 96, for: .scrollContent)
-        .navigationTitle("About FireVault")
+        .navigationTitle("About FireVault Pro")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $showsDeveloperCenter) {
             FireVaultDeveloperCenterView(

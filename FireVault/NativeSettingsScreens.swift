@@ -35,7 +35,7 @@ enum NativeSettingsCatalog {
         group("help", "Help & About", "Documentation and application information", "questionmark.circle", "red", [
             item("manual", "Help & User Manual", "Quick-start instructions", "book.closed"),
             item("demo", "Demo Mode", "Enter, exit, or reset the fictional vault", "theatermasks"),
-            item("about", "About FireVault", "Version and application information", "info.circle")
+            item("about", "About FireVault Pro", "Version and application information", "info.circle")
         ])
     ]
 

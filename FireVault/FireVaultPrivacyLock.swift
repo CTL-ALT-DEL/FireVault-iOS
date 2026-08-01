@@ -110,20 +110,13 @@ struct FireVaultPrivacyLockView: View {
                             .offset(x: 8, y: 8)
                     }
 
-                    HStack(spacing: 0) {
-                        Text("FIRE")
-                            .foregroundStyle(NativeShellPalette.red)
-                        Text("VAULT")
-                            .foregroundStyle(.white)
-                    }
-                    .font(.system(size: 27, weight: .bold, design: .rounded))
-                    .tracking(1.15)
+                    FireVaultProWordmark(fontSize: 27, proFontSize: 9, tracking: 1.15)
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("FireVault, Face ID protected")
+                .accessibilityLabel("FireVault Pro, Face ID protected")
 
                 VStack(spacing: 7) {
-                    Text("FireVault Locked")
+                    Text("FireVault Pro Locked")
                         .font(.title2.bold())
                     Text("Use Face ID or your device passcode to open the signed-in workspace.")
                         .font(.subheadline)

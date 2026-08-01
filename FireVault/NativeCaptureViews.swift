@@ -269,6 +269,45 @@ enum FireVaultOverlayTemplateFormatter {
     }
 }
 
+struct FireVaultProWordmark: View {
+    var fireColor: Color = NativeShellPalette.red
+    var vaultColor: Color = .white
+    var proColor: Color = .white
+    var proBackground: Color = NativeShellPalette.red
+    var fontSize: CGFloat = 15
+    var proFontSize: CGFloat = 7
+    var tracking: CGFloat = 0.9
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: max(6, fontSize * 0.22)) {
+            HStack(spacing: 0) {
+                Text("FIRE").foregroundStyle(fireColor)
+                Text("VAULT").foregroundStyle(vaultColor)
+            }
+            .font(.system(size: fontSize, weight: .bold, design: .rounded))
+            .tracking(tracking)
+
+            Text("PRO")
+                .font(.system(size: proFontSize, weight: .black, design: .rounded))
+                .tracking(0.6)
+                .foregroundStyle(proColor)
+                .padding(.horizontal, max(3, proFontSize * 0.45))
+                .padding(.vertical, max(1.5, proFontSize * 0.22))
+                .background(proBackground, in: RoundedRectangle(cornerRadius: max(2, proFontSize * 0.32), style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: max(2, proFontSize * 0.32), style: .continuous)
+                        .stroke(.white.opacity(0.45), lineWidth: 0.7)
+                }
+                .rotationEffect(.degrees(-7))
+                .offset(y: -max(1.5, fontSize * 0.12))
+                .shadow(color: proBackground.opacity(0.34), radius: 3, y: 1)
+        }
+        .padding(.top, max(2, fontSize * 0.08))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("FireVault Pro")
+    }
+}
+
 struct FireVaultBrandMark: View {
     var body: some View {
         HStack(spacing: 6) {
@@ -278,12 +317,7 @@ struct FireVaultBrandMark: View {
                 .frame(width: 30, height: 30)
                 .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
 
-            HStack(spacing: 0) {
-                Text("FIRE").foregroundStyle(NativeShellPalette.red)
-                Text("VAULT").foregroundStyle(.white)
-            }
-            .font(.system(size: 15, weight: .bold, design: .rounded))
-            .tracking(0.9)
+            FireVaultProWordmark()
         }
         .padding(.horizontal, 3)
         .padding(.vertical, 3)

@@ -223,7 +223,7 @@ private struct FireVaultPrivacyShieldView: View {
                 Image(systemName: "lock.shield.fill")
                     .font(.system(size: 46))
                     .foregroundStyle(NativeShellPalette.blue)
-                Text("FireVault")
+                Text("FireVault Pro")
                     .font(.title2.bold())
                 Text("Workspace hidden")
                     .font(.subheadline)
@@ -255,19 +255,9 @@ private struct FireVaultBrandHeader: View {
                 .padding(.top, 1)
                 .accessibilityHidden(true)
 
-            HStack(spacing: 0) {
-                Text("FIRE")
-                    .foregroundColor(NativeShellPalette.red)
-                    .tracking(1.35)
-                Text("VAULT")
-                    .foregroundColor(.white)
-                    .tracking(1.35)
-            }
-            .font(.system(size: 15, weight: .bold, design: .rounded))
+            FireVaultProWordmark(fontSize: 15, proFontSize: 6.8, tracking: 1.35)
             .shadow(color: .black.opacity(0.78), radius: 2, x: 0, y: 1)
             .padding(.top, 2)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("FireVault")
 
             Spacer()
 
@@ -364,18 +354,8 @@ private struct FireVaultSplashView: View {
                 .opacity(logoIsVisible ? 1 : 0)
 
                 VStack(spacing: 8) {
-                    HStack(spacing: 0) {
-                        Text("FIRE")
-                            .foregroundColor(NativeShellPalette.red)
-                            .tracking(0.4)
-                        Text("VAULT")
-                            .foregroundColor(.white)
-                            .tracking(0.4)
-                    }
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    FireVaultProWordmark(fontSize: 40, proFontSize: 13, tracking: 0.4)
                     .shadow(color: .black.opacity(0.42), radius: 8, y: 4)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("FireVault")
 
                     Text("FIELD WORKSPACE")
                         .font(.caption.bold())
@@ -402,7 +382,7 @@ private struct FireVaultSplashView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("FireVault")
+        .accessibilityLabel("FireVault Pro")
         .accessibilityValue("Loading field workspace")
         .accessibilityIdentifier("firevault-splash")
         .task {

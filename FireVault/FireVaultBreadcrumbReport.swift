@@ -715,11 +715,14 @@ struct FireVaultBreadcrumbReportView: View {
                     .frame(width: 34, height: 34)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-                HStack(spacing: 0) {
-                    Text("FIRE").foregroundStyle(FireVaultTripLogReportPalette.red)
-                    Text("VAULT").foregroundStyle(FireVaultTripLogReportPalette.navy)
-                }
-                .font(.system(size: 18, weight: .black, design: .rounded))
+                FireVaultProWordmark(
+                    fireColor: FireVaultTripLogReportPalette.red,
+                    vaultColor: FireVaultTripLogReportPalette.navy,
+                    proColor: .white,
+                    proBackground: FireVaultTripLogReportPalette.red,
+                    fontSize: 18,
+                    proFontSize: 7.5
+                )
             }
 
             Text(title)

@@ -8,6 +8,8 @@
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleDisplayName</key>
+	<string>FireVault Pro</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -34,15 +36,15 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>FireVault uses the camera to photograph and scan fire alarm equipment and site documents.</string>
+	<string>FireVault Pro uses the camera to photograph and scan fire alarm equipment and site documents.</string>
 	<key>NSFaceIDUsageDescription</key>
-	<string>FireVault uses Face ID to protect your signed-in field workspace.</string>
+	<string>FireVault Pro uses Face ID to protect your signed-in field workspace.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>FireVault records Trip Log activity only after you start a workday, allowing the route and detected stops to continue while you use other apps.</string>
+	<string>FireVault Pro records Trip Log activity only after you start a workday, allowing the route and detected stops to continue while you use other apps.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>FireVault uses your location to identify nearby accounts and record a workday route when you start Trip Log.</string>
+	<string>FireVault Pro uses your location to identify nearby accounts and record a workday route when you start Trip Log.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>FireVault imports site and equipment photos that you select from your photo library.</string>
+	<string>FireVault Pro imports site and equipment photos that you select from your photo library.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

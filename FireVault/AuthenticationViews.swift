@@ -212,11 +212,7 @@ private struct FireVaultAuthenticationView: View {
                 .shadow(color: NativeShellPalette.red.opacity(0.25), radius: 22, y: 10)
 
             VStack(spacing: 5) {
-                HStack(spacing: 0) {
-                    Text("FIRE").foregroundStyle(NativeShellPalette.red)
-                    Text("VAULT").foregroundStyle(.white)
-                }
-                .font(.system(size: 32, weight: .bold, design: .rounded))
+                FireVaultProWordmark(fontSize: 32, proFontSize: 11)
 
                 Text("Secure access to your field workspace")
                     .font(.subheadline)
