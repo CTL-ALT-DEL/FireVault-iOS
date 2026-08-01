@@ -191,7 +191,7 @@ struct FireVaultGPSPreferences: Codable, Equatable {
 
 struct FireVaultPlusCodePreferences: Codable, Equatable { var enabled = true; var autoGenerate = true; var accountLength = 10; var locationLength = 11; var verifyAfterDays = 180; var searchable = true; var includeInReports = true }
 struct FireVaultReportPreferences: Codable, Equatable {
-    var title = "FireVault Service Report"
+    var title = "FireVault Pro Service Report"
     var format = "detailed"
     var includeTechnician = true
     var includeTasks = true
@@ -216,7 +216,7 @@ struct FireVaultReportPreferences: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        title = try values.decodeIfPresent(String.self, forKey: .title) ?? "FireVault Service Report"
+        title = try values.decodeIfPresent(String.self, forKey: .title) ?? "FireVault Pro Service Report"
         format = try values.decodeIfPresent(String.self, forKey: .format) ?? "detailed"
         includeTechnician = try values.decodeIfPresent(Bool.self, forKey: .includeTechnician) ?? true
         includeTasks = try values.decodeIfPresent(Bool.self, forKey: .includeTasks) ?? true
@@ -248,9 +248,9 @@ struct FireVaultReportPreferences: Codable, Equatable {
         return copy
     }
 }
-struct FireVaultEmailPreferences: Codable, Equatable { var defaultTo = ""; var cc = ""; var defaultSubject = "FireVault Service Report"; var signature = "" }
+struct FireVaultEmailPreferences: Codable, Equatable { var defaultTo = ""; var cc = ""; var defaultSubject = "FireVault Pro Service Report"; var signature = "" }
 struct FireVaultStoragePreferences: Codable, Equatable { var photoProvider = "local"; var documentProvider = "local"; var photoFolder = "FireVault/Photos"; var documentFolder = "FireVault/Documents"; var microsoftProfileLabel = ""; var microsoftEmail = ""; var sharePointSiteURL = ""; var libraryName = "Documents" }
-struct FireVaultSyncPreferences: Codable, Equatable { var organization = ""; var workspace = "FireVault Shared Vault"; var conflictPolicy = "review" }
+struct FireVaultSyncPreferences: Codable, Equatable { var organization = ""; var workspace = "FireVault Pro Shared Vault"; var conflictPolicy = "review" }
 struct FireVaultWebDAVPreferences: Codable, Equatable { var enabled = false; var serverURL = ""; var username = ""; var folder = "/FireVault" }
 struct FireVaultPrivacyPreferences: Codable, Equatable { var enabled = false; var autoLockMinutes = 5; var lockOnBackground = true; var hideInAppSwitcher = true }
 

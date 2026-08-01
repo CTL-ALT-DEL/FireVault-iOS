@@ -264,7 +264,7 @@ struct FireVaultBreadcrumbPermissionState: Equatable {
             if accuracyAuthorization == .reducedAccuracy {
                 return "Turn on Precise Location in iOS Settings so Trip Log can recognize short stops and nearby accounts."
             }
-            return "Trip Log can continue an active workday while FireVault is in the background."
+            return "Trip Log can continue an active workday while FireVault Pro is in the background."
         case .authorizedWhenInUse:
             if accuracyAuthorization == .reducedAccuracy {
                 return "Turn on Precise Location in iOS Settings so Trip Log can recognize short stops and nearby accounts."
@@ -275,9 +275,9 @@ struct FireVaultBreadcrumbPermissionState: Equatable {
         case .restricted:
             return "Location access is restricted by this iPhone’s system or management settings."
         case .notDetermined:
-            return "FireVault asks for location access only when you start your first Trip Log workday."
+            return "FireVault Pro asks for location access only when you start your first Trip Log workday."
         @unknown default:
-            return "This iPhone is not currently providing location access to FireVault."
+            return "This iPhone is not currently providing location access to FireVault Pro."
         }
     }
 
@@ -972,7 +972,7 @@ struct FireVaultBreadcrumbsView: View {
                     }
                 }
 
-                Text("Trip Log starts only when you choose Start Workday. Route history stays in FireVault on this device unless you explicitly export a report.")
+                Text("Trip Log starts only when you choose Start Workday. Route history stays in FireVault Pro on this device unless you explicitly export a report.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -989,7 +989,7 @@ struct FireVaultBreadcrumbsView: View {
                     systemImage: "map",
                     description: Text(
                         day.isActive
-                            ? "Keep the workday active while FireVault collects the first reliable GPS positions. Recording can continue while you use other apps."
+                            ? "Keep the workday active while FireVault Pro collects the first reliable GPS positions. Recording can continue while you use other apps."
                             : "No reliable GPS points were recorded for this workday."
                     )
                 )

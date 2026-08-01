@@ -204,11 +204,7 @@ private struct FireVaultAuthenticationView: View {
 
     private var brand: some View {
         VStack(spacing: 16) {
-            Image("FireVaultLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 112, height: 112)
-                .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
+            FireVaultProIconBadge(size: 112, cornerRadius: 25)
                 .shadow(color: NativeShellPalette.red.opacity(0.25), radius: 22, y: 10)
 
             VStack(spacing: 5) {
@@ -314,7 +310,7 @@ private struct FireVaultAuthenticationView: View {
             .disabled(authentication.isWorking)
 
             if mode == .signup {
-                Text("By creating an account, you agree to use FireVault only for authorized company and customer data.")
+                Text("By creating an account, you agree to use FireVault Pro only for authorized company and customer data.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

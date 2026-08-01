@@ -69,10 +69,10 @@ final class FireVaultPrivacyLockController: ObservableObject {
             do {
                 let success = try await context.evaluatePolicy(
                     .deviceOwnerAuthentication,
-                    localizedReason: "Unlock your signed-in FireVault workspace."
+                    localizedReason: "Unlock your signed-in FireVault Pro workspace."
                 )
                 isUnlocked = success
-                message = success ? "" : "FireVault remains locked."
+                message = success ? "" : "FireVault Pro remains locked."
             } catch {
                 message = error.localizedDescription
             }
@@ -91,11 +91,7 @@ struct FireVaultPrivacyLockView: View {
             VStack(spacing: 22) {
                 VStack(spacing: 12) {
                     ZStack(alignment: .bottomTrailing) {
-                        Image("FireVaultLogo")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 112, height: 112)
-                            .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
+                        FireVaultProIconBadge(size: 112, cornerRadius: 25)
                             .shadow(color: .black.opacity(0.42), radius: 14, y: 8)
 
                         Image(systemName: "faceid")
@@ -135,7 +131,7 @@ struct FireVaultPrivacyLockView: View {
                     controller.authenticate()
                 } label: {
                     Label(
-                        controller.isAuthenticating ? "Unlocking…" : "Unlock FireVault",
+                        controller.isAuthenticating ? "Unlocking…" : "Unlock FireVault Pro",
                         systemImage: "faceid"
                     )
                     .font(.headline)

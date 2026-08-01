@@ -276,7 +276,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
             manager.requestLocation()
         case .denied:
             isLocating = false
-            statusText = "Location access is off for FireVault"
+            statusText = "Location access is off for FireVault Pro"
         case .restricted:
             isLocating = false
             statusText = "Location access is restricted"
@@ -310,7 +310,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
             beginLiveNearbyUpdates()
         case .denied:
             isLiveNearbyTracking = false
-            statusText = "Location access is off for FireVault"
+            statusText = "Location access is off for FireVault Pro"
         case .restricted:
             isLiveNearbyTracking = false
             statusText = "Location access is restricted"
@@ -348,7 +348,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
             }
         case .denied:
             isLocating = false
-            statusText = "Location access is off for FireVault"
+            statusText = "Location access is off for FireVault Pro"
         case .restricted:
             isLocating = false
             statusText = "Location access is restricted"
@@ -379,7 +379,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         isLocating = false
         if let locationError = error as? CLError, locationError.code == .denied {
-            statusText = "Location access is off for FireVault"
+            statusText = "Location access is off for FireVault Pro"
         } else {
             statusText = "Location could not be updated"
         }

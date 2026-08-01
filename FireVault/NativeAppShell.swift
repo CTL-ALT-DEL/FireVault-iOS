@@ -431,7 +431,7 @@ private struct NativeNearbyView: View {
                 }
             }
         } message: {
-            Text("FireVault sends only street, city, state, and ZIP fields to the U.S. Census Geocoder, then uses Apple Maps for unmatched addresses. Account names, IDs, notes, photos, and files remain on this iPhone. Returned coordinates are saved locally.")
+            Text("FireVault Pro sends only street, city, state, and ZIP fields to the U.S. Census Geocoder, then uses Apple Maps for unmatched addresses. Account names, IDs, notes, photos, and files remain on this iPhone. Returned coordinates are saved locally.")
         }
     }
 
@@ -1375,7 +1375,7 @@ private struct NativePhotoView: View {
             [
                 mediaKind == .scan
                     ? "Scanned document preview"
-                    : "Field photo with baked FireVault overlay",
+                    : "Field photo with baked FireVault Pro overlay",
                 mediaAccount.map { "Saved to \($0.name)" }
             ]
             .compactMap { $0 }
@@ -2380,7 +2380,7 @@ private struct NativeAboutFireVaultView: View {
                 )
 
                 FireVaultJustifiedText(
-                    "Designed for fire alarm technicians by a fire alarm technician, FireVault is shaped around real service calls, site visits, inspections, troubleshooting, and follow-up work. Its purpose is simple: reduce the time spent hunting for information and leave behind clearer records after every visit."
+                    "Designed for fire alarm technicians by a fire alarm technician, FireVault Pro is shaped around real service calls, site visits, inspections, troubleshooting, and follow-up work. Its purpose is simple: reduce the time spent hunting for information and leave behind clearer records after every visit."
                 )
             }
 
@@ -2523,7 +2523,7 @@ private struct FireVaultDeveloperCenterView: View {
                     ContentUnavailableView(
                         "No Test Results",
                         systemImage: "waveform.path.ecg",
-                        description: Text("Run diagnostics to test FireVault's local vault and connected services.")
+                        description: Text("Run diagnostics to test FireVault Pro's local vault and connected services.")
                     )
                 }
             } else {
@@ -2562,7 +2562,7 @@ private struct FireVaultDeveloperCenterView: View {
             } header: {
                 Text("Developer Tools")
             } footer: {
-                Text("A production database write test will require a dedicated diagnostic table migration. FireVault does not write test records into customer or Trip Log tables.")
+                Text("A production database write test will require a dedicated diagnostic table migration. FireVault Pro does not write test records into customer or Trip Log tables.")
             }
         }
         .contentMargins(.bottom, 96, for: .scrollContent)
@@ -2598,7 +2598,7 @@ private struct FireVaultSimpleTemplateDeveloperView: View {
                     showsResetConfirmation = true
                 }
             } footer: {
-                Text("Resetting enables every Simple-mode feature without deleting FireVault data.")
+                Text("Resetting enables every Simple-mode feature without deleting FireVault Pro data.")
             }
         }
         .contentMargins(.bottom, 96, for: .scrollContent)

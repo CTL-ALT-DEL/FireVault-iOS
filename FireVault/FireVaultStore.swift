@@ -40,7 +40,7 @@ enum FireVaultMediaError: LocalizedError {
         case .encodingFailed:
             "The captured photo could not be encoded."
         case .storageUnavailable:
-            "FireVault media storage is unavailable on this iPhone."
+            "FireVault Pro media storage is unavailable on this iPhone."
         case .writeFailed(let detail):
             "The captured media could not be saved. \(detail)"
         }
@@ -523,7 +523,7 @@ final class FireVaultStore: ObservableObject {
         let document = FireVaultWorkspaceDocument(
             id: UUID().uuidString,
             title: "Field photo",
-            subtitle: "Photo with FireVault overlay",
+            subtitle: "Photo with FireVault Pro overlay",
             kind: "photo",
             date: Date().formatted(date: .abbreviated, time: .shortened),
             mediaFileName: fileName

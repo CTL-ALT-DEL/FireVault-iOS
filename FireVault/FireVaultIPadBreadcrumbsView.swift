@@ -267,7 +267,7 @@ struct FireVaultIPadBreadcrumbsView: View {
                 systemImage: "map",
                 description: Text(
                     day.isActive
-                        ? "Keep the workday active while FireVault collects reliable GPS positions."
+                        ? "Keep the workday active while FireVault Pro collects reliable GPS positions."
                         : "No reliable GPS points were recorded for this workday."
                 )
             )

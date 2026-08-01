@@ -308,14 +308,68 @@ struct FireVaultProWordmark: View {
     }
 }
 
+struct FireVaultProIconBadge: View {
+    var size: CGFloat = 30
+    var cornerRadius: CGFloat? = nil
+
+    private var resolvedCornerRadius: CGFloat {
+        cornerRadius ?? size * 0.23
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.06, green: 0.07, blue: 0.09),
+                            Color(red: 0.16, green: 0.03, blue: 0.02)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous)
+                        .stroke(.white.opacity(0.12), lineWidth: max(0.7, size * 0.02))
+                }
+                .shadow(color: NativeShellPalette.red.opacity(0.22), radius: size * 0.18, y: size * 0.08)
+
+            Image(systemName: "flame.fill")
+                .font(.system(size: size * 0.55, weight: .black))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [NativeShellPalette.amber, NativeShellPalette.red],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .shadow(color: NativeShellPalette.red.opacity(0.55), radius: size * 0.12, y: size * 0.03)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Text("PRO")
+                .font(.system(size: max(5, size * 0.16), weight: .black, design: .rounded))
+                .tracking(0.25)
+                .foregroundStyle(.white)
+                .padding(.horizontal, max(2, size * 0.06))
+                .padding(.vertical, max(1, size * 0.025))
+                .background(NativeShellPalette.red, in: RoundedRectangle(cornerRadius: max(2, size * 0.06), style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: max(2, size * 0.06), style: .continuous)
+                        .stroke(.white.opacity(0.42), lineWidth: 0.5)
+                }
+                .rotationEffect(.degrees(-7))
+                .offset(x: size * 0.08, y: size * 0.04)
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
 struct FireVaultBrandMark: View {
     var body: some View {
         HStack(spacing: 6) {
-            Image("FireVaultLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 30, height: 30)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            FireVaultProIconBadge(size: 30)
 
             FireVaultProWordmark()
         }
@@ -408,7 +462,7 @@ struct FireVaultPhotoOverlayView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(["FireVault photo overlay", siteName, address, technicianName, formattedTimestamp].joined(separator: ", "))
+        .accessibilityLabel(["FireVault Pro photo overlay", siteName, address, technicianName, formattedTimestamp].joined(separator: ", "))
     }
 
     private func glassPanel(metrics: FireVaultOverlayPanelSizing.Metrics) -> some View {
@@ -621,7 +675,7 @@ struct FireVaultOverlayPreview: View {
         }
         .onAppear { stageEdits() }
         .accessibilityIdentifier("overlay-interactive-preview")
-        .accessibilityHint("Drag the glass overlay or FireVault logo to place it on the photo")
+        .accessibilityHint("Drag the glass overlay or FireVault Pro logo to place it on the photo")
     }
 
     private func finishDrag(translation: CGSize, designSize: CGSize) {
@@ -964,7 +1018,7 @@ struct FireVaultOverlayPlacementEditor: View {
                 .font(.title2.bold())
                 .foregroundStyle(.white)
             if !hasEnteredLandscape {
-                Text("Use the full-width camera preview to position the overlay and FireVault logo.")
+                Text("Use the full-width camera preview to position the overlay and FireVault Pro logo.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white.opacity(0.72))
                     .frame(maxWidth: 340)

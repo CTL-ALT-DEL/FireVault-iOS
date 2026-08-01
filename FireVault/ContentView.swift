@@ -247,13 +247,8 @@ private struct FireVaultBrandHeader: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
-            Image("FireVaultLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 30, height: 30)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            FireVaultProIconBadge(size: 30)
                 .padding(.top, 1)
-                .accessibilityHidden(true)
 
             FireVaultProWordmark(fontSize: 15, proFontSize: 6.8, tracking: 1.35)
             .shadow(color: .black.opacity(0.78), radius: 2, x: 0, y: 1)
@@ -320,11 +315,7 @@ private struct FireVaultSplashView: View {
                         .frame(width: 218, height: 218)
                         .scaleEffect(haloIsExpanded ? 1.16 : 0.82)
 
-                    Image("FireVaultLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 176, height: 176)
-                        .clipShape(RoundedRectangle(cornerRadius: 39, style: .continuous))
+                    FireVaultProIconBadge(size: 176, cornerRadius: 39)
                         .overlay {
                             RoundedRectangle(cornerRadius: 39, style: .continuous)
                                 .stroke(.white.opacity(0.12), lineWidth: 1)

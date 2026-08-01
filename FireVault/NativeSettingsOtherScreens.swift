@@ -95,7 +95,7 @@ struct NativeReportSettingsView: View {
             } header: {
                 Text("Automatic Email Delivery")
             } footer: {
-                Text("Reports are generated and emailed securely through Supabase and Resend even when FireVault is closed. Multiple addresses may be separated with commas.")
+                Text("Reports are generated and emailed securely through Supabase and Resend even when FireVault Pro is closed. Multiple addresses may be separated with commas.")
             }
             Section("Service Report Defaults") {
                 TextField("Report title", text: $draft.reports.title).focused($focused)
@@ -304,7 +304,7 @@ struct NativePrivacySettingsView: View {
                 Picker("Auto-lock", selection: $draft.privacy.autoLockMinutes) { Text("Immediately").tag(0); Text("1 minute").tag(1); Text("5 minutes").tag(5); Text("15 minutes").tag(15) }
                 Toggle("Lock when app enters background", isOn: $draft.privacy.lockOnBackground)
                 Toggle("Hide content in app switcher", isOn: $draft.privacy.hideInAppSwitcher)
-                Text("Face ID protects the signed-in FireVault workspace. Your device passcode remains available as Apple’s secure fallback.")
+                Text("Face ID protects the signed-in FireVault Pro workspace. Your device passcode remains available as Apple’s secure fallback.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -357,7 +357,7 @@ struct NativeSecuritySettingsView: View {
             }
 
             Section {
-                Text("FireVault stores its local vault inside the iOS application sandbox. Device authentication uses Apple’s secure system interface; FireVault never receives or stores biometric data.")
+                Text("FireVault Pro stores its local vault inside the iOS application sandbox. Device authentication uses Apple’s secure system interface; FireVault Pro never receives or stores biometric data.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -749,7 +749,7 @@ private struct NativeCSVImportReviewView: View {
                 Section("Coordinate Correction") {
                     Toggle("Correct likely swapped latitude/longitude", isOn: $correctSwappedCoordinates)
                         .onChange(of: correctSwappedCoordinates) { _, _ in refreshAnalysis() }
-                    Text("FireVault only offers this correction when the supplied pair is invalid but becomes valid after swapping.")
+                    Text("FireVault Pro only offers this correction when the supplied pair is invalid but becomes valid after swapping.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }

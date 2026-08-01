@@ -80,11 +80,11 @@ enum FireVaultAIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .emptyResponse:
-            "FireVault AI returned an empty account brief. Please try again."
+            "FireVault Pro AI returned an empty account brief. Please try again."
         case .notAuthenticated:
-            "Your FireVault session has expired. Sign in again, then retry."
+            "Your FireVault Pro session has expired. Sign in again, then retry."
         case .requestFailed:
-            "FireVault could not generate the account brief. Check your connection and try again."
+            "FireVault Pro could not generate the account brief. Check your connection and try again."
         }
     }
 }
@@ -188,7 +188,7 @@ struct FireVaultAccountBriefSheet: View {
                         Text("Reviewing \(accountName)’s history…")
                             .font(.headline)
                             .multilineTextAlignment(.center)
-                        Text("FireVault is checking the account records for useful patterns.")
+                        Text("FireVault Pro is checking the account records for useful patterns.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -207,7 +207,7 @@ struct FireVaultAccountBriefSheet: View {
                     ContentUnavailableView {
                         Label("Brief Unavailable", systemImage: "exclamationmark.triangle")
                     } description: {
-                        Text(errorMessage ?? "FireVault could not generate an account brief.")
+                        Text(errorMessage ?? "FireVault Pro could not generate an account brief.")
                     } actions: {
                         Button("Try Again", action: retry)
                             .buttonStyle(.borderedProminent)

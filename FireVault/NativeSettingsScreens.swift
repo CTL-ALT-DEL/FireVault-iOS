@@ -91,7 +91,7 @@ struct NativeAppearanceSettingsView: View {
             } header: {
                 Text("Theme")
             } footer: {
-                Text("Light uses FireVault's warm porcelain palette. System Default follows the iPhone appearance automatically.")
+                Text("Light uses FireVault Pro's warm porcelain palette. System Default follows the iPhone appearance automatically.")
             }
         }
         .navigationTitle("Appearance")
@@ -116,7 +116,7 @@ struct NativeAppearanceSettingsView: View {
 
     private func detail(for mode: FireVaultAppearanceMode) -> String {
         switch mode {
-        case .dark: "Original high-contrast FireVault theme"
+        case .dark: "Original high-contrast FireVault Pro theme"
         case .light: "Warm porcelain and ivory surfaces"
         case .system: "Match the current iPhone setting"
         }
@@ -235,7 +235,7 @@ struct NativeOverlaySettingsView: View {
             } header: {
                 Text("Preview")
             } footer: {
-                Text("Tap the photo to position and resize the overlay and FireVault logo in a full-screen landscape editor.")
+                Text("Tap the photo to position and resize the overlay and FireVault Pro logo in a full-screen landscape editor.")
             }
 
             Section("Appearance") {
@@ -261,7 +261,7 @@ struct NativeOverlaySettingsView: View {
 
             Section {
                 Toggle(
-                    "Show FireVault brand",
+                    "Show FireVault Pro brand",
                     isOn: overlayBinding(\.showLogo)
                 )
                 Toggle(
@@ -286,7 +286,7 @@ struct NativeOverlaySettingsView: View {
             } header: {
                 Text("Branding")
             } footer: {
-                Text("The FireVault brand includes the app icon plus FIRE in red and VAULT in white.")
+                Text("The FireVault Pro brand includes the app icon plus FIRE in red, VAULT in white, and the PRO stamp.")
             }
 
             Section {
