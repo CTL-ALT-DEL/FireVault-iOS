@@ -157,6 +157,53 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(persisted, updated)
     }
 
+    func testAccountNoteLifecyclePersistsWithoutChangingOtherAccountData() throws {
+        let suite = "FireVaultTests.NoteLifecycle.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let account = store.addAccount()
+        let accountIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        store.accounts[accountIndex].favorite = true
+        store.accounts[accountIndex].latitude = 43.615
+        store.accounts[accountIndex].equipment = [
+            .init(id: "equipment-1", title: "FACP", subtitle: "Lobby", status: "Normal")
+        ]
+
+        let note = try XCTUnwrap(
+            store.addNote(to: account.id, title: "  Panel trouble  ", text: "  Checked field wiring.  ")
+        )
+        XCTAssertEqual(note.title, "Panel trouble")
+        XCTAssertEqual(note.text, "Checked field wiring.")
+
+        XCTAssertTrue(
+            store.updateNote(
+                accountID: account.id,
+                noteID: note.id,
+                title: "   ",
+                text: "  Replaced damaged conductor.  "
+            )
+        )
+
+        let updatedAccount = try XCTUnwrap(store.accounts.first(where: { $0.id == account.id }))
+        let updatedNote = try XCTUnwrap(updatedAccount.notes.first(where: { $0.id == note.id }))
+        XCTAssertEqual(updatedNote.title, "Field note")
+        XCTAssertEqual(updatedNote.text, "Replaced damaged conductor.")
+        XCTAssertTrue(updatedAccount.favorite)
+        XCTAssertEqual(updatedAccount.latitude, 43.615)
+        XCTAssertEqual(updatedAccount.equipment.map(\.id), ["equipment-1"])
+
+        let reloadedStore = FireVaultStore(defaults: defaults)
+        let persisted = try XCTUnwrap(reloadedStore.accounts.first(where: { $0.id == account.id }))
+        XCTAssertEqual(persisted.notes.first(where: { $0.id == note.id })?.text, "Replaced damaged conductor.")
+        XCTAssertTrue(persisted.favorite)
+        XCTAssertEqual(persisted.equipment.map(\.id), ["equipment-1"])
+
+        XCTAssertTrue(reloadedStore.deleteNote(accountID: account.id, noteID: note.id))
+        XCTAssertFalse(reloadedStore.accounts.first(where: { $0.id == account.id })?.notes.contains(where: { $0.id == note.id }) ?? true)
+    }
+
     func testTripLogOccupiesCenterNavigationPosition() {
         XCTAssertEqual(FireVaultShellTab.allCases.count, 5)
         XCTAssertEqual(FireVaultShellTab.allCases[2], .trip)

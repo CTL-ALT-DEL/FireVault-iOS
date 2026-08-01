@@ -65,6 +65,8 @@ struct FireVaultAdaptiveAccountDetailsView: View {
     @State private var pinsLayer: FireVaultAccountMapLayer = .standard
     @State private var isShowingAccountBrief = false
     @State private var isShowingAccountEditor = false
+    @State private var editingNote: FireVaultWorkspaceNote?
+    @State private var isShowingNoteEditor = false
     @State private var isLoadingAccountBrief = false
     @State private var accountBrief: String?
     @State private var accountBriefError: String?
@@ -179,6 +181,19 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     accountId: draft.accountId,
                     phone: draft.phone
                 )
+            }
+        }
+        .sheet(isPresented: $isShowingNoteEditor) {
+            FireVaultNoteEditorSheet(accountName: account.name, note: editingNote) { draft in
+                if let editingNote {
+                    return store.updateNote(
+                        accountID: account.id,
+                        noteID: editingNote.id,
+                        title: draft.title,
+                        text: draft.text
+                    )
+                }
+                return store.addNote(to: account.id, title: draft.title, text: draft.text) != nil
             }
         }
     }
@@ -493,6 +508,13 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     .font(.subheadline.bold())
                     .foregroundStyle(selectedSection.tint)
                 Spacer()
+                if selectedSection == .notes {
+                    Button("Add Note", systemImage: "square.and.pencil") {
+                        editingNote = nil
+                        isShowingNoteEditor = true
+                    }
+                    .buttonStyle(.glass)
+                }
                 Text("\(count(for: selectedSection)) total")
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -504,7 +526,18 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     emptyRow("No notes saved", symbol: "note.text")
                 } else {
                     ForEach(account.notes) { note in
-                        dataRow(title: note.title, subtitle: note.text, trailing: note.date, symbol: "note.text")
+                        Button {
+                            editingNote = note
+                            isShowingNoteEditor = true
+                        } label: {
+                            dataRow(title: note.title, subtitle: note.text, trailing: note.date, symbol: "note.text")
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Delete Note", systemImage: "trash", role: .destructive) {
+                                store.deleteNote(accountID: account.id, noteID: note.id)
+                            }
+                        }
                     }
                 }
             case .documents:

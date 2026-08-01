@@ -87,6 +87,7 @@ struct FieldWorkspaceView: View {
 
     @State private var isShowingAccountBrief = false
     @State private var isShowingAccountEditor = false
+    @State private var isShowingNoteEditor = false
     @State private var isLoadingAccountBrief = false
     @State private var accountBrief: String?
     @State private var accountBriefError: String?
@@ -183,6 +184,11 @@ struct FieldWorkspaceView: View {
                     accountId: draft.accountId,
                     phone: draft.phone
                 )
+            }
+        }
+        .sheet(isPresented: $isShowingNoteEditor) {
+            FireVaultNoteEditorSheet(accountName: account.name, note: nil) { draft in
+                store.addNote(to: account.id, title: draft.title, text: draft.text) != nil
             }
         }
     }
@@ -448,7 +454,7 @@ struct FieldWorkspaceView: View {
             }
             if settings.isFeatureVisible("account.action.note") {
                 WorkspaceDockButton(title: "Note", symbol: "square.and.pencil", tint: FieldWorkspacePalette.amber) {
-                    store.addNote(to: account.id)
+                    isShowingNoteEditor = true
                 }
             }
             if settings.isFeatureVisible("account.action.camera") {
@@ -720,6 +726,8 @@ private struct WorkspaceMap: View {
 private struct NotesWorkspaceView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
+    @State private var editingNote: FireVaultWorkspaceNote?
+    @State private var isShowingEditor = false
 
     var body: some View {
         List {
@@ -731,18 +739,29 @@ private struct NotesWorkspaceView: View {
                 )
             } else {
                 ForEach(account.notes) { note in
-                    VStack(alignment: .leading, spacing: 7) {
-                        HStack {
-                            Text(note.title).font(.caption.bold()).foregroundStyle(FieldWorkspacePalette.amber)
-                            Spacer()
-                            Text(note.date).font(.caption2).foregroundStyle(.tertiary)
+                    Button {
+                        editingNote = note
+                        isShowingEditor = true
+                    } label: {
+                        VStack(alignment: .leading, spacing: 7) {
+                            HStack {
+                                Text(note.title).font(.caption.bold()).foregroundStyle(FieldWorkspacePalette.amber)
+                                Spacer()
+                                Text(note.date).font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Text(note.text)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        Text(note.text)
-                            .font(.body)
-                            .foregroundStyle(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        .padding(.vertical, 6)
                     }
-                    .padding(.vertical, 6)
+                    .buttonStyle(.plain)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button("Delete", systemImage: "trash", role: .destructive) {
+                            store.deleteNote(accountID: account.id, noteID: note.id)
+                        }
+                    }
                 }
             }
         }
@@ -751,11 +770,90 @@ private struct NotesWorkspaceView: View {
         .navigationTitle("Field Notes")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            Button("Add Note", systemImage: "square.and.pencil") { store.addNote(to: account.id) }
+            Button("Add Note", systemImage: "square.and.pencil") {
+                editingNote = nil
+                isShowingEditor = true
+            }
                 .buttonStyle(.glassProminent)
                 .padding(12)
                 .glassEffect()
         }
+        .sheet(isPresented: $isShowingEditor) {
+            FireVaultNoteEditorSheet(accountName: account.name, note: editingNote) { draft in
+                if let editingNote {
+                    return store.updateNote(
+                        accountID: account.id,
+                        noteID: editingNote.id,
+                        title: draft.title,
+                        text: draft.text
+                    )
+                }
+                return store.addNote(to: account.id, title: draft.title, text: draft.text) != nil
+            }
+        }
+    }
+}
+
+struct FireVaultNoteDraft: Equatable {
+    var title: String
+    var text: String
+}
+
+struct FireVaultNoteEditorSheet: View {
+    let accountName: String
+    let note: FireVaultWorkspaceNote?
+    let save: (FireVaultNoteDraft) -> Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title: String
+    @State private var text: String
+
+    init(
+        accountName: String,
+        note: FireVaultWorkspaceNote?,
+        save: @escaping (FireVaultNoteDraft) -> Bool
+    ) {
+        self.accountName = accountName
+        self.note = note
+        self.save = save
+        _title = State(initialValue: note?.title ?? "")
+        _text = State(initialValue: note?.text ?? "")
+    }
+
+    private var canSave: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Account") {
+                    Text(accountName)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Note") {
+                    TextField("Title (optional)", text: $title)
+                    TextField("Field note", text: $text, axis: .vertical)
+                        .lineLimit(6...14)
+                }
+            }
+            .navigationTitle(note == nil ? "New Note" : "Edit Note")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        if save(.init(title: title, text: text)) {
+                            dismiss()
+                        }
+                    }
+                    .disabled(!canSave)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 

@@ -443,12 +443,20 @@ final class FireVaultStore: ObservableObject {
         return account
     }
 
-    func addNote(to accountID: String) {
-        guard let index = accounts.firstIndex(where: { $0.id == accountID }) else { return }
+    @discardableResult
+    func addNote(
+        to accountID: String,
+        title: String = "Field note",
+        text: String = "New note"
+    ) -> FireVaultWorkspaceNote? {
+        guard let index = accounts.firstIndex(where: { $0.id == accountID }) else { return nil }
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return nil }
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let note = FireVaultWorkspaceNote(
             id: UUID().uuidString,
-            title: "Field note",
-            text: "New note",
+            title: trimmedTitle.isEmpty ? "Field note" : trimmedTitle,
+            text: trimmedText,
             date: Date().formatted(date: .abbreviated, time: .shortened)
         )
         accounts[index].notes.insert(note, at: 0)
@@ -457,6 +465,34 @@ final class FireVaultStore: ObservableObject {
             at: 0
         )
         persist()
+        return note
+    }
+
+    @discardableResult
+    func updateNote(accountID: String, noteID: String, title: String, text: String) -> Bool {
+        guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
+              let noteIndex = accounts[accountIndex].notes.firstIndex(where: { $0.id == noteID }) else {
+            return false
+        }
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return false }
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        accounts[accountIndex].notes[noteIndex].title = trimmedTitle.isEmpty ? "Field note" : trimmedTitle
+        accounts[accountIndex].notes[noteIndex].text = trimmedText
+        accounts[accountIndex].notes[noteIndex].date = Date().formatted(date: .abbreviated, time: .shortened)
+        persist()
+        return true
+    }
+
+    @discardableResult
+    func deleteNote(accountID: String, noteID: String) -> Bool {
+        guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
+              let noteIndex = accounts[accountIndex].notes.firstIndex(where: { $0.id == noteID }) else {
+            return false
+        }
+        accounts[accountIndex].notes.remove(at: noteIndex)
+        persist()
+        return true
     }
 
     func addDocument(to accountID: String, scan: Bool) {
