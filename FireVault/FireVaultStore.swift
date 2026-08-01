@@ -591,20 +591,26 @@ final class FireVaultStore: ObservableObject {
     @discardableResult
     func addEquipment(
         to accountID: String,
-        title: String = "New equipment",
-        subtitle: String = "Details not entered",
-        status: String = "Draft"
+        title: String = "Fire Alarm Control Panel (FACP)",
+        subtitle: String = "",
+        status: String = "",
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        pinColor: String = "Green"
     ) -> FireVaultWorkspaceEquipment? {
-        guard let index = accounts.firstIndex(where: { $0.id == accountID }) else { return nil }
+        guard let index = accounts.firstIndex(where: { $0.id == accountID }),
+              Self.isValidCoordinatePair(latitude: latitude, longitude: longitude) else { return nil }
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty else { return nil }
         let equipment = FireVaultWorkspaceEquipment(
             id: UUID().uuidString,
             title: trimmedTitle,
             subtitle: subtitle.trimmingCharacters(in: .whitespacesAndNewlines),
-            status: status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "Active"
-                : status.trimmingCharacters(in: .whitespacesAndNewlines)
+            status: status.trimmingCharacters(in: .whitespacesAndNewlines),
+            latitude: latitude,
+            longitude: longitude,
+            pinColor: FireVaultMapPinColor(rawValue: pinColor)?.rawValue
+                ?? FireVaultMapPinColor.green.rawValue
         )
         accounts[index].equipment.append(equipment)
         persist()
@@ -617,18 +623,26 @@ final class FireVaultStore: ObservableObject {
         equipmentID: String,
         title: String,
         subtitle: String,
-        status: String
+        status: String,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        pinColor: String = "Green"
     ) -> Bool {
         guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
-              let equipmentIndex = accounts[accountIndex].equipment.firstIndex(where: { $0.id == equipmentID }) else {
+              let equipmentIndex = accounts[accountIndex].equipment.firstIndex(where: { $0.id == equipmentID }),
+              Self.isValidCoordinatePair(latitude: latitude, longitude: longitude) else {
             return false
         }
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty else { return false }
         accounts[accountIndex].equipment[equipmentIndex].title = trimmedTitle
         accounts[accountIndex].equipment[equipmentIndex].subtitle = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedStatus = status.trimmingCharacters(in: .whitespacesAndNewlines)
-        accounts[accountIndex].equipment[equipmentIndex].status = trimmedStatus.isEmpty ? "Active" : trimmedStatus
+        accounts[accountIndex].equipment[equipmentIndex].status = status.trimmingCharacters(in: .whitespacesAndNewlines)
+        accounts[accountIndex].equipment[equipmentIndex].latitude = latitude
+        accounts[accountIndex].equipment[equipmentIndex].longitude = longitude
+        accounts[accountIndex].equipment[equipmentIndex].pinColor =
+            FireVaultMapPinColor(rawValue: pinColor)?.rawValue
+            ?? FireVaultMapPinColor.green.rawValue
         persist()
         return true
     }
@@ -681,7 +695,8 @@ final class FireVaultStore: ObservableObject {
         type: String = "Other",
         plusCode: String = "",
         latitude: Double? = nil,
-        longitude: Double? = nil
+        longitude: Double? = nil,
+        pinColor: String = "Purple"
     ) -> FireVaultWorkspaceLocation? {
         guard let index = accounts.firstIndex(where: { $0.id == accountID }),
               Self.isValidCoordinatePair(latitude: latitude, longitude: longitude) else { return nil }
@@ -696,7 +711,9 @@ final class FireVaultStore: ObservableObject {
                 : type.trimmingCharacters(in: .whitespacesAndNewlines),
             plusCode: plusCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
             latitude: latitude,
-            longitude: longitude
+            longitude: longitude,
+            pinColor: FireVaultMapPinColor(rawValue: pinColor)?.rawValue
+                ?? FireVaultMapPinColor.purple.rawValue
         )
         accounts[index].locations.append(location)
         persist()
@@ -712,7 +729,8 @@ final class FireVaultStore: ObservableObject {
         type: String,
         plusCode: String,
         latitude: Double?,
-        longitude: Double?
+        longitude: Double?,
+        pinColor: String = "Purple"
     ) -> Bool {
         guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
               let locationIndex = accounts[accountIndex].locations.firstIndex(where: { $0.id == locationID }),
@@ -726,6 +744,9 @@ final class FireVaultStore: ObservableObject {
         accounts[accountIndex].locations[locationIndex].plusCode = plusCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         accounts[accountIndex].locations[locationIndex].latitude = latitude
         accounts[accountIndex].locations[locationIndex].longitude = longitude
+        accounts[accountIndex].locations[locationIndex].pinColor =
+            FireVaultMapPinColor(rawValue: pinColor)?.rawValue
+            ?? FireVaultMapPinColor.purple.rawValue
         persist()
         return true
     }

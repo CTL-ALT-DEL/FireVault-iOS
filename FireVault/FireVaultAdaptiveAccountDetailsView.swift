@@ -202,21 +202,32 @@ struct FireVaultAdaptiveAccountDetailsView: View {
             }
         }
         .sheet(isPresented: $isShowingEquipmentEditor) {
-            FireVaultEquipmentEditorSheet(accountName: account.name, equipment: editingEquipment) { draft in
+            FireVaultEquipmentEditorSheet(
+                accountName: account.name,
+                accountCoordinate: account.coordinate,
+                equipment: editingEquipment,
+                locationService: locationService
+            ) { draft in
                 if let editingEquipment {
                     return store.updateEquipment(
                         accountID: account.id,
                         equipmentID: editingEquipment.id,
                         title: draft.title,
                         subtitle: draft.subtitle,
-                        status: draft.status
+                        status: draft.deviceAddress,
+                        latitude: draft.latitude,
+                        longitude: draft.longitude,
+                        pinColor: draft.pinColor.rawValue
                     )
                 }
                 return store.addEquipment(
                     to: account.id,
                     title: draft.title,
                     subtitle: draft.subtitle,
-                    status: draft.status
+                    status: draft.deviceAddress,
+                    latitude: draft.latitude,
+                    longitude: draft.longitude,
+                    pinColor: draft.pinColor.rawValue
                 ) != nil
             }
         }
@@ -236,7 +247,8 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                         type: draft.type,
                         plusCode: draft.plusCode,
                         latitude: draft.latitude,
-                        longitude: draft.longitude
+                        longitude: draft.longitude,
+                        pinColor: draft.pinColor.rawValue
                     )
                 }
                 return store.addLocation(
@@ -246,7 +258,8 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     type: draft.type,
                     plusCode: draft.plusCode,
                     latitude: draft.latitude,
-                    longitude: draft.longitude
+                    longitude: draft.longitude,
+                    pinColor: draft.pinColor.rawValue
                 ) != nil
             }
         }
@@ -502,8 +515,14 @@ struct FireVaultAdaptiveAccountDetailsView: View {
             }
             ForEach(mappedPins) { location in
                 if let coordinate = location.coordinate {
-                    Marker(location.label, systemImage: "mappin", coordinate: coordinate)
-                        .tint(NativeShellPalette.purple)
+                    Annotation("", coordinate: coordinate) {
+                        Circle()
+                            .fill(location.resolvedPinColor.color)
+                            .overlay(Circle().stroke(.white, lineWidth: 2))
+                            .frame(width: 18, height: 18)
+                            .shadow(radius: 3, y: 1)
+                            .accessibilityLabel(location.label)
+                    }
                 }
             }
         }
@@ -623,7 +642,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                             editingEquipment = equipment
                             isShowingEquipmentEditor = true
                         } label: {
-                            dataRow(title: equipment.title, subtitle: equipment.subtitle, trailing: equipment.status, symbol: "wrench.and.screwdriver.fill")
+                            dataRow(title: equipment.title, subtitle: equipment.subtitle, trailing: equipment.deviceAddress, symbol: "wrench.and.screwdriver.fill")
                         }
                         .buttonStyle(.plain)
                         .contextMenu {

@@ -131,7 +131,7 @@ final class FireVaultAIService: FireVaultAIProviding {
             "- \($0.date): \($0.title) — \($0.text)"
         }
         let equipment = account.equipment.prefix(20).map {
-            "- \($0.title): \($0.subtitle) [\($0.status)]"
+            "- \($0.title): \($0.subtitle)" + ($0.deviceAddress.isEmpty ? "" : " [Device address: \($0.deviceAddress)]")
         }
         let documents = account.documents.prefix(20).map {
             "- \($0.date): \($0.title) — \($0.subtitle)"

@@ -220,30 +220,38 @@ final class FireVaultTests: XCTestCase {
         let equipment = try XCTUnwrap(
             store.addEquipment(
                 to: account.id,
-                title: "  Notifier NFS2-3030  ",
-                subtitle: "  Main electrical room  ",
-                status: "  Active  "
+                title: "  Fire Alarm Control Panel (FACP)  ",
+                subtitle: "  Notifier NFS2-3030  ",
+                status: "  NODE 1  ",
+                latitude: 43.615,
+                longitude: -116.202
             )
         )
-        XCTAssertEqual(equipment.title, "Notifier NFS2-3030")
-        XCTAssertEqual(equipment.subtitle, "Main electrical room")
-        XCTAssertEqual(equipment.status, "Active")
+        XCTAssertEqual(equipment.title, "Fire Alarm Control Panel (FACP)")
+        XCTAssertEqual(equipment.subtitle, "Notifier NFS2-3030")
+        XCTAssertEqual(equipment.deviceAddress, "NODE 1")
+        XCTAssertEqual(equipment.latitude, 43.615)
+        XCTAssertEqual(equipment.longitude, -116.202)
 
         XCTAssertTrue(
             store.updateEquipment(
                 accountID: account.id,
                 equipmentID: equipment.id,
-                title: "  Notifier NFS-320  ",
-                subtitle: "  Front lobby  ",
-                status: "   "
+                title: "  Smoke Detector  ",
+                subtitle: "  System Sensor  ",
+                status: "  L1D042  ",
+                latitude: 43.616,
+                longitude: -116.203
             )
         )
 
         let updatedAccount = try XCTUnwrap(store.accounts.first(where: { $0.id == account.id }))
         let updatedEquipment = try XCTUnwrap(updatedAccount.equipment.first(where: { $0.id == equipment.id }))
-        XCTAssertEqual(updatedEquipment.title, "Notifier NFS-320")
-        XCTAssertEqual(updatedEquipment.subtitle, "Front lobby")
-        XCTAssertEqual(updatedEquipment.status, "Active")
+        XCTAssertEqual(updatedEquipment.title, "Smoke Detector")
+        XCTAssertEqual(updatedEquipment.subtitle, "System Sensor")
+        XCTAssertEqual(updatedEquipment.deviceAddress, "L1D042")
+        XCTAssertEqual(updatedEquipment.latitude, 43.616)
+        XCTAssertEqual(updatedEquipment.longitude, -116.203)
         XCTAssertTrue(updatedAccount.favorite)
         XCTAssertEqual(updatedAccount.notes.map(\.id), ["note-1"])
 
@@ -255,6 +263,26 @@ final class FireVaultTests: XCTestCase {
 
         XCTAssertTrue(reloadedStore.deleteEquipment(accountID: account.id, equipmentID: equipment.id))
         XCTAssertFalse(reloadedStore.accounts.first(where: { $0.id == account.id })?.equipment.contains(where: { $0.id == equipment.id }) ?? true)
+    }
+
+    func testEquipmentCSVImportMapsDeviceTypeAndAddressColumns() throws {
+        let csv = """
+        DEVICE,TYPE,ADDRESS
+        NFS2-3030,Fire Alarm Control Panel (FACP),01
+        HPF-PS10,Booster Panel,02
+        Missing Type,,03
+        """
+
+        let result = try FireVaultEquipmentCSVImporter.records(
+            from: try XCTUnwrap(csv.data(using: .utf8))
+        )
+
+        XCTAssertEqual(result.records.count, 2)
+        XCTAssertEqual(result.skipped, 1)
+        XCTAssertEqual(result.records[0].device, "NFS2-3030")
+        XCTAssertEqual(result.records[0].type, "Fire Alarm Control Panel (FACP)")
+        XCTAssertEqual(result.records[0].address, "01")
+        XCTAssertEqual(result.records[1].type, "Booster Panel")
     }
 
     func testAccountLocationLifecycleValidatesCoordinatesAndPreservesOtherData() throws {

@@ -8,6 +8,7 @@
 import SwiftUI
 import Combine
 import MapKit
+import UniformTypeIdentifiers
 
 struct FireVaultWorkspaceAccount: Codable, Identifiable, Equatable {
     var id: String
@@ -54,6 +55,72 @@ struct FireVaultWorkspaceEquipment: Codable, Identifiable, Equatable {
     var title: String
     var subtitle: String
     var status: String
+    var latitude: Double? = nil
+    var longitude: Double? = nil
+    var pinColor: String? = nil
+
+    var coordinate: CLLocationCoordinate2D? {
+        guard let latitude, let longitude,
+              CLLocationCoordinate2DIsValid(.init(latitude: latitude, longitude: longitude)) else { return nil }
+        return .init(latitude: latitude, longitude: longitude)
+    }
+
+    var deviceAddress: String {
+        let legacyStatuses = ["active", "draft", "monitor", "normal", "enabled"]
+        return legacyStatuses.contains(status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+            ? ""
+            : status
+    }
+
+    var resolvedPinColor: FireVaultMapPinColor {
+        FireVaultMapPinColor(rawValue: pinColor ?? "") ?? .green
+    }
+}
+
+enum FireVaultEquipmentComponentCatalog {
+    static let types = [
+        "Fire Alarm Control Panel (FACP)",
+        "Remote Annunciator",
+        "Graphic Annunciator",
+        "Network Control Node",
+        "Fire Alarm Communicator",
+        "Cellular Communicator",
+        "Radio Communicator",
+        "Booster Panel",
+        "NAC Power Supply",
+        "Auxiliary Power Supply",
+        "Battery Cabinet",
+        "Smoke Detector",
+        "Duct Smoke Detector",
+        "Heat Detector",
+        "Beam Smoke Detector",
+        "Multi-Criteria Detector",
+        "CO Detector",
+        "Manual Pull Station",
+        "Monitor Module",
+        "Control Module",
+        "Relay Module",
+        "Input/Output Module",
+        "Isolation Module",
+        "Notification Appliance Circuit",
+        "Horn/Strobe",
+        "Strobe",
+        "Speaker/Strobe",
+        "Speaker",
+        "Bell",
+        "Sprinkler Waterflow Switch",
+        "Sprinkler Tamper Switch",
+        "Low-Air Switch",
+        "Pressure Switch",
+        "Fire Pump Controller",
+        "Elevator Recall Interface",
+        "Door Release Interface",
+        "Smoke Control Interface",
+        "Kitchen Hood Interface",
+        "Suppression/Releasing Panel",
+        "Remote Test Station",
+        "Other Fire Alarm Component"
+    ]
 }
 
 struct FireVaultWorkspaceLocation: Codable, Identifiable, Equatable {
@@ -64,11 +131,38 @@ struct FireVaultWorkspaceLocation: Codable, Identifiable, Equatable {
     var plusCode: String
     var latitude: Double?
     var longitude: Double?
+    var pinColor: String?
 
     var coordinate: CLLocationCoordinate2D? {
         guard let latitude, let longitude,
               CLLocationCoordinate2DIsValid(.init(latitude: latitude, longitude: longitude)) else { return nil }
         return .init(latitude: latitude, longitude: longitude)
+    }
+
+    var resolvedPinColor: FireVaultMapPinColor {
+        FireVaultMapPinColor(rawValue: pinColor ?? "") ?? .purple
+    }
+}
+
+enum FireVaultMapPinColor: String, CaseIterable, Identifiable {
+    case red = "Red"
+    case orange = "Orange"
+    case yellow = "Yellow"
+    case green = "Green"
+    case blue = "Blue"
+    case purple = "Purple"
+
+    var id: String { rawValue }
+
+    var color: Color {
+        switch self {
+        case .red: .red
+        case .orange: .orange
+        case .yellow: .yellow
+        case .green: .green
+        case .blue: .blue
+        case .purple: .purple
+        }
     }
 }
 
@@ -402,7 +496,11 @@ struct FieldWorkspaceView: View {
 
                 if settings.isFeatureVisible("account.equipment") {
                     NavigationLink {
-                        EquipmentWorkspaceView(account: account, store: store)
+                        EquipmentWorkspaceView(
+                            account: account,
+                            store: store,
+                            locationService: locationService
+                        )
                     } label: {
                         WorkspaceDestinationTile(
                             title: "Equipment", count: account.equipment.count,
@@ -628,9 +726,9 @@ private struct MapArrivalView: View {
                             HStack(spacing: 12) {
                                 Image(systemName: locationSymbol(location.type))
                                     .font(.headline)
-                                    .foregroundStyle(FieldWorkspacePalette.purple)
+                                    .foregroundStyle(location.resolvedPinColor.color)
                                     .frame(width: 34, height: 34)
-                                    .background(FieldWorkspacePalette.purple.opacity(0.14), in: Circle())
+                                    .background(location.resolvedPinColor.color.opacity(0.14), in: Circle())
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(location.label).font(.headline).foregroundStyle(.primary)
                                     Text([location.subtitle, location.plusCode].filter { !$0.isEmpty }.joined(separator: " • "))
@@ -697,7 +795,8 @@ private struct MapArrivalView: View {
                         type: draft.type,
                         plusCode: draft.plusCode,
                         latitude: draft.latitude,
-                        longitude: draft.longitude
+                        longitude: draft.longitude,
+                        pinColor: draft.pinColor.rawValue
                     )
                 }
                 return store.addLocation(
@@ -707,7 +806,8 @@ private struct MapArrivalView: View {
                     type: draft.type,
                     plusCode: draft.plusCode,
                     latitude: draft.latitude,
-                    longitude: draft.longitude
+                    longitude: draft.longitude,
+                    pinColor: draft.pinColor.rawValue
                 ) != nil
             }
         }
@@ -736,6 +836,7 @@ struct FireVaultLocationDraft: Equatable {
     var plusCode: String
     var latitude: Double?
     var longitude: Double?
+    var pinColor: FireVaultMapPinColor
 }
 
 struct FireVaultLocationEditorSheet: View {
@@ -752,6 +853,10 @@ struct FireVaultLocationEditorSheet: View {
     @State private var plusCode: String
     @State private var latitudeText: String
     @State private var longitudeText: String
+    @State private var pinColor: FireVaultMapPinColor
+    @State private var isShowingFullScreenPinEditor = false
+    @State private var mapPosition: MapCameraPosition
+    @FocusState private var isTextInputFocused: Bool
 
     init(
         accountName: String,
@@ -771,6 +876,14 @@ struct FireVaultLocationEditorSheet: View {
         _plusCode = State(initialValue: location?.plusCode ?? "")
         _latitudeText = State(initialValue: location?.latitude.map { String($0) } ?? "")
         _longitudeText = State(initialValue: location?.longitude.map { String($0) } ?? "")
+        _pinColor = State(initialValue: location?.resolvedPinColor ?? .purple)
+        let initialCoordinate = location?.coordinate
+            ?? accountCoordinate
+            ?? CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)
+        _mapPosition = State(initialValue: .region(.init(
+            center: initialCoordinate,
+            span: .init(latitudeDelta: 0.0005, longitudeDelta: 0.0005)
+        )))
     }
 
     private var parsedCoordinates: (Double?, Double?)? {
@@ -794,58 +907,86 @@ struct FireVaultLocationEditorSheet: View {
                 }
                 Section("Location") {
                     TextField("Location name", text: $label)
+                        .focused($isTextInputFocused)
                     TextField("Details", text: $subtitle, axis: .vertical).lineLimit(2...4)
+                        .focused($isTextInputFocused)
                     TextField("Type (Entrance, Panel, Riser…)", text: $type)
+                        .focused($isTextInputFocused)
                     TextField("Plus Code", text: $plusCode)
                         .textInputAutocapitalization(.characters)
-                }
-                Section("Exact Coordinates") {
-                    TextField("Latitude", text: $latitudeText)
-                        .keyboardType(.numbersAndPunctuation)
-                    TextField("Longitude", text: $longitudeText)
-                        .keyboardType(.numbersAndPunctuation)
-                    if parsedCoordinates == nil {
-                        Text("Enter both valid coordinates, or leave both blank.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                }
-                Section("Coordinate Shortcuts") {
-                    Button("Use Current Location", systemImage: "location.fill") {
-                        if let coordinate = locationService.coordinate {
-                            apply(coordinate)
+                        .focused($isTextInputFocused)
+
+                    Picker("Pin Color", selection: $pinColor) {
+                        ForEach(FireVaultMapPinColor.allCases) { option in
+                            Label(option.rawValue, systemImage: "mappin").tag(option)
                         }
-                        locationService.requestCurrentLocation(highAccuracy: true)
                     }
-                    if locationService.isLocating {
-                        HStack {
-                            ProgressView()
-                            Text(locationService.statusText)
+                    .pickerStyle(.menu)
+                }
+                Section("Exact Location") {
+                        locationPinMap
+                            .frame(height: 230)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                        Button("Edit Pin Full Screen", systemImage: "arrow.up.left.and.arrow.down.right") {
+                            isTextInputFocused = false
+                            isShowingFullScreenPinEditor = true
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        TextField("Latitude", text: $latitudeText)
+                            .keyboardType(.numbersAndPunctuation)
+                            .focused($isTextInputFocused)
+                        TextField("Longitude", text: $longitudeText)
+                            .keyboardType(.numbersAndPunctuation)
+                            .focused($isTextInputFocused)
+                        if parsedCoordinates == nil {
+                            Text("Enter both valid coordinates, or leave both blank.")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.red)
                         }
-                    } else if locationService.authorizationStatus == .denied {
-                        Button("Open Location Settings", systemImage: "gear") {
-                            locationService.openAppSettings()
-                        }
-                    }
 
-                    Button("Use Account Location", systemImage: "building.2.fill") {
-                        if let accountCoordinate {
-                            apply(accountCoordinate)
+                        Button("Use Current Location", systemImage: "location.fill") {
+                            if let coordinate = locationService.coordinate {
+                                apply(coordinate)
+                            }
+                            locationService.requestCurrentLocation(highAccuracy: true)
                         }
-                    }
-                    .disabled(accountCoordinate == nil)
+                        if locationService.isLocating {
+                            HStack {
+                                ProgressView()
+                                Text(locationService.statusText)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else if locationService.authorizationStatus == .denied {
+                            Button("Open Location Settings", systemImage: "gear") {
+                                locationService.openAppSettings()
+                            }
+                        }
 
-                    if accountCoordinate == nil {
-                        Text("This account does not have saved coordinates yet.")
+                        Button("Use Account Location", systemImage: "building.2.fill") {
+                            if let accountCoordinate {
+                                apply(accountCoordinate)
+                            }
+                        }
+                        .disabled(accountCoordinate == nil)
+
+                        if locationCoordinate != nil {
+                            Button("Remove Location Pin", systemImage: "mappin.slash", role: .destructive) {
+                                latitudeText = ""
+                                longitudeText = ""
+                            }
+                        }
+
+                        Text("Open the full-screen map for landscape editing, map layers, and 3D view.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
                 }
             }
             .navigationTitle(location == nil ? "New Location" : "Edit Location")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -859,24 +1000,76 @@ struct FireVaultLocationEditorSheet: View {
                             type: type,
                             plusCode: plusCode,
                             latitude: coordinates.0,
-                            longitude: coordinates.1
+                            longitude: coordinates.1,
+                            pinColor: pinColor
                         )) {
                             dismiss()
                         }
                     }
                     .disabled(!canSave)
                 }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { isTextInputFocused = false }
+                }
             }
         }
         .presentationDetents([.large])
+        .fullScreenCover(isPresented: $isShowingFullScreenPinEditor) {
+            FireVaultFullScreenPinEditor(
+                pinLabel: label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Location" : label,
+                pinSystemImage: "circle.fill",
+                pinTint: pinColor.color,
+                initialCoordinate: locationCoordinate,
+                fallbackCoordinate: accountCoordinate ?? locationService.coordinate
+            ) { coordinate in
+                apply(coordinate)
+            }
+        }
         .onReceive(locationService.$coordinate.compactMap { $0 }) { coordinate in
-            apply(coordinate)
+            if locationService.isLocating {
+                apply(coordinate)
+            }
         }
     }
 
     private func apply(_ coordinate: CLLocationCoordinate2D) {
         latitudeText = String(format: "%.6f", coordinate.latitude)
         longitudeText = String(format: "%.6f", coordinate.longitude)
+        mapPosition = .region(.init(
+            center: coordinate,
+            span: .init(latitudeDelta: 0.0005, longitudeDelta: 0.0005)
+        ))
+    }
+
+    private var locationCoordinate: CLLocationCoordinate2D? {
+        guard let parsedCoordinates,
+              let latitude = parsedCoordinates.0,
+              let longitude = parsedCoordinates.1 else { return nil }
+        return .init(latitude: latitude, longitude: longitude)
+    }
+
+    private var locationPinMap: some View {
+        Map(position: $mapPosition, interactionModes: []) {
+            if let locationCoordinate {
+                Annotation("", coordinate: locationCoordinate) {
+                    VStack(spacing: 3) {
+                        Circle()
+                            .fill(pinColor.color)
+                            .overlay(Circle().stroke(.white, lineWidth: 3))
+                            .frame(width: 24, height: 24)
+                            .shadow(radius: 4, y: 2)
+                        Text(label.isEmpty ? "Location" : label)
+                            .font(.caption2.bold())
+                            .lineLimit(1)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(.regularMaterial, in: Capsule())
+                    }
+                }
+            }
+        }
+        .mapStyle(.standard(elevation: .realistic))
     }
 }
 
@@ -915,8 +1108,14 @@ private struct WorkspaceMap: View {
             }
             ForEach(validLocations) { location in
                 if let coordinate = location.coordinate {
-                    Marker(location.label, systemImage: "mappin", coordinate: coordinate)
-                        .tint(FieldWorkspacePalette.purple)
+                    Annotation("", coordinate: coordinate) {
+                        Circle()
+                            .fill(location.resolvedPinColor.color)
+                            .overlay(Circle().stroke(.white, lineWidth: 2))
+                            .frame(width: 18, height: 18)
+                            .shadow(radius: 3, y: 1)
+                            .accessibilityLabel(location.label)
+                    }
                 }
             }
         }
@@ -1126,11 +1325,91 @@ private struct FilesScansView: View {
     }
 }
 
+struct FireVaultEquipmentCSVRecord {
+    let device: String
+    let type: String
+    let address: String
+}
+
+enum FireVaultEquipmentCSVError: LocalizedError {
+    case unreadable
+    case empty
+    case missingTypeColumn
+    case noValidRows
+
+    var errorDescription: String? {
+        switch self {
+        case .unreadable: "The selected CSV file could not be read."
+        case .empty: "The selected CSV file is empty."
+        case .missingTypeColumn: "The CSV needs a TYPE or DEVICE TYPE column."
+        case .noValidRows: "No equipment rows with a device type were found."
+        }
+    }
+}
+
+struct FireVaultEquipmentCSVImporter {
+    static func records(from data: Data) throws -> (records: [FireVaultEquipmentCSVRecord], skipped: Int) {
+        guard let source = String(data: data, encoding: .utf8)
+            ?? String(data: data, encoding: .utf16) else { throw FireVaultEquipmentCSVError.unreadable }
+        let table = FireVaultStore.parseCSV(source)
+        guard let headers = table.first, !headers.isEmpty else { throw FireVaultEquipmentCSVError.empty }
+        let normalized = headers.map(normalize)
+
+        let deviceIndex = column(in: normalized, aliases: ["device", "model", "description", "devicedescription"])
+        guard let typeIndex = column(
+            in: normalized,
+            aliases: ["type", "devicetype", "componenttype", "equipmenttype"]
+        ) else { throw FireVaultEquipmentCSVError.missingTypeColumn }
+        let addressIndex = column(
+            in: normalized,
+            aliases: ["address", "deviceaddress", "pointaddress", "addressnumber"]
+        )
+
+        var records: [FireVaultEquipmentCSVRecord] = []
+        var skipped = 0
+        for row in table.dropFirst() where row.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            let type = value(at: typeIndex, in: row)
+            guard !type.isEmpty else {
+                skipped += 1
+                continue
+            }
+            records.append(.init(
+                device: deviceIndex.map { value(at: $0, in: row) } ?? "",
+                type: type,
+                address: addressIndex.map { value(at: $0, in: row) } ?? ""
+            ))
+        }
+        guard !records.isEmpty else { throw FireVaultEquipmentCSVError.noValidRows }
+        return (records, skipped)
+    }
+
+    private static func column(in headers: [String], aliases: Set<String>) -> Int? {
+        headers.firstIndex(where: aliases.contains)
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value.lowercased().filter(\.isLetter)
+    }
+
+    private static func value(at index: Int, in row: [String]) -> String {
+        guard row.indices.contains(index) else { return "" }
+        return row[index].trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private struct FireVaultEquipmentImportNotice: Identifiable {
+    let id = UUID()
+    let message: String
+}
+
 private struct EquipmentWorkspaceView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
+    @ObservedObject var locationService: FireVaultLocationService
     @State private var editingEquipment: FireVaultWorkspaceEquipment?
     @State private var isShowingEditor = false
+    @State private var isImportingCSV = false
+    @State private var importNotice: FireVaultEquipmentImportNotice?
 
     var body: some View {
         List {
@@ -1156,9 +1435,11 @@ private struct EquipmentWorkspaceView: View {
                                 Text(equipment.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                             }
                             Spacer()
-                            Text(equipment.status)
-                                .font(.caption2.bold())
-                                .foregroundStyle(equipment.status.lowercased().contains("attention") ? FieldWorkspacePalette.red : FieldWorkspacePalette.green)
+                            if !equipment.deviceAddress.isEmpty {
+                                Text(equipment.deviceAddress)
+                                    .font(.caption2.monospaced().bold())
+                                    .foregroundStyle(FieldWorkspacePalette.green)
+                            }
                         }
                         .padding(.vertical, 4)
                     }
@@ -1176,32 +1457,89 @@ private struct EquipmentWorkspaceView: View {
         .navigationTitle("Equipment")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            Button("Add Equipment", systemImage: "plus") {
-                editingEquipment = nil
-                isShowingEditor = true
-            }
+            HStack(spacing: 10) {
+                Button("Import CSV", systemImage: "square.and.arrow.down") {
+                    isImportingCSV = true
+                }
+                .buttonStyle(.glass)
+
+                Button("Add Equipment", systemImage: "plus") {
+                    editingEquipment = nil
+                    isShowingEditor = true
+                }
                 .buttonStyle(.glassProminent)
-                .padding(12)
-                .glassEffect()
+            }
+            .padding(12)
+            .glassEffect()
         }
         .sheet(isPresented: $isShowingEditor) {
-            FireVaultEquipmentEditorSheet(accountName: account.name, equipment: editingEquipment) { draft in
+            FireVaultEquipmentEditorSheet(
+                accountName: account.name,
+                accountCoordinate: account.coordinate,
+                equipment: editingEquipment,
+                locationService: locationService
+            ) { draft in
                 if let editingEquipment {
                     return store.updateEquipment(
                         accountID: account.id,
                         equipmentID: editingEquipment.id,
                         title: draft.title,
                         subtitle: draft.subtitle,
-                        status: draft.status
+                        status: draft.deviceAddress,
+                        latitude: draft.latitude,
+                        longitude: draft.longitude,
+                        pinColor: draft.pinColor.rawValue
                     )
                 }
                 return store.addEquipment(
                     to: account.id,
                     title: draft.title,
                     subtitle: draft.subtitle,
-                    status: draft.status
+                    status: draft.deviceAddress,
+                    latitude: draft.latitude,
+                    longitude: draft.longitude,
+                    pinColor: draft.pinColor.rawValue
                 ) != nil
             }
+        }
+        .fileImporter(
+            isPresented: $isImportingCSV,
+            allowedContentTypes: [.commaSeparatedText, .plainText, .data],
+            allowsMultipleSelection: false
+        ) { selection in
+            importEquipment(from: selection)
+        }
+        .alert(item: $importNotice) { notice in
+            Alert(
+                title: Text("Equipment CSV Import"),
+                message: Text(notice.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+    }
+
+    private func importEquipment(from selection: Result<[URL], Error>) {
+        do {
+            guard let url = try selection.get().first else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            let result = try FireVaultEquipmentCSVImporter.records(from: data)
+            var imported = 0
+            for record in result.records {
+                if store.addEquipment(
+                    to: account.id,
+                    title: record.type,
+                    subtitle: record.device,
+                    status: record.address
+                ) != nil {
+                    imported += 1
+                }
+            }
+            let skippedText = result.skipped == 0 ? "" : " \(result.skipped) row(s) were skipped because TYPE was blank."
+            importNotice = .init(message: "Imported \(imported) equipment record(s).\(skippedText)")
+        } catch {
+            importNotice = .init(message: error.localizedDescription)
         }
     }
 }
@@ -1209,30 +1547,59 @@ private struct EquipmentWorkspaceView: View {
 struct FireVaultEquipmentDraft: Equatable {
     var title: String
     var subtitle: String
-    var status: String
+    var deviceAddress: String
+    var latitude: Double?
+    var longitude: Double?
+    var pinColor: FireVaultMapPinColor
 }
 
 struct FireVaultEquipmentEditorSheet: View {
     let accountName: String
+    let accountCoordinate: CLLocationCoordinate2D?
     let equipment: FireVaultWorkspaceEquipment?
+    @ObservedObject var locationService: FireVaultLocationService
     let save: (FireVaultEquipmentDraft) -> Bool
 
     @Environment(\.dismiss) private var dismiss
     @State private var title: String
     @State private var subtitle: String
-    @State private var status: String
+    @State private var deviceAddress: String
+    @State private var latitude: Double?
+    @State private var longitude: Double?
+    @State private var mapPosition: MapCameraPosition
+    @State private var mapSpan: CLLocationDegrees = 0.0005
+    @State private var isShowingComponentPicker = false
+    @State private var isShowingFullScreenPinEditor = false
+    @State private var showsLocation: Bool
+    @State private var pinColor: FireVaultMapPinColor
+    @FocusState private var isTextInputFocused: Bool
 
     init(
         accountName: String,
+        accountCoordinate: CLLocationCoordinate2D?,
         equipment: FireVaultWorkspaceEquipment?,
+        locationService: FireVaultLocationService,
         save: @escaping (FireVaultEquipmentDraft) -> Bool
     ) {
         self.accountName = accountName
+        self.accountCoordinate = accountCoordinate
         self.equipment = equipment
+        self.locationService = locationService
         self.save = save
-        _title = State(initialValue: equipment?.title ?? "")
+        _title = State(initialValue: equipment?.title ?? FireVaultEquipmentComponentCatalog.types[0])
         _subtitle = State(initialValue: equipment?.subtitle ?? "")
-        _status = State(initialValue: equipment?.status ?? "Active")
+        _deviceAddress = State(initialValue: equipment?.deviceAddress ?? "")
+        _latitude = State(initialValue: equipment?.latitude)
+        _longitude = State(initialValue: equipment?.longitude)
+        _showsLocation = State(initialValue: equipment?.coordinate != nil)
+        _pinColor = State(initialValue: equipment?.resolvedPinColor ?? .green)
+        let initialCoordinate = equipment?.coordinate
+            ?? accountCoordinate
+            ?? CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)
+        _mapPosition = State(initialValue: .region(.init(
+            center: initialCoordinate,
+            span: .init(latitudeDelta: 0.0005, longitudeDelta: 0.0005)
+        )))
     }
 
     private var canSave: Bool {
@@ -1246,29 +1613,456 @@ struct FireVaultEquipmentEditorSheet: View {
                     Text(accountName).foregroundStyle(.secondary)
                 }
                 Section("Equipment") {
-                    TextField("Equipment name", text: $title)
-                    TextField("Location or details", text: $subtitle, axis: .vertical)
+                    Button {
+                        isTextInputFocused = false
+                        isShowingComponentPicker = true
+                    } label: {
+                        HStack {
+                            Text("Component Type")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text(title)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
+                                .lineLimit(2)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption.bold())
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    TextField("Model or description", text: $subtitle, axis: .vertical)
                         .lineLimit(2...5)
-                    TextField("Status", text: $status)
+                        .focused($isTextInputFocused)
+                    TextField("Device Address", text: $deviceAddress)
+                        .focused($isTextInputFocused)
+                        .textInputAutocapitalization(.characters)
+
+                    Toggle("Show Location", isOn: $showsLocation)
+
+                    Picker("Pin Color", selection: $pinColor) {
+                        ForEach(FireVaultMapPinColor.allCases) { option in
+                            Label(option.rawValue, systemImage: "circle.fill").tag(option)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                if showsLocation {
+                    Section("Exact Equipment Location") {
+                        equipmentPinMap
+                            .frame(height: 230)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                        Button("Edit Pin Full Screen", systemImage: "arrow.up.left.and.arrow.down.right") {
+                            isTextInputFocused = false
+                            isShowingFullScreenPinEditor = true
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button("Use Current Location", systemImage: "location.fill") {
+                            if let coordinate = locationService.coordinate {
+                                apply(coordinate)
+                            }
+                            locationService.requestCurrentLocation(highAccuracy: true)
+                        }
+                        if locationService.isLocating {
+                            HStack {
+                                ProgressView()
+                                Text(locationService.statusText)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else if locationService.authorizationStatus == .denied {
+                            Button("Open Location Settings", systemImage: "gear") {
+                                locationService.openAppSettings()
+                            }
+                        }
+
+                        Button("Use Account Location", systemImage: "building.2.fill") {
+                            if let accountCoordinate { apply(accountCoordinate) }
+                        }
+                        .disabled(accountCoordinate == nil)
+
+                        if latitude != nil && longitude != nil {
+                            Button("Remove Equipment Pin", systemImage: "mappin.slash", role: .destructive) {
+                                latitude = nil
+                                longitude = nil
+                            }
+                        }
+
+                        Text("For precise placement, open the full-screen map and rotate the iPhone to landscape.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .navigationTitle(equipment == nil ? "New Equipment" : "Edit Equipment")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        if save(.init(title: title, subtitle: subtitle, status: status)) {
+                        if save(.init(
+                            title: title,
+                            subtitle: subtitle,
+                            deviceAddress: deviceAddress,
+                            latitude: latitude,
+                            longitude: longitude,
+                            pinColor: pinColor
+                        )) {
                             dismiss()
                         }
                     }
                     .disabled(!canSave)
                 }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { isTextInputFocused = false }
+                }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
+        .sheet(isPresented: $isShowingComponentPicker) {
+            FireVaultComponentTypePickerSheet(selection: $title, componentTypes: componentTypes)
+        }
+        .fullScreenCover(isPresented: $isShowingFullScreenPinEditor) {
+            FireVaultFullScreenPinEditor(
+                pinLabel: title,
+                pinSystemImage: "circle.fill",
+                pinTint: pinColor.color,
+                initialCoordinate: equipmentCoordinate,
+                fallbackCoordinate: accountCoordinate ?? locationService.coordinate
+            ) { coordinate in
+                apply(coordinate)
+            }
+        }
+        .onReceive(locationService.$coordinate.compactMap { $0 }) { coordinate in
+            apply(coordinate)
+        }
+    }
+
+    private var equipmentCoordinate: CLLocationCoordinate2D? {
+        guard let latitude, let longitude else { return nil }
+        return .init(latitude: latitude, longitude: longitude)
+    }
+
+    private var componentTypes: [String] {
+        FireVaultEquipmentComponentCatalog.types.contains(title)
+            ? FireVaultEquipmentComponentCatalog.types
+            : [title] + FireVaultEquipmentComponentCatalog.types
+    }
+
+    private var equipmentPinMap: some View {
+        Map(position: $mapPosition, interactionModes: []) {
+            if let equipmentCoordinate {
+                Annotation("", coordinate: equipmentCoordinate) {
+                    Circle()
+                        .fill(pinColor.color)
+                        .overlay(Circle().stroke(.white, lineWidth: 3))
+                        .frame(width: 24, height: 24)
+                        .shadow(radius: 4, y: 2)
+                        .accessibilityLabel(title)
+                }
+            }
+        }
+    }
+
+    private func apply(_ coordinate: CLLocationCoordinate2D) {
+        latitude = coordinate.latitude
+        longitude = coordinate.longitude
+        mapSpan = 0.0005
+        recenterMap(on: coordinate)
+    }
+
+    private func recenterMap() {
+        guard let equipmentCoordinate else { return }
+        recenterMap(on: equipmentCoordinate)
+    }
+
+    private func recenterMap(on coordinate: CLLocationCoordinate2D) {
+        mapPosition = .region(.init(
+            center: coordinate,
+            span: .init(latitudeDelta: mapSpan, longitudeDelta: mapSpan)
+        ))
+    }
+}
+
+private struct FireVaultComponentTypePickerSheet: View {
+    @Binding var selection: String
+    let componentTypes: [String]
+    @Environment(\.dismiss) private var dismiss
+    @State private var pendingSelection: String
+
+    init(selection: Binding<String>, componentTypes: [String]) {
+        _selection = selection
+        self.componentTypes = componentTypes
+        _pendingSelection = State(initialValue: selection.wrappedValue)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button("Cancel") { dismiss() }
+                Spacer()
+                Text("Component Type").font(.headline)
+                Spacer()
+                Button("Select") {
+                    selection = pendingSelection
+                    dismiss()
+                }
+                .fontWeight(.semibold)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 14)
+
+            Picker("Component Type", selection: $pendingSelection) {
+                ForEach(componentTypes, id: \.self) { component in
+                    Text(component).tag(component)
+                }
+            }
+            .pickerStyle(.wheel)
+        }
+        .presentationDetents([.height(260)])
+    }
+}
+
+private struct FireVaultFullScreenPinEditor: View {
+    private enum MapLayer: String, CaseIterable, Identifiable {
+        case standard = "Standard"
+        case hybrid = "Hybrid"
+        case imagery = "Satellite"
+
+        var id: String { rawValue }
+
+        var symbol: String {
+            switch self {
+            case .standard: "map"
+            case .hybrid: "map.fill"
+            case .imagery: "globe.americas.fill"
+            }
+        }
+    }
+
+    let pinLabel: String
+    let pinSystemImage: String
+    let pinTint: Color
+    let save: (CLLocationCoordinate2D) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var coordinate: CLLocationCoordinate2D
+    @State private var mapSpan: CLLocationDegrees = 0.0005
+    @State private var mapPosition: MapCameraPosition
+    @State private var mapLayer: MapLayer = .standard
+    @State private var is3DEnabled = false
+    @GestureState private var pinDragTranslation: CGSize = .zero
+
+    init(
+        pinLabel: String,
+        pinSystemImage: String,
+        pinTint: Color,
+        initialCoordinate: CLLocationCoordinate2D?,
+        fallbackCoordinate: CLLocationCoordinate2D?,
+        save: @escaping (CLLocationCoordinate2D) -> Void
+    ) {
+        let start = initialCoordinate
+            ?? fallbackCoordinate
+            ?? CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)
+        self.pinLabel = pinLabel
+        self.pinSystemImage = pinSystemImage
+        self.pinTint = pinTint
+        self.save = save
+        _coordinate = State(initialValue: start)
+        _mapPosition = State(initialValue: .region(.init(
+            center: start,
+            span: .init(latitudeDelta: 0.0005, longitudeDelta: 0.0005)
+        )))
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            MapReader { proxy in
+                ZStack {
+                    styledMap(proxy: proxy)
+
+                    VStack(spacing: 10) {
+                        HStack {
+                            Button("Cancel") { dismiss() }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.secondary)
+
+                            Spacer()
+
+                            VStack(spacing: 2) {
+                                Text("Location Pin").font(.headline)
+                                Text("Press and drag the pin • Pinch to zoom")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(.regularMaterial, in: Capsule())
+
+                            Spacer()
+
+                            Button("Save Pin") {
+                                save(coordinate)
+                                dismiss()
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+
+                        if geometry.size.height > geometry.size.width {
+                            Label("Rotate iPhone to landscape for precise placement", systemImage: "iphone.gen3.radiowaves.left.and.right")
+                                .font(.caption.bold())
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(.regularMaterial, in: Capsule())
+                        }
+
+                        Spacer()
+
+                        HStack {
+                            Menu {
+                                Picker("Map Layer", selection: $mapLayer) {
+                                    ForEach(MapLayer.allCases) { layer in
+                                        Label(layer.rawValue, systemImage: layer.symbol).tag(layer)
+                                    }
+                                }
+                                Divider()
+                                Button {
+                                    is3DEnabled.toggle()
+                                    updatePerspective()
+                                } label: {
+                                    Label(
+                                        is3DEnabled ? "Return to 2D" : "3D View",
+                                        systemImage: is3DEnabled ? "view.2d" : "view.3d"
+                                    )
+                                }
+                            } label: {
+                                Label(mapLayer.rawValue, systemImage: "square.3.layers.3d.top.filled")
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Spacer()
+                            VStack(spacing: 8) {
+                                Button {
+                                    mapSpan = max(mapSpan / 2, 0.00005)
+                                    recenterMap()
+                                } label: {
+                                    Image(systemName: "plus.magnifyingglass")
+                                }
+                                Button {
+                                    mapSpan = min(mapSpan * 2, 0.02)
+                                    recenterMap()
+                                } label: {
+                                    Image(systemName: "minus.magnifyingglass")
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+                    .padding()
+                }
+            }
+        }
+        .background(Color.black)
+        .onAppear {
+            FireVaultOrientationCoordinator.beginOverlayPlacement()
+        }
+        .onDisappear {
+            FireVaultOrientationCoordinator.finishOverlayPlacement()
+        }
+    }
+
+    @ViewBuilder
+    private func styledMap(proxy: MapProxy) -> some View {
+        switch mapLayer {
+        case .standard:
+            equipmentMap(proxy: proxy).mapStyle(.standard(elevation: .realistic))
+        case .hybrid:
+            equipmentMap(proxy: proxy).mapStyle(.hybrid(elevation: .realistic))
+        case .imagery:
+            equipmentMap(proxy: proxy).mapStyle(.imagery(elevation: .realistic))
+        }
+    }
+
+    private func equipmentMap(proxy: MapProxy) -> some View {
+        Map(position: $mapPosition, interactionModes: [.pan, .zoom, .rotate, .pitch]) {
+            Annotation("", coordinate: coordinate) {
+                VStack(spacing: 3) {
+                    if pinSystemImage == "circle.fill" {
+                        Circle()
+                            .fill(pinTint)
+                            .overlay(Circle().stroke(.white, lineWidth: 3))
+                            .frame(width: 26, height: 26)
+                            .shadow(radius: 6, y: 3)
+                    } else {
+                        Image(systemName: pinSystemImage)
+                            .font(.title3.bold())
+                            .foregroundStyle(.white)
+                            .padding(13)
+                            .background(pinTint, in: Circle())
+                            .shadow(radius: 6, y: 3)
+                    }
+                    Text(equipmentDisplayLabel)
+                        .font(.caption2.bold())
+                        .lineLimit(1)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(.regularMaterial, in: Capsule())
+                }
+                .contentShape(Rectangle())
+                .offset(pinDragTranslation)
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 2, coordinateSpace: .local)
+                        .updating($pinDragTranslation) { drag, translation, _ in
+                            translation = drag.translation
+                        }
+                        .onEnded { drag in
+                            guard let startPoint = proxy.convert(coordinate, to: .local) else { return }
+                            let destination = CGPoint(
+                                x: startPoint.x + drag.translation.width,
+                                y: startPoint.y + drag.translation.height
+                            )
+                            if let converted = proxy.convert(destination, from: .local) {
+                                coordinate = converted
+                            }
+                        }
+                )
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    private var equipmentDisplayLabel: String {
+        if let openingParenthesis = pinLabel.firstIndex(of: "("),
+           let closingParenthesis = pinLabel.firstIndex(of: ")"),
+           openingParenthesis < closingParenthesis {
+            let acronym = pinLabel[pinLabel.index(after: openingParenthesis)..<closingParenthesis]
+            if !acronym.isEmpty { return String(acronym) }
+        }
+        return pinLabel
+    }
+
+    private func recenterMap() {
+        mapPosition = .region(.init(
+            center: coordinate,
+            span: .init(latitudeDelta: mapSpan, longitudeDelta: mapSpan)
+        ))
+    }
+
+    private func updatePerspective() {
+        let distance = max(80, min(mapSpan * 222_000, 4_000))
+        mapPosition = .camera(MapCamera(
+            centerCoordinate: coordinate,
+            distance: distance,
+            heading: 0,
+            pitch: is3DEnabled ? 55 : 0
+        ))
     }
 }
 
