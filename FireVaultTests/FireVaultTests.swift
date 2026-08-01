@@ -204,6 +204,59 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(reloadedStore.accounts.first(where: { $0.id == account.id })?.notes.contains(where: { $0.id == note.id }) ?? true)
     }
 
+    func testAccountEquipmentLifecyclePersistsWithoutChangingOtherAccountData() throws {
+        let suite = "FireVaultTests.EquipmentLifecycle.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let account = store.addAccount()
+        let accountIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        store.accounts[accountIndex].favorite = true
+        store.accounts[accountIndex].notes = [
+            .init(id: "note-1", title: "Panel", text: "Lobby", date: "Today")
+        ]
+
+        let equipment = try XCTUnwrap(
+            store.addEquipment(
+                to: account.id,
+                title: "  Notifier NFS2-3030  ",
+                subtitle: "  Main electrical room  ",
+                status: "  Active  "
+            )
+        )
+        XCTAssertEqual(equipment.title, "Notifier NFS2-3030")
+        XCTAssertEqual(equipment.subtitle, "Main electrical room")
+        XCTAssertEqual(equipment.status, "Active")
+
+        XCTAssertTrue(
+            store.updateEquipment(
+                accountID: account.id,
+                equipmentID: equipment.id,
+                title: "  Notifier NFS-320  ",
+                subtitle: "  Front lobby  ",
+                status: "   "
+            )
+        )
+
+        let updatedAccount = try XCTUnwrap(store.accounts.first(where: { $0.id == account.id }))
+        let updatedEquipment = try XCTUnwrap(updatedAccount.equipment.first(where: { $0.id == equipment.id }))
+        XCTAssertEqual(updatedEquipment.title, "Notifier NFS-320")
+        XCTAssertEqual(updatedEquipment.subtitle, "Front lobby")
+        XCTAssertEqual(updatedEquipment.status, "Active")
+        XCTAssertTrue(updatedAccount.favorite)
+        XCTAssertEqual(updatedAccount.notes.map(\.id), ["note-1"])
+
+        let reloadedStore = FireVaultStore(defaults: defaults)
+        let persisted = try XCTUnwrap(reloadedStore.accounts.first(where: { $0.id == account.id }))
+        XCTAssertEqual(persisted.equipment.first(where: { $0.id == equipment.id }), updatedEquipment)
+        XCTAssertTrue(persisted.favorite)
+        XCTAssertEqual(persisted.notes.map(\.id), ["note-1"])
+
+        XCTAssertTrue(reloadedStore.deleteEquipment(accountID: account.id, equipmentID: equipment.id))
+        XCTAssertFalse(reloadedStore.accounts.first(where: { $0.id == account.id })?.equipment.contains(where: { $0.id == equipment.id }) ?? true)
+    }
+
     func testTripLogOccupiesCenterNavigationPosition() {
         XCTAssertEqual(FireVaultShellTab.allCases.count, 5)
         XCTAssertEqual(FireVaultShellTab.allCases[2], .trip)

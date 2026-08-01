@@ -588,12 +588,60 @@ final class FireVaultStore: ObservableObject {
         return document
     }
 
-    func addEquipment(to accountID: String) {
-        guard let index = accounts.firstIndex(where: { $0.id == accountID }) else { return }
-        accounts[index].equipment.append(
-            .init(id: UUID().uuidString, title: "New equipment", subtitle: "Details not entered", status: "Draft")
+    @discardableResult
+    func addEquipment(
+        to accountID: String,
+        title: String = "New equipment",
+        subtitle: String = "Details not entered",
+        status: String = "Draft"
+    ) -> FireVaultWorkspaceEquipment? {
+        guard let index = accounts.firstIndex(where: { $0.id == accountID }) else { return nil }
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else { return nil }
+        let equipment = FireVaultWorkspaceEquipment(
+            id: UUID().uuidString,
+            title: trimmedTitle,
+            subtitle: subtitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            status: status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Active"
+                : status.trimmingCharacters(in: .whitespacesAndNewlines)
         )
+        accounts[index].equipment.append(equipment)
         persist()
+        return equipment
+    }
+
+    @discardableResult
+    func updateEquipment(
+        accountID: String,
+        equipmentID: String,
+        title: String,
+        subtitle: String,
+        status: String
+    ) -> Bool {
+        guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
+              let equipmentIndex = accounts[accountIndex].equipment.firstIndex(where: { $0.id == equipmentID }) else {
+            return false
+        }
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else { return false }
+        accounts[accountIndex].equipment[equipmentIndex].title = trimmedTitle
+        accounts[accountIndex].equipment[equipmentIndex].subtitle = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedStatus = status.trimmingCharacters(in: .whitespacesAndNewlines)
+        accounts[accountIndex].equipment[equipmentIndex].status = trimmedStatus.isEmpty ? "Active" : trimmedStatus
+        persist()
+        return true
+    }
+
+    @discardableResult
+    func deleteEquipment(accountID: String, equipmentID: String) -> Bool {
+        guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
+              let equipmentIndex = accounts[accountIndex].equipment.firstIndex(where: { $0.id == equipmentID }) else {
+            return false
+        }
+        accounts[accountIndex].equipment.remove(at: equipmentIndex)
+        persist()
+        return true
     }
 
     private func mediaURL(accountID: String, fileName: String) throws -> URL {

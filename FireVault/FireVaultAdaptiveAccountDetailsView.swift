@@ -67,6 +67,8 @@ struct FireVaultAdaptiveAccountDetailsView: View {
     @State private var isShowingAccountEditor = false
     @State private var editingNote: FireVaultWorkspaceNote?
     @State private var isShowingNoteEditor = false
+    @State private var editingEquipment: FireVaultWorkspaceEquipment?
+    @State private var isShowingEquipmentEditor = false
     @State private var isLoadingAccountBrief = false
     @State private var accountBrief: String?
     @State private var accountBriefError: String?
@@ -194,6 +196,25 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     )
                 }
                 return store.addNote(to: account.id, title: draft.title, text: draft.text) != nil
+            }
+        }
+        .sheet(isPresented: $isShowingEquipmentEditor) {
+            FireVaultEquipmentEditorSheet(accountName: account.name, equipment: editingEquipment) { draft in
+                if let editingEquipment {
+                    return store.updateEquipment(
+                        accountID: account.id,
+                        equipmentID: editingEquipment.id,
+                        title: draft.title,
+                        subtitle: draft.subtitle,
+                        status: draft.status
+                    )
+                }
+                return store.addEquipment(
+                    to: account.id,
+                    title: draft.title,
+                    subtitle: draft.subtitle,
+                    status: draft.status
+                ) != nil
             }
         }
     }
@@ -514,6 +535,12 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                         isShowingNoteEditor = true
                     }
                     .buttonStyle(.glass)
+                } else if selectedSection == .equipment {
+                    Button("Add Equipment", systemImage: "plus") {
+                        editingEquipment = nil
+                        isShowingEquipmentEditor = true
+                    }
+                    .buttonStyle(.glass)
                 }
                 Text("\(count(for: selectedSection)) total")
                     .font(.subheadline.monospacedDigit())
@@ -553,7 +580,18 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     emptyRow("No equipment saved", symbol: "wrench.and.screwdriver")
                 } else {
                     ForEach(account.equipment) { equipment in
-                        dataRow(title: equipment.title, subtitle: equipment.subtitle, trailing: equipment.status, symbol: "wrench.and.screwdriver.fill")
+                        Button {
+                            editingEquipment = equipment
+                            isShowingEquipmentEditor = true
+                        } label: {
+                            dataRow(title: equipment.title, subtitle: equipment.subtitle, trailing: equipment.status, symbol: "wrench.and.screwdriver.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Delete Equipment", systemImage: "trash", role: .destructive) {
+                                store.deleteEquipment(accountID: account.id, equipmentID: equipment.id)
+                            }
+                        }
                     }
                 }
             case .locations:

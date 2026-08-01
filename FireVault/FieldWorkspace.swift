@@ -928,6 +928,8 @@ private struct FilesScansView: View {
 private struct EquipmentWorkspaceView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
+    @State private var editingEquipment: FireVaultWorkspaceEquipment?
+    @State private var isShowingEditor = false
 
     var body: some View {
         List {
@@ -939,12 +941,9 @@ private struct EquipmentWorkspaceView: View {
                 )
             } else {
                 ForEach(account.equipment) { equipment in
-                    NavigationLink {
-                        NativeRecordDetailView(
-                            title: equipment.title,
-                            subtitle: equipment.subtitle,
-                            symbol: "wrench.and.screwdriver.fill"
-                        )
+                    Button {
+                        editingEquipment = equipment
+                        isShowingEditor = true
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "wrench.and.screwdriver.fill")
@@ -963,6 +962,11 @@ private struct EquipmentWorkspaceView: View {
                         .padding(.vertical, 4)
                     }
                     .buttonStyle(.plain)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button("Delete", systemImage: "trash", role: .destructive) {
+                            store.deleteEquipment(accountID: account.id, equipmentID: equipment.id)
+                        }
+                    }
                 }
             }
         }
@@ -971,11 +975,99 @@ private struct EquipmentWorkspaceView: View {
         .navigationTitle("Equipment")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            Button("Add Equipment", systemImage: "plus") { store.addEquipment(to: account.id) }
+            Button("Add Equipment", systemImage: "plus") {
+                editingEquipment = nil
+                isShowingEditor = true
+            }
                 .buttonStyle(.glassProminent)
                 .padding(12)
                 .glassEffect()
         }
+        .sheet(isPresented: $isShowingEditor) {
+            FireVaultEquipmentEditorSheet(accountName: account.name, equipment: editingEquipment) { draft in
+                if let editingEquipment {
+                    return store.updateEquipment(
+                        accountID: account.id,
+                        equipmentID: editingEquipment.id,
+                        title: draft.title,
+                        subtitle: draft.subtitle,
+                        status: draft.status
+                    )
+                }
+                return store.addEquipment(
+                    to: account.id,
+                    title: draft.title,
+                    subtitle: draft.subtitle,
+                    status: draft.status
+                ) != nil
+            }
+        }
+    }
+}
+
+struct FireVaultEquipmentDraft: Equatable {
+    var title: String
+    var subtitle: String
+    var status: String
+}
+
+struct FireVaultEquipmentEditorSheet: View {
+    let accountName: String
+    let equipment: FireVaultWorkspaceEquipment?
+    let save: (FireVaultEquipmentDraft) -> Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title: String
+    @State private var subtitle: String
+    @State private var status: String
+
+    init(
+        accountName: String,
+        equipment: FireVaultWorkspaceEquipment?,
+        save: @escaping (FireVaultEquipmentDraft) -> Bool
+    ) {
+        self.accountName = accountName
+        self.equipment = equipment
+        self.save = save
+        _title = State(initialValue: equipment?.title ?? "")
+        _subtitle = State(initialValue: equipment?.subtitle ?? "")
+        _status = State(initialValue: equipment?.status ?? "Active")
+    }
+
+    private var canSave: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Account") {
+                    Text(accountName).foregroundStyle(.secondary)
+                }
+                Section("Equipment") {
+                    TextField("Equipment name", text: $title)
+                    TextField("Location or details", text: $subtitle, axis: .vertical)
+                        .lineLimit(2...5)
+                    TextField("Status", text: $status)
+                }
+            }
+            .navigationTitle(equipment == nil ? "New Equipment" : "Edit Equipment")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        if save(.init(title: title, subtitle: subtitle, status: status)) {
+                            dismiss()
+                        }
+                    }
+                    .disabled(!canSave)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 
