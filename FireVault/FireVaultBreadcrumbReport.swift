@@ -1516,16 +1516,9 @@ enum FireVaultTripLogPDFRenderer {
         UIBezierPath(roundedRect: masthead, cornerRadius: 18).fill()
 
         let logoRect = CGRect(x: 42, y: 40, width: 58, height: 58)
-        if let logo = UIImage(named: "FireVaultLogo") {
-            roundedLogo(logo, size: logoRect.size, cornerRadius: 13).draw(in: logoRect)
-        } else {
-            UIColor.black.withAlphaComponent(0.42).setFill()
-            UIBezierPath(roundedRect: logoRect, cornerRadius: 13).fill()
-            drawCenteredText("FV", font: .systemFont(ofSize: 19, weight: .black), color: .white, rect: logoRect)
-        }
+        drawFireVaultProIcon(in: logoRect, cornerRadius: 13)
 
-        drawText("FIRE", font: .systemFont(ofSize: 23, weight: .black), color: red, x: 116, y: 39, width: 62)
-        drawText("VAULT", font: .systemFont(ofSize: 23, weight: .black), color: .white, x: 178, y: 39, width: 82)
+        drawFireVaultProWordmark(x: 116, y: 39, fontSize: 23)
         drawText(title, font: .systemFont(ofSize: 10, weight: .bold), color: .white, x: 116, y: 70, width: 300)
 
         let identity = [
@@ -1560,12 +1553,8 @@ enum FireVaultTripLogPDFRenderer {
         let bar = CGRect(x: 24, y: 22, width: 564, height: 58)
         navy.setFill()
         UIBezierPath(roundedRect: bar, cornerRadius: 16).fill()
-        if let logo = UIImage(named: "FireVaultLogo") {
-            let rect = CGRect(x: 38, y: 31, width: 40, height: 40)
-            roundedLogo(logo, size: rect.size, cornerRadius: 9).draw(in: rect)
-        }
-        drawText("FIRE", font: .systemFont(ofSize: 16, weight: .black), color: red, x: 90, y: 33, width: 43)
-        drawText("VAULT", font: .systemFont(ofSize: 16, weight: .black), color: .white, x: 133, y: 33, width: 62)
+        drawFireVaultProIcon(in: CGRect(x: 38, y: 31, width: 40, height: 40), cornerRadius: 9)
+        drawFireVaultProWordmark(x: 90, y: 33, fontSize: 16)
         drawText(title, font: .systemFont(ofSize: 8.5, weight: .bold), color: UIColor.white.withAlphaComponent(0.78), x: 90, y: 55, width: 220)
         drawText(date, font: .systemFont(ofSize: 8.5, weight: .semibold), color: .white, x: 352, y: 45, width: 214, alignment: .right)
         drawFooter(page: page)
@@ -1639,25 +1628,56 @@ enum FireVaultTripLogPDFRenderer {
         line.addLine(to: .init(x: 570, y: 758))
         line.lineWidth = 0.7
         line.stroke()
-        drawText("FIREVAULT FIELD OPERATIONS", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 42, y: 766, width: 250)
+        drawText("FIREVAULT PRO FIELD OPERATIONS", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 42, y: 766, width: 250)
         drawText("PAGE \(page)", font: .monospacedSystemFont(ofSize: 7, weight: .semibold), color: .gray, x: 470, y: 766, width: 100, alignment: .right)
     }
 
-    private static func roundedLogo(
-        _ image: UIImage,
-        size: CGSize,
-        cornerRadius: CGFloat
-    ) -> UIImage {
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 2
-        format.opaque = false
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            UIBezierPath(
-                roundedRect: CGRect(origin: .zero, size: size),
-                cornerRadius: cornerRadius
-            ).addClip()
-            image.draw(in: CGRect(origin: .zero, size: size))
-        }
+    private static func drawFireVaultProIcon(in rect: CGRect, cornerRadius: CGFloat) {
+        let path = UIBezierPath(roundedRect: rect, cornerRadius: cornerRadius)
+        UIColor(red: 0.055, green: 0.06, blue: 0.075, alpha: 1).setFill()
+        path.fill()
+
+        UIColor.white.withAlphaComponent(0.12).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+
+        drawCenteredText(
+            "🔥",
+            font: .systemFont(ofSize: rect.height * 0.46, weight: .black),
+            color: red,
+            rect: rect.insetBy(dx: rect.width * 0.12, dy: rect.height * 0.1)
+        )
+
+        let proRect = CGRect(
+            x: rect.maxX - rect.width * 0.48,
+            y: rect.maxY - rect.height * 0.26,
+            width: rect.width * 0.52,
+            height: rect.height * 0.2
+        )
+        red.setFill()
+        UIBezierPath(roundedRect: proRect, cornerRadius: max(2, rect.height * 0.04)).fill()
+        drawCenteredText("PRO", font: .systemFont(ofSize: max(5, rect.height * 0.105), weight: .black), color: .white, rect: proRect)
+    }
+
+    private static func drawFireVaultProWordmark(x: CGFloat, y: CGFloat, fontSize: CGFloat) {
+        let fireWidth = fontSize * 2.72
+        let vaultWidth = fontSize * 3.5
+        drawText("FIRE", font: .systemFont(ofSize: fontSize, weight: .black), color: red, x: x, y: y, width: fireWidth)
+        drawText("VAULT", font: .systemFont(ofSize: fontSize, weight: .black), color: .white, x: x + fireWidth, y: y, width: vaultWidth)
+
+        let proRect = CGRect(
+            x: x + fireWidth + vaultWidth + fontSize * 0.36,
+            y: y + fontSize * 0.08,
+            width: fontSize * 1.35,
+            height: fontSize * 0.64
+        )
+        red.setFill()
+        UIBezierPath(roundedRect: proRect, cornerRadius: fontSize * 0.14).fill()
+        UIColor.white.withAlphaComponent(0.4).setStroke()
+        let outline = UIBezierPath(roundedRect: proRect, cornerRadius: fontSize * 0.14)
+        outline.lineWidth = 0.5
+        outline.stroke()
+        drawCenteredText("PRO", font: .systemFont(ofSize: fontSize * 0.32, weight: .black), color: .white, rect: proRect)
     }
 
     private static func stopRowHeight(visit: FireVaultBreadcrumbReport.Visit, note: String) -> CGFloat {
