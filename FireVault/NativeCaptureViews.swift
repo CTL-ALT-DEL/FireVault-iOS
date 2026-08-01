@@ -8,6 +8,8 @@
 import SwiftUI
 import UIKit
 import VisionKit
+import CoreImage.CIFilterBuiltins
+import CoreLocation
 
 struct FireVaultResolvedOverlayField: Identifiable, Equatable {
     let field: FireVaultOverlayField
@@ -68,10 +70,12 @@ struct FireVaultOverlayPanelSizing {
         siteName: String,
         maximumFieldLength: Int,
         hasTechnician: Bool,
+        hasQRCode: Bool = false,
         canvasWidth: CGFloat,
         scale: Double
     ) -> Metrics {
         let technicianAllowance: CGFloat = hasTechnician ? 76 : 0
+        let qrAllowance: CGFloat = hasQRCode ? 52 : 0
         let maximumPanelWidth = max(
             180,
             min(560, (canvasWidth - 20) / max(scale, 0.45))
@@ -83,7 +87,7 @@ struct FireVaultOverlayPanelSizing {
         )
         let availableInformationWidth = max(
             145,
-            maximumPanelWidth - technicianAllowance - 28
+            maximumPanelWidth - technicianAllowance - qrAllowance - 28
         )
         let informationWidth = min(
             availableInformationWidth,
@@ -93,9 +97,39 @@ struct FireVaultOverlayPanelSizing {
             informationWidth: informationWidth,
             panelWidth: min(
                 maximumPanelWidth,
-                informationWidth + technicianAllowance + 28
+                informationWidth + technicianAllowance + qrAllowance + 28
             )
         )
+    }
+}
+
+enum FireVaultLocationQRCode {
+    static func payload(for account: FireVaultWorkspaceAccount) -> String? {
+        guard let coordinate = account.coordinate else { return nil }
+        return payload(latitude: coordinate.latitude, longitude: coordinate.longitude, name: account.name)
+    }
+
+    static func payload(latitude: Double, longitude: Double, name: String) -> String {
+        var components = URLComponents(string: "https://maps.apple.com/")!
+        components.queryItems = [
+            URLQueryItem(name: "ll", value: "\(latitude),\(longitude)"),
+            URLQueryItem(name: "q", value: name)
+        ]
+        return components.url?.absoluteString ?? "https://maps.apple.com/?ll=\(latitude),\(longitude)"
+    }
+}
+
+enum FireVaultQRCodeRenderer {
+    static func image(from payload: String, scale: CGFloat = 8) -> UIImage? {
+        guard let data = payload.data(using: .utf8) else { return nil }
+        let filter = CIFilter.qrCodeGenerator()
+        filter.setValue(data, forKey: "inputMessage")
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage else { return nil }
+        let transformed = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(transformed, from: transformed.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
     }
 }
 
@@ -266,6 +300,7 @@ struct FireVaultPhotoOverlayView: View {
     let accountID: String
     let category: String
     let timestamp: Date
+    let locationQRCodePayload: String?
 
     private var accent: Color {
         switch preferences.accentColor {
@@ -312,6 +347,7 @@ struct FireVaultPhotoOverlayView: View {
             siteName: siteName,
             maximumFieldLength: informationFields.map(\.value.count).max() ?? 0,
             hasTechnician: technicianField != nil,
+            hasQRCode: locationQRCodePayload != nil,
             canvasWidth: canvasWidth,
             scale: preferences.scale
         )
@@ -378,6 +414,18 @@ struct FireVaultPhotoOverlayView: View {
                         .minimumScaleFactor(0.8)
                 }
                 .frame(width: 66, alignment: .trailing)
+            }
+
+            if let locationQRCodePayload,
+               let qrImage = FireVaultQRCodeRenderer.image(from: locationQRCodePayload, scale: 5) {
+                Image(uiImage: qrImage)
+                    .interpolation(.none)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 42, height: 42)
+                    .padding(3)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .accessibilityLabel("Scannable map location QR code")
             }
         }
         .padding(.horizontal, isThickGlass ? 11 : 9)
@@ -478,7 +526,10 @@ struct FireVaultOverlayPreview: View {
                         address: address,
                         accountID: accountID,
                         category: category,
-                        timestamp: .now
+                        timestamp: .now,
+                        locationQRCodePayload: previewPreferences(size: designSize).showLocationQRCode
+                            ? FireVaultLocationQRCode.payload(latitude: 43.6177, longitude: -116.1968, name: siteName)
+                            : nil
                     )
                     .frame(width: designSize.width, height: designSize.height)
                     .allowsHitTesting(false)
@@ -784,7 +835,10 @@ struct FireVaultOverlayPlacementEditor: View {
                     address: address,
                     accountID: accountID,
                     category: category,
-                    timestamp: .now
+                    timestamp: .now,
+                    locationQRCodePayload: previewPreferences(in: designSize).showLocationQRCode
+                        ? FireVaultLocationQRCode.payload(latitude: 43.6177, longitude: -116.1968, name: siteName)
+                        : nil
                 )
                 .frame(width: designSize.width, height: designSize.height)
             }
@@ -1090,7 +1144,10 @@ enum FireVaultPhotoOverlayRenderer {
                 address: account.address,
                 accountID: account.accountId,
                 category: account.category,
-                timestamp: timestamp
+                timestamp: timestamp,
+                locationQRCodePayload: preferences.showLocationQRCode
+                    ? FireVaultLocationQRCode.payload(for: account)
+                    : nil
             ).frame(width: logicalSize.width, height: logicalSize.height)
         }.frame(width: logicalSize.width, height: logicalSize.height)
         let renderer = ImageRenderer(content: content)

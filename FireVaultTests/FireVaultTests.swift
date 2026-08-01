@@ -1032,6 +1032,7 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(normalized.backgroundStyle, "frosted")
         XCTAssertEqual(normalized.accentColor, "blue")
         XCTAssertEqual(normalized.opacity, 35)
+        XCTAssertFalse(normalized.showLocationQRCode)
     }
 
     func testPhotoOverlayPreviewGeometryUsesSameDesignCoordinatesOnIPhoneAndIPad() {
@@ -1133,7 +1134,29 @@ final class FireVaultTests: XCTestCase {
 
         XCTAssertEqual(decoded.alignment, "top")
         XCTAssertEqual(decoded.tagline, "FIREVAULT FIELD DOCUMENTATION")
+        XCTAssertFalse(decoded.showLocationQRCode)
         XCTAssertTrue(decoded.fieldTemplate.contains("{site}"))
+    }
+
+    func testPhotoOverlayLocationQRCodePayloadUsesAppleMapsCoordinate() {
+        let payload = FireVaultLocationQRCode.payload(
+            latitude: 43.6177,
+            longitude: -116.1968,
+            name: "Main Entrance"
+        )
+
+        XCTAssertTrue(payload.hasPrefix("https://maps.apple.com/"))
+        XCTAssertTrue(payload.contains("ll=43.6177,-116.1968"))
+        XCTAssertTrue(payload.contains("q=Main%20Entrance"))
+    }
+
+    func testPhotoOverlayQRCodeRendererCreatesImage() throws {
+        let image = try XCTUnwrap(
+            FireVaultQRCodeRenderer.image(from: "https://maps.apple.com/?ll=43.6177,-116.1968")
+        )
+
+        XCTAssertGreaterThan(image.size.width, 20)
+        XCTAssertGreaterThan(image.size.height, 20)
     }
 
     func testPhotoOverlayFieldControlsKeepRequiredFieldsVisibleAndOrdered() {

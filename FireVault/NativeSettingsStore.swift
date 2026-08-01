@@ -55,6 +55,7 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
     var opacity = 85
     var showLogo = true
     var showTagline = true
+    var showLocationQRCode = false
     var accentColor = "blue"
     var tagline = "FIREVAULT FIELD DOCUMENTATION"
     var fieldOrder = FireVaultOverlayField.allCases.map(\.rawValue)
@@ -100,7 +101,7 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
         case alignment, horizontalPosition, scale, positionX, positionY
         case logoScale, logoPositionX, logoPositionY, logoPlacement
         case fontSize, backgroundStyle, glassStyle, glassThickness, opacity, showLogo, showTagline
-        case accentColor, tagline, fieldOrder, hiddenFields, fieldTemplate
+        case showLocationQRCode, accentColor, tagline, fieldOrder, hiddenFields, fieldTemplate
     }
 
     init(from decoder: Decoder) throws {
@@ -121,6 +122,7 @@ struct FireVaultOverlayPreferences: Codable, Equatable {
         opacity = try values.decodeIfPresent(Int.self, forKey: .opacity) ?? 85
         showLogo = try values.decodeIfPresent(Bool.self, forKey: .showLogo) ?? true
         showTagline = try values.decodeIfPresent(Bool.self, forKey: .showTagline) ?? true
+        showLocationQRCode = try values.decodeIfPresent(Bool.self, forKey: .showLocationQRCode) ?? false
         accentColor = try values.decodeIfPresent(String.self, forKey: .accentColor) ?? "blue"
         tagline = try values.decodeIfPresent(String.self, forKey: .tagline) ?? "FIREVAULT FIELD DOCUMENTATION"
         fieldOrder = try values.decodeIfPresent([String].self, forKey: .fieldOrder) ?? FireVaultOverlayField.allCases.map(\.rawValue)

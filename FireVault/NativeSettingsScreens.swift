@@ -268,6 +268,10 @@ struct NativeOverlaySettingsView: View {
                     "Show tagline",
                     isOn: overlayBinding(\.showTagline)
                 )
+                Toggle(
+                    "Show location QR code",
+                    isOn: overlayBinding(\.showLocationQRCode)
+                )
                 TextField(
                     "Tagline",
                     text: overlayBinding(\.tagline)
