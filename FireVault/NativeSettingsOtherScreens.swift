@@ -240,6 +240,14 @@ struct NativeCategoriesSettingsView: View {
     @ObservedObject var store: FireVaultStore
     @State private var draft: FireVaultNativePreferences
     @State private var newCategory = ""
+    @State private var editingOriginalCategory: String?
+    @State private var editingCategoryName = ""
+    @State private var editingCategorySymbol = "tag.fill"
+    @State private var editingCategoryColor = "blue"
+    @State private var editingCategoryDesign = FireVaultCategoryTagDesign.label
+    @State private var ruleCreatingCategoryIndex: Int?
+    @State private var ruleNewCategory = ""
+    @State private var runResult: String?
     @FocusState private var focused: Bool
     init(settings: FireVaultNativeSettingsStore, store: FireVaultStore) {
         self.settings = settings
@@ -250,9 +258,23 @@ struct NativeCategoriesSettingsView: View {
         List {
             Section("Category Tags") {
                 ForEach(draft.categories, id: \.self) { category in
-                    Label(category, systemImage: "tag.fill")
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                    Button { beginEditing(category) } label: {
+                        HStack(spacing: 11) {
+                            categoryPreview(category)
+                            Text(category)
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                            Spacer()
+                            Text("\(accountCount(for: category))")
+                                .font(.subheadline.bold().monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.bold())
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
                 .onDelete { draft.categories.remove(atOffsets: $0) }
             }
@@ -281,6 +303,13 @@ struct NativeCategoriesSettingsView: View {
                     draft.categoryRules = rules
                 }
                 .disabled(draft.categories.isEmpty)
+
+                Button("Run Rules Now", systemImage: "play.circle.fill") {
+                    save()
+                    let additions = store.configureCategoryRules(draft.categoryRules ?? [])
+                    runResult = additions == 1 ? "1 category tag was added." : "\(additions) category tags were added."
+                }
+                .disabled((draft.categoryRules ?? []).isEmpty)
             } header: {
                 Text("Automatic IF / THEN Rules")
             } footer: {
@@ -288,6 +317,21 @@ struct NativeCategoriesSettingsView: View {
             }
         }
         .nativeSettingsForm(title: "Account Categories", focused: $focused) { save() }
+        .sheet(isPresented: Binding(get: { editingOriginalCategory != nil }, set: { if !$0 { editingOriginalCategory = nil } })) {
+            categoryEditor
+        }
+        .alert("Create New Category", isPresented: Binding(get: { ruleCreatingCategoryIndex != nil }, set: { if !$0 { ruleCreatingCategoryIndex = nil } })) {
+            TextField("Category name", text: $ruleNewCategory)
+            Button("Cancel", role: .cancel) { ruleNewCategory = "" }
+            Button("Create") { createCategoryForRule() }
+        } message: {
+            Text("The new category will be created and selected for this rule.")
+        }
+        .alert("Rules Complete", isPresented: Binding(get: { runResult != nil }, set: { if !$0 { runResult = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(runResult ?? "")
+        }
     }
 
     private var ruleIndices: [Int] { Array((draft.categoryRules ?? []).indices) }
@@ -311,33 +355,40 @@ struct NativeCategoriesSettingsView: View {
             Toggle("Rule \(index + 1)", isOn: rule.isEnabled)
                 .font(.subheadline.weight(.semibold))
 
-            HStack(spacing: 6) {
-                Text("IF")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("IF FIELD")
+                    .font(.caption.bold()).foregroundStyle(.secondary)
                 Picker("Field", selection: rule.field) {
                     ForEach(FireVaultCategoryRuleField.allCases) { Text($0.title).tag($0) }
                 }
-                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text("CONDITION")
+                    .font(.caption.bold()).foregroundStyle(.secondary)
                 Picker("Condition", selection: rule.condition) {
                     ForEach(FireVaultCategoryRuleCondition.allCases) { Text($0.title).tag($0) }
                 }
-                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             TextField("Match text", text: rule.value)
                 .textInputAutocapitalization(.words)
                 .focused($focused)
 
-            HStack(spacing: 8) {
-                Text("THEN ADD")
+            VStack(alignment: .leading, spacing: 5) {
+                Text("THEN ADD CATEGORY")
                     .font(.caption.bold())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Picker("Category tag", selection: rule.categoryTag) {
+                Picker("Category tag", selection: ruleCategoryBinding(at: index)) {
                     ForEach(draft.categories, id: \.self) { Text($0).tag($0) }
+                    Divider()
+                    Text("Create New Category…").tag("__CREATE_NEW_CATEGORY__")
                 }
-                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.vertical, 4)
@@ -346,6 +397,141 @@ struct NativeCategoriesSettingsView: View {
     private func save() {
         settings.save(draft)
         store.configureCategoryRules(draft.categoryRules ?? [])
+    }
+
+    private func ruleCategoryBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: { (draft.categoryRules ?? [])[index].categoryTag },
+            set: { value in
+                if value == "__CREATE_NEW_CATEGORY__" {
+                    ruleCreatingCategoryIndex = index
+                    return
+                }
+                var rules = draft.categoryRules ?? []
+                guard rules.indices.contains(index) else { return }
+                rules[index].categoryTag = value
+                draft.categoryRules = rules
+            }
+        )
+    }
+
+    private func accountCount(for category: String) -> Int {
+        store.accounts.filter { account in
+            account.category.caseInsensitiveCompare(category) == .orderedSame
+                || account.tags.contains { $0.caseInsensitiveCompare(category) == .orderedSame }
+        }.count
+    }
+
+    private func style(for category: String) -> FireVaultCategoryStyle {
+        (draft.categoryStyles ?? []).first { $0.category.caseInsensitiveCompare(category) == .orderedSame }
+            ?? FireVaultCategoryStyle(category: category)
+    }
+
+    private func categoryPreview(_ category: String) -> some View {
+        let style = style(for: category)
+        return Image(systemName: style.design == .hashtag ? "number" : style.symbol)
+            .font(.system(size: 15, weight: .bold))
+            .foregroundStyle(categoryColor(style.color))
+            .frame(width: 30, height: 30)
+            .background(categoryColor(style.color).opacity(0.14), in: RoundedRectangle(cornerRadius: 9))
+    }
+
+    private func categoryColor(_ name: String) -> Color {
+        switch name {
+        case "red": .red
+        case "green": .green
+        case "orange": .orange
+        case "purple": .purple
+        case "pink": .pink
+        case "teal": .teal
+        default: .blue
+        }
+    }
+
+    private func beginEditing(_ category: String) {
+        let style = style(for: category)
+        editingOriginalCategory = category
+        editingCategoryName = category
+        editingCategorySymbol = style.symbol
+        editingCategoryColor = style.color
+        editingCategoryDesign = style.design
+    }
+
+    private var categoryEditor: some View {
+        NavigationStack {
+            Form {
+                Section("Category") {
+                    TextField("Category name", text: $editingCategoryName)
+                    Picker("Tag design", selection: $editingCategoryDesign) {
+                        ForEach(FireVaultCategoryTagDesign.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                Section("Icon Style") {
+                    Picker("Icon", selection: $editingCategorySymbol) {
+                        Label("Tag", systemImage: "tag.fill").tag("tag.fill")
+                        Label("Building", systemImage: "building.2.fill").tag("building.2.fill")
+                        Label("Shield", systemImage: "shield.fill").tag("shield.fill")
+                        Label("Star", systemImage: "star.fill").tag("star.fill")
+                        Label("Wrench", systemImage: "wrench.and.screwdriver.fill").tag("wrench.and.screwdriver.fill")
+                    }
+                    .disabled(editingCategoryDesign == .hashtag)
+                    Picker("Icon color", selection: $editingCategoryColor) {
+                        ForEach(["blue", "red", "green", "orange", "purple", "pink", "teal"], id: \.self) { color in
+                            Text(color.capitalized).tag(color)
+                        }
+                    }
+                }
+                Section("Preview") {
+                    HStack {
+                        Image(systemName: editingCategoryDesign == .hashtag ? "number" : editingCategorySymbol)
+                        Text(editingCategoryDesign == .hashtag ? "#\(editingCategoryName.replacingOccurrences(of: " ", with: ""))" : editingCategoryName)
+                            .font(.subheadline.bold())
+                    }
+                    .foregroundStyle(categoryColor(editingCategoryColor))
+                }
+            }
+            .navigationTitle("Edit Category")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingOriginalCategory = nil } }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { saveCategoryEdit() } }
+            }
+        }
+    }
+
+    private func saveCategoryEdit() {
+        guard let original = editingOriginalCategory else { return }
+        let updated = editingCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !updated.isEmpty else { return }
+        if let index = draft.categories.firstIndex(where: { $0.caseInsensitiveCompare(original) == .orderedSame }) {
+            draft.categories[index] = updated
+        }
+        var rules = draft.categoryRules ?? []
+        for index in rules.indices where rules[index].categoryTag.caseInsensitiveCompare(original) == .orderedSame {
+            rules[index].categoryTag = updated
+        }
+        draft.categoryRules = rules
+        var styles = (draft.categoryStyles ?? []).filter { $0.category.caseInsensitiveCompare(original) != .orderedSame }
+        styles.append(.init(category: updated, symbol: editingCategorySymbol, color: editingCategoryColor, design: editingCategoryDesign))
+        draft.categoryStyles = styles
+        store.renameCategory(from: original, to: updated)
+        save()
+        editingOriginalCategory = nil
+    }
+
+    private func createCategoryForRule() {
+        guard let index = ruleCreatingCategoryIndex else { return }
+        let value = ruleNewCategory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        if !draft.categories.contains(where: { $0.caseInsensitiveCompare(value) == .orderedSame }) {
+            draft.categories.append(value)
+        }
+        var rules = draft.categoryRules ?? []
+        if rules.indices.contains(index) { rules[index].categoryTag = value }
+        draft.categoryRules = rules
+        ruleNewCategory = ""
+        ruleCreatingCategoryIndex = nil
     }
 }
 

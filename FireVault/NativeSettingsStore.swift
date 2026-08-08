@@ -73,6 +73,20 @@ struct FireVaultCategoryRule: Codable, Equatable, Identifiable {
     var categoryTag = ""
 }
 
+enum FireVaultCategoryTagDesign: String, Codable, CaseIterable, Identifiable {
+    case label, hashtag
+    var id: String { rawValue }
+    var title: String { self == .label ? "Tag Label" : "Hashtag" }
+}
+
+struct FireVaultCategoryStyle: Codable, Equatable, Identifiable {
+    var id: String { category.lowercased() }
+    var category: String
+    var symbol = "tag.fill"
+    var color = "blue"
+    var design = FireVaultCategoryTagDesign.label
+}
+
 struct FireVaultOverlayPreferences: Codable, Equatable {
     var alignment = "bottom"
     var horizontalPosition = "left"
@@ -388,6 +402,7 @@ struct FireVaultNativePreferences: Codable, Equatable {
     var privacy = FireVaultPrivacyPreferences()
     var categories: [String] = ["Commercial", "Healthcare", "Education", "Government", "Residential"]
     var categoryRules: [FireVaultCategoryRule]? = []
+    var categoryStyles: [FireVaultCategoryStyle]? = []
     var normalized: Self {
         var copy = self
         copy.gps = gps.normalized
@@ -400,6 +415,7 @@ struct FireVaultNativePreferences: Codable, Equatable {
             rule.categoryTag = rule.categoryTag.trimmingCharacters(in: .whitespacesAndNewlines)
             return rule
         }
+        copy.categoryStyles = categoryStyles ?? []
         return copy
     }
 }

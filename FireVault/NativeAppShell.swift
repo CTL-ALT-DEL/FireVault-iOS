@@ -226,8 +226,7 @@ struct NativeAppShellView: View {
                             )
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(minHeight: 48)
-                    .offset(y: 3)
+                    .frame(height: 48)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -238,13 +237,19 @@ struct NativeAppShellView: View {
             }
         }
         .padding(.horizontal, 6)
-        .padding(.top, 2)
-        .padding(.bottom, 0)
-        .background(NativeShellPalette.navigationBackground.ignoresSafeArea(edges: .bottom))
+        .padding(.vertical, 4)
+        .background(
+            NativeShellPalette.navigationBackground,
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(NativeShellPalette.background.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) {
-            Rectangle()
+            Capsule()
                 .fill(NativeShellPalette.navigationDivider)
                 .frame(height: 1)
+                .padding(.horizontal, 16)
                 .accessibilityHidden(true)
         }
         .accessibilityElement(children: .contain)
@@ -495,7 +500,7 @@ private struct NativeNearbyView: View {
                             .foregroundStyle(tripLogStatusTint)
                             .symbolEffect(.pulse, options: .repeating, isActive: breadcrumbs.isRecording)
                     }
-                    .frame(width: 28, height: 28)
+                    .frame(width: 24, height: 24)
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text("TRIP LOG")
@@ -521,15 +526,15 @@ private struct NativeNearbyView: View {
             .accessibilityHint("Shows start, pause, resume, and stop controls")
 
             Divider()
-                .frame(height: 34)
+                .frame(height: 28)
 
             tripLogDetailMenu
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(height: 50)
-        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .frame(height: 44)
+        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(tripLogStatusTint.opacity(0.18), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.14), radius: 7, y: 4)

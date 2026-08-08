@@ -112,10 +112,26 @@ final class FireVaultStore: ObservableObject {
         }.count
     }
 
-    func configureCategoryRules(_ rules: [FireVaultCategoryRule]) {
+    @discardableResult
+    func configureCategoryRules(_ rules: [FireVaultCategoryRule]) -> Int {
         categoryRules = rules
-        applyCategoryRules()
+        let additions = applyCategoryRules()
         persistAccounts()
+        return additions
+    }
+
+    func renameCategory(from oldName: String, to newName: String) {
+        let replacement = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !replacement.isEmpty else { return }
+        for index in accounts.indices {
+            if accounts[index].category.caseInsensitiveCompare(oldName) == .orderedSame {
+                accounts[index].category = replacement
+            }
+            accounts[index].tags = accounts[index].tags.map {
+                $0.caseInsensitiveCompare(oldName) == .orderedSame ? replacement : $0
+            }
+        }
+        persist()
     }
 
     func appPayload(
@@ -982,7 +998,9 @@ final class FireVaultStore: ObservableObject {
         defaults.set(data, forKey: demoMode ? Key.demoAccounts : Key.productionAccounts)
     }
 
-    private func applyCategoryRules() {
+    @discardableResult
+    private func applyCategoryRules() -> Int {
+        var additions = 0
         for index in accounts.indices {
             for rule in categoryRules where rule.isEnabled {
                 let needle = rule.value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1002,9 +1020,11 @@ final class FireVaultStore: ObservableObject {
                 }
                 if matches, !accounts[index].tags.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) {
                     accounts[index].tags.append(tag)
+                    additions += 1
                 }
             }
         }
+        return additions
     }
 
     private static func savedAccounts(defaults: UserDefaults, key: String) -> [FireVaultWorkspaceAccount]? {
