@@ -235,6 +235,8 @@ private struct FireVaultPrivacyShieldView: View {
 }
 
 private struct FireVaultBrandHeader: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     private var weekday: String {
         Date().formatted(.dateTime.weekday(.wide))
     }
@@ -264,7 +266,13 @@ private struct FireVaultBrandHeader: View {
                 Text(displayDate)
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.86))
-                    .shadow(color: .black.opacity(0.88), radius: 2, x: 0, y: 1)
+                    .shadow(
+                        color: colorScheme == .light ? .black : .black.opacity(0.82),
+                        radius: colorScheme == .light ? 3.25 : 2,
+                        x: 0,
+                        y: colorScheme == .light ? 2 : 1
+                    )
+                    .shadow(color: .black.opacity(0.72), radius: 1, x: 0, y: 1)
                     .lineLimit(1)
             }
             .frame(height: 37, alignment: .center)

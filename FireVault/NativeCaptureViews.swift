@@ -1214,6 +1214,9 @@ enum FireVaultPhotoOverlayRenderer {
 }
 
 struct NativeCameraCaptureView: UIViewControllerRepresentable {
+    let preferences: FireVaultOverlayPreferences
+    let technicianName: String
+    let account: FireVaultWorkspaceAccount?
     let onCapture: (UIImage) -> Void
     let onCancel: () -> Void
     func makeCoordinator() -> Coordinator { Coordinator(onCapture: onCapture, onCancel: onCancel) }
@@ -1223,11 +1226,38 @@ struct NativeCameraCaptureView: UIViewControllerRepresentable {
         controller.cameraCaptureMode = .photo
         controller.allowsEditing = false
         controller.delegate = context.coordinator
+
+        if let account {
+            let preview = FireVaultPhotoOverlayView(
+                preferences: preferences,
+                technicianName: technicianName,
+                siteName: account.name,
+                address: account.address,
+                accountID: account.accountId,
+                category: account.category,
+                timestamp: .now,
+                locationQRCodePayload: preferences.showLocationQRCode
+                    ? FireVaultLocationQRCode.payload(for: account)
+                    : nil
+            )
+            .allowsHitTesting(false)
+            .ignoresSafeArea()
+
+            let host = UIHostingController(rootView: AnyView(preview))
+            host.view.backgroundColor = .clear
+            host.view.isUserInteractionEnabled = false
+            host.view.frame = controller.view.bounds
+            host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            controller.cameraOverlayView = host.view
+            context.coordinator.overlayHost = host
+        }
+
         return controller
     }
     func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
     final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
         let onCapture: (UIImage) -> Void; let onCancel: () -> Void
+        var overlayHost: UIHostingController<AnyView>?
         init(onCapture: @escaping (UIImage) -> Void, onCancel: @escaping () -> Void) { self.onCapture = onCapture; self.onCancel = onCancel }
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
             guard let image = info[.originalImage] as? UIImage else { onCancel(); return }

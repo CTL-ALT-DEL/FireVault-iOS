@@ -209,14 +209,13 @@ struct NativeAppShellView: View {
                                         : NativeShellPalette.navigationInactive)
                             )
                             .frame(width: 34, height: 26)
-                            .overlay(alignment: .topTrailing) {
+                            .background {
                                 if isTripRecording {
                                     Image(systemName: "circle.fill")
-                                        .font(.system(size: 7, weight: .bold))
-                                        .foregroundStyle(NativeShellPalette.red)
-                                        .overlay { Circle().stroke(.white, lineWidth: 1.25) }
+                                        .font(.system(size: 25, weight: .bold))
+                                        .foregroundStyle(NativeShellPalette.green.opacity(0.48))
+                                        .blur(radius: 5)
                                         .symbolEffect(.pulse, options: .repeating)
-                                        .offset(x: 1, y: 1)
                                         .accessibilityHidden(true)
                                 }
                             }
@@ -1752,6 +1751,9 @@ private struct NativePhotoView: View {
                 switch route {
                 case .camera:
                     NativeCameraCaptureView(
+                        preferences: settings.preferences.overlay,
+                        technicianName: technicianName,
+                        account: destinationAccount,
                         onCapture: acceptPhoto,
                         onCancel: { captureRoute = nil }
                     )
