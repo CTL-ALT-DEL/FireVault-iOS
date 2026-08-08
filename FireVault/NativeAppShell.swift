@@ -169,6 +169,7 @@ struct NativeAppShellView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !keyboardVisible {
                 nativeNavigation
+                    .offset(y: 22)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -1204,6 +1205,10 @@ private struct NativeNearbyView: View {
                         .padding(.bottom, 20)
                     }
                     .scrollIndicators(.hidden)
+                    .refreshable {
+                        store.reloadAccounts()
+                        try? await Task.sleep(for: .milliseconds(350))
+                    }
                     .scrollPosition(id: $scrollAccountID, anchor: .top)
                     .scrollTargetBehavior(
                         .viewAligned(limitBehavior: .never, anchor: .top)

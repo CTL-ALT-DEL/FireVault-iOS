@@ -112,6 +112,16 @@ final class FireVaultStore: ObservableObject {
         }.count
     }
 
+    func reloadAccounts() {
+        let key = demoMode ? Key.demoAccounts : Key.productionAccounts
+        guard let refreshed = Self.savedAccounts(defaults: defaults, key: key) else { return }
+        accounts = refreshed
+        if let selectedAccountID, !accounts.contains(where: { $0.id == selectedAccountID }) {
+            self.selectedAccountID = nil
+        }
+        applyCategoryRules()
+    }
+
     @discardableResult
     func configureCategoryRules(_ rules: [FireVaultCategoryRule]) -> Int {
         categoryRules = rules
