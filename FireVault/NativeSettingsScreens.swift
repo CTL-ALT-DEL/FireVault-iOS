@@ -169,6 +169,7 @@ struct NativeTechnicianSettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var draft: FireVaultNativePreferences
     @FocusState private var focused: Bool
+    @State private var showsSubscriptionSetupMessage = false
 
     init(settings: FireVaultNativeSettingsStore) {
         self.settings = settings
@@ -186,8 +187,74 @@ struct NativeTechnicianSettingsView: View {
                 TextField("Phone", text: $draft.technician.phone).keyboardType(.phonePad).focused($focused)
                 TextField("Email", text: $draft.technician.email).keyboardType(.emailAddress).textInputAutocapitalization(.never).focused($focused)
             }
+
+            Section {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("FireVault Pro")
+                                .font(.title3.bold())
+                            Text("Annual subscription")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 0) {
+                            Text("$29")
+                                .font(.title2.bold().monospacedDigit())
+                            Text("per year")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    proFeature("Trip reports with 90-day cloud storage", symbol: "cloud.fill")
+                    proFeature("Automatic Trip Log report emailing", symbol: "envelope.badge.fill")
+                    proFeature("Unknown-stop identification with Google Places", symbol: "mappin.and.ellipse")
+                    proFeature("Custom company logo on photo overlays", symbol: "photo.badge.plus")
+
+                    Button {
+                        showsSubscriptionSetupMessage = true
+                    } label: {
+                        Text("Upgrade to Pro — $29 / Year")
+                            .font(.headline)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.76)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                }
+                .padding(.vertical, 6)
+            } header: {
+                Text("Subscription")
+            } footer: {
+                Text("Subscription features require an internet connection. Google Places matching sends stop coordinates for place identification.")
+            }
         }
         .nativeSettingsForm(title: "Technician Profile", focused: $focused) { settings.save(draft) }
+        .alert("App Store Subscription Setup Required", isPresented: $showsSubscriptionSetupMessage) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The FireVault Pro subscription display is ready. Connect the App Store Connect product and StoreKit purchase service before accepting payments.")
+        }
+    }
+
+    private func proFeature(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(NativeShellPalette.blue)
+                .frame(width: 26, height: 26)
+                .background(NativeShellPalette.blue.opacity(0.13), in: RoundedRectangle(cornerRadius: 8))
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+            Spacer(minLength: 0)
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(NativeShellPalette.green)
+        }
     }
 }
 
