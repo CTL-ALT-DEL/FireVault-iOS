@@ -279,7 +279,7 @@ struct FireVaultProWordmark: View {
     var tracking: CGFloat = 0.9
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: max(6, fontSize * 0.22)) {
+        VStack(alignment: .trailing, spacing: max(1, fontSize * 0.03)) {
             HStack(spacing: 0) {
                 Text("FIRE").foregroundStyle(fireColor)
                 Text("VAULT").foregroundStyle(vaultColor)
@@ -298,11 +298,8 @@ struct FireVaultProWordmark: View {
                     RoundedRectangle(cornerRadius: max(2, proFontSize * 0.32), style: .continuous)
                         .stroke(.white.opacity(0.45), lineWidth: 0.7)
                 }
-                .rotationEffect(.degrees(-7))
-                .offset(y: -max(1.5, fontSize * 0.12))
                 .shadow(color: proBackground.opacity(0.34), radius: 3, y: 1)
         }
-        .padding(.top, max(2, fontSize * 0.08))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("FireVault Pro")
     }
@@ -317,50 +314,12 @@ struct FireVaultProIconBadge: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.06, green: 0.07, blue: 0.09),
-                            Color(red: 0.16, green: 0.03, blue: 0.02)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous)
-                        .stroke(.white.opacity(0.12), lineWidth: max(0.7, size * 0.02))
-                }
-                .shadow(color: NativeShellPalette.red.opacity(0.22), radius: size * 0.18, y: size * 0.08)
-
-            Image(systemName: "flame.fill")
-                .font(.system(size: size * 0.55, weight: .black))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [NativeShellPalette.amber, NativeShellPalette.red],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .shadow(color: NativeShellPalette.red.opacity(0.55), radius: size * 0.12, y: size * 0.03)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            Text("PRO")
-                .font(.system(size: max(5, size * 0.16), weight: .black, design: .rounded))
-                .tracking(0.25)
-                .foregroundStyle(.white)
-                .padding(.horizontal, max(2, size * 0.06))
-                .padding(.vertical, max(1, size * 0.025))
-                .background(NativeShellPalette.red, in: RoundedRectangle(cornerRadius: max(2, size * 0.06), style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: max(2, size * 0.06), style: .continuous)
-                        .stroke(.white.opacity(0.42), lineWidth: 0.5)
-                }
-                .rotationEffect(.degrees(-7))
-                .offset(x: size * 0.08, y: size * 0.04)
-        }
+        Image("FireVaultLogo")
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            .clipShape(RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous))
+            .shadow(color: .black.opacity(0.42), radius: size * 0.1, y: size * 0.05)
         .frame(width: size, height: size)
         .accessibilityHidden(true)
     }
