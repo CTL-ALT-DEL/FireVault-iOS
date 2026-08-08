@@ -215,7 +215,7 @@ struct FireVaultTripLogPortraitView: View {
                 .padding(.vertical, 3)
                 .background(NativeShellPalette.red, in: Capsule())
             Text(day.startedAt.formatted(date: .abbreviated, time: .omitted))
-                .font(.subheadline.bold())
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(.white)
         }
         .padding(.horizontal, 11)
@@ -225,48 +225,14 @@ struct FireVaultTripLogPortraitView: View {
     }
 
     private func controlDock(_ day: FireVaultBreadcrumbDay) -> some View {
-        VStack(spacing: 7) {
-            HStack(spacing: 7) {
+        VStack(spacing: 9) {
+            HStack(spacing: 10) {
                 recordingIndicator(day)
-                Spacer(minLength: 2)
+                Spacer(minLength: 8)
+                recordingMenu
+            }
 
-                if breadcrumbs.activeDay == nil {
-                    compactTripAction(
-                        title: "START",
-                        symbol: "play.fill",
-                        tint: NativeShellPalette.green
-                    ) {
-                        breadcrumbs.startWorkday(accounts: store.accounts)
-                        selectedDayID = breadcrumbs.activeDay?.id
-                    }
-                } else if breadcrumbs.isRecording {
-                    compactTripAction(
-                        title: "PAUSE",
-                        symbol: "pause.fill",
-                        tint: NativeShellPalette.amber
-                    ) {
-                        breadcrumbs.pauseWorkday()
-                    }
-                } else {
-                    compactTripAction(
-                        title: "RESUME",
-                        symbol: "play.fill",
-                        tint: NativeShellPalette.green
-                    ) {
-                        breadcrumbs.resumeWorkday(accounts: store.accounts)
-                    }
-                }
-
-                compactTripAction(
-                    title: "STOP",
-                    symbol: "stop.fill",
-                    tint: NativeShellPalette.red
-                ) {
-                    confirmsEnd = true
-                }
-                .disabled(breadcrumbs.activeDay == nil)
-                .opacity(breadcrumbs.activeDay == nil ? 0.38 : 1)
-
+            HStack(spacing: 10) {
                 historyMenu
                 reportButton
             }
@@ -279,7 +245,7 @@ struct FireVaultTripLogPortraitView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(9)
+        .padding(11)
         .background {
             LinearGradient(
                 colors: [
@@ -350,12 +316,12 @@ struct FireVaultTripLogPortraitView: View {
                 }
             }
         } label: {
-            Image(systemName: "calendar.badge.clock")
-                .font(.system(size: 17, weight: .semibold))
-                .frame(width: 38, height: 38)
+            Label("HISTORY", systemImage: "calendar.badge.clock")
+                .font(.subheadline.bold())
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
         }
         .buttonStyle(.bordered)
-        .controlSize(.small)
         .disabled(breadcrumbs.days.isEmpty)
         .accessibilityLabel("Trip Log history")
     }
@@ -364,14 +330,46 @@ struct FireVaultTripLogPortraitView: View {
         Button {
             showsReport = true
         } label: {
-            Image(systemName: "doc.text.fill")
-                .font(.system(size: 17, weight: .semibold))
-                .frame(width: 38, height: 38)
+            Label("REPORT", systemImage: "doc.text.fill")
+                .font(.subheadline.bold())
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
         }
         .buttonStyle(.borderedProminent)
-        .controlSize(.small)
         .disabled(selectedDay == nil)
         .accessibilityHint("Previews and exports the selected Trip Log report")
+    }
+
+    private var recordingMenu: some View {
+        Menu {
+            if breadcrumbs.activeDay == nil {
+                Button("Start Trip Log", systemImage: "play.fill") {
+                    breadcrumbs.startWorkday(accounts: store.accounts)
+                    selectedDayID = breadcrumbs.activeDay?.id
+                }
+            } else if breadcrumbs.isRecording {
+                Button("Pause Recording", systemImage: "pause.fill") {
+                    breadcrumbs.pauseWorkday()
+                }
+                Button("Stop Trip Log", systemImage: "stop.fill", role: .destructive) {
+                    confirmsEnd = true
+                }
+            } else {
+                Button("Resume Recording", systemImage: "play.fill") {
+                    breadcrumbs.resumeWorkday(accounts: store.accounts)
+                }
+                Button("Stop Trip Log", systemImage: "stop.fill", role: .destructive) {
+                    confirmsEnd = true
+                }
+            }
+        } label: {
+            Label("Recording", systemImage: "slider.horizontal.3")
+                .font(.caption.bold())
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(indicatorTint)
+        .accessibilityLabel("Trip Log recording controls")
     }
 
     private func compactTripAction(
@@ -464,7 +462,7 @@ struct FireVaultTripLogPortraitView: View {
             NativeShellCard {
                 VStack(spacing: 0) {
                     portraitTimelineRow(
-                        time: day.startedAt,
+                        timeText: day.startedAt.formatted(date: .omitted, time: .shortened),
                         title: "Trip Started",
                         subtitle: "Route recording began",
                         symbol: "play.fill",
@@ -477,7 +475,7 @@ struct FireVaultTripLogPortraitView: View {
                             editingStop = .init(dayID: day.id, stopID: stop.id)
                         } label: {
                             portraitTimelineRow(
-                                time: stop.arrival,
+                                timeText: stopTimeRange(stop, in: day),
                                 title: stop.title,
                                 subtitle: "\(stop.subtitle) • \(day.stopDuration(for: stop).tripLogDuration)",
                                 symbol: "\(index + 1).circle.fill",
@@ -491,7 +489,7 @@ struct FireVaultTripLogPortraitView: View {
                     if let endedAt = day.endedAt {
                         Divider().padding(.leading, 48)
                         portraitTimelineRow(
-                            time: endedAt,
+                            timeText: endedAt.formatted(date: .omitted, time: .shortened),
                             title: "Trip Ended",
                             subtitle: day.totalDistanceMeters.tripLogMiles,
                             symbol: "stop.fill",
@@ -504,7 +502,7 @@ struct FireVaultTripLogPortraitView: View {
     }
 
     private func portraitTimelineRow(
-        time: Date,
+        timeText: String,
         title: String,
         subtitle: String,
         symbol: String,
@@ -519,7 +517,7 @@ struct FireVaultTripLogPortraitView: View {
                 .background(tint.opacity(0.14), in: Circle())
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(time.formatted(date: .omitted, time: .shortened))
+                Text(timeText)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Text(title)
@@ -541,6 +539,12 @@ struct FireVaultTripLogPortraitView: View {
         }
         .padding(.vertical, 10)
         .contentShape(Rectangle())
+    }
+
+    private func stopTimeRange(_ stop: FireVaultBreadcrumbStop, in day: FireVaultBreadcrumbDay) -> String {
+        let arrival = stop.arrival.formatted(date: .omitted, time: .shortened)
+        let departure = day.effectiveDeparture(for: stop).formatted(date: .omitted, time: .shortened)
+        return "\(arrival) – \(departure)"
     }
 
     private var emptyState: some View {
@@ -586,7 +590,7 @@ struct FireVaultTripLogPortraitView: View {
 
     private var emptyControlDock: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 7) {
+            HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("READY")
                         .font(.caption.bold())
@@ -601,23 +605,18 @@ struct FireVaultTripLogPortraitView: View {
 
                 Spacer(minLength: 2)
 
-                compactTripAction(
-                    title: "START",
-                    symbol: "play.fill",
-                    tint: NativeShellPalette.green
-                ) {
+                Button {
                     breadcrumbs.startWorkday(accounts: store.accounts)
                     selectedDayID = breadcrumbs.activeDay?.id
+                } label: {
+                    Label("Start", systemImage: "play.fill")
+                        .font(.caption.bold())
                 }
+                .buttonStyle(.borderedProminent)
+                .tint(NativeShellPalette.green)
+            }
 
-                compactTripAction(
-                    title: "STOP",
-                    symbol: "stop.fill",
-                    tint: NativeShellPalette.red
-                ) {}
-                .disabled(true)
-                .opacity(0.38)
-
+            HStack(spacing: 10) {
                 historyMenu
                 reportButton
             }

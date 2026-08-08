@@ -141,15 +141,20 @@ struct FireVaultBreadcrumbDay: Codable, Identifiable, Equatable {
         for stop: FireVaultBreadcrumbStop,
         asOf referenceDate: Date = Date()
     ) -> Date {
+        let resolved: Date
         if let departure = stop.departure {
-            return max(stop.arrival, departure)
+            resolved = max(stop.arrival, departure)
+        } else {
+            let nextArrival = stops
+                .lazy
+                .filter { $0.id != stop.id && $0.arrival > stop.arrival }
+                .map(\.arrival)
+                .min()
+            resolved = max(stop.arrival, nextArrival ?? endedAt ?? referenceDate)
         }
-        let nextArrival = stops
-            .lazy
-            .filter { $0.id != stop.id && $0.arrival > stop.arrival }
-            .map(\.arrival)
-            .min()
-        return max(stop.arrival, nextArrival ?? endedAt ?? referenceDate)
+
+        guard let endedAt else { return resolved }
+        return min(resolved, max(stop.arrival, endedAt))
     }
 
     func stopDuration(

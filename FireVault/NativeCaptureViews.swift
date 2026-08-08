@@ -328,11 +328,7 @@ struct FireVaultProIconBadge: View {
 
 struct FireVaultBrandMark: View {
     var body: some View {
-        HStack(spacing: 6) {
-            FireVaultProIconBadge(size: 30)
-
-            FireVaultProWordmark()
-        }
+        FireVaultProWordmark()
         .padding(.horizontal, 3)
         .padding(.vertical, 3)
         .shadow(color: .gray.opacity(0.78), radius: 2, x: 1, y: 2)
@@ -635,7 +631,7 @@ struct FireVaultOverlayPreview: View {
         }
         .onAppear { stageEdits() }
         .accessibilityIdentifier("overlay-interactive-preview")
-        .accessibilityHint("Drag the glass overlay or FireVault Pro logo to place it on the photo")
+        .accessibilityHint("Drag the glass overlay or FireVault Pro wordmark to place it on the photo")
     }
 
     private func finishDrag(translation: CGSize, designSize: CGSize) {
@@ -776,7 +772,7 @@ struct FireVaultOverlayPlacementEditor: View {
         var title: String {
             switch self {
             case .overlay: "Overlay Size"
-            case .logo: "Logo Size"
+            case .logo: "Wordmark Size"
             }
         }
     }
@@ -961,7 +957,7 @@ struct FireVaultOverlayPlacementEditor: View {
     }
 
     private var instructionPill: some View {
-        Text("Drag the logo or overlay • Rotate to portrait to save")
+        Text("Drag the wordmark or overlay • Rotate to portrait to save")
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 14)
@@ -978,7 +974,7 @@ struct FireVaultOverlayPlacementEditor: View {
                 .font(.title2.bold())
                 .foregroundStyle(.white)
             if !hasEnteredLandscape {
-                Text("Use the full-width camera preview to position the overlay and FireVault Pro logo.")
+                Text("Use the full-width camera preview to position the overlay and FireVault Pro wordmark.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white.opacity(0.72))
                     .frame(maxWidth: 340)

@@ -413,18 +413,9 @@ struct FieldWorkspaceView: View {
         } label: {
             WorkspaceCard {
                 ZStack(alignment: .bottomLeading) {
-                    if let coordinate = previewCoordinate {
-                        Map(
-                            initialPosition: .region(.init(
-                                center: coordinate,
-                                span: .init(latitudeDelta: 0.008, longitudeDelta: 0.008)
-                            )),
-                            interactionModes: []
-                        ) {
-                            Marker(account.name, systemImage: "shield.fill", coordinate: coordinate)
-                                .tint(FieldWorkspacePalette.red)
-                        }
-                        .allowsHitTesting(false)
+                    if previewCoordinate != nil || account.locations.contains(where: { $0.coordinate != nil }) {
+                        WorkspaceMap(account: account)
+                            .allowsHitTesting(false)
                     } else {
                         Rectangle()
                             .fill(FieldWorkspacePalette.surfaceRaised)
@@ -691,9 +682,7 @@ private struct MapArrivalView: View {
                         .tracking(0.8)
                         .foregroundStyle(FieldWorkspacePalette.blue)
                     Spacer()
-                    Text("\(account.locations.count) saved")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    editLocationsMenu
                 }
 
                 WorkspaceMap(account: account)
@@ -726,8 +715,9 @@ private struct MapArrivalView: View {
                 } else {
                     ForEach(account.locations) { location in
                         Button {
-                            editingLocation = location
-                            isShowingEditor = true
+                            if let coordinate = location.coordinate {
+                                openWalkingRoute(to: coordinate, named: location.label)
+                            }
                         } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: locationSymbol(location.type))
@@ -744,7 +734,7 @@ private struct MapArrivalView: View {
                                 }
                                 Spacer()
                                 if location.coordinate != nil {
-                                    Image(systemName: "arrow.triangle.turn.up.right.diamond")
+                                    Image(systemName: "figure.walk")
                                         .foregroundStyle(FieldWorkspacePalette.blue)
                                 }
                             }
@@ -759,14 +749,6 @@ private struct MapArrivalView: View {
                             }
                         }
                         .buttonStyle(.plain)
-                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                            if let coordinate = location.coordinate {
-                                Button("Route", systemImage: "arrow.triangle.turn.up.right.diamond") {
-                                    openRoute(to: coordinate, named: location.label)
-                                }
-                                .tint(FieldWorkspacePalette.blue)
-                            }
-                        }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button("Delete", systemImage: "trash", role: .destructive) {
                                 store.deleteLocation(accountID: account.id, locationID: location.id)
@@ -785,23 +767,6 @@ private struct MapArrivalView: View {
         .background(FieldWorkspacePalette.background)
         .navigationTitle("Arrival Map")
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom) {
-            HStack(spacing: 10) {
-                Button("Import CSV", systemImage: "square.and.arrow.down") {
-                    isImportingCSV = true
-                }
-                    .buttonStyle(.glass)
-                Button("Add Location", systemImage: "plus") {
-                    editingLocation = nil
-                    isShowingEditor = true
-                }
-                    .buttonStyle(.glass)
-                Button("Route", systemImage: "arrow.triangle.turn.up.right.diamond.fill") { store.openRoute(for: account) }
-                    .buttonStyle(.glassProminent)
-            }
-            .padding(12)
-            .glassEffect()
-        }
         .sheet(isPresented: $isShowingEditor) {
             FireVaultLocationEditorSheet(
                 accountName: account.name,
@@ -850,10 +815,43 @@ private struct MapArrivalView: View {
         }
     }
 
-    private func openRoute(to coordinate: CLLocationCoordinate2D, named name: String) {
+    private var editLocationsMenu: some View {
+        Menu {
+            Button("Add Location", systemImage: "plus") {
+                editingLocation = nil
+                isShowingEditor = true
+            }
+            Button("Import CSV", systemImage: "square.and.arrow.down") {
+                isImportingCSV = true
+            }
+
+            if !account.locations.isEmpty {
+                Divider()
+                Section("Edit Saved Locations") {
+                    ForEach(account.locations) { location in
+                        Button(location.label, systemImage: locationSymbol(location.type)) {
+                            editingLocation = location
+                            isShowingEditor = true
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("Edit Locations", systemImage: "pencil.and.list.clipboard")
+                .font(.caption.bold())
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .accessibilityHint("Adds, imports, or edits saved arrival points")
+    }
+
+    private func openWalkingRoute(to coordinate: CLLocationCoordinate2D, named name: String) {
         let item = MKMapItem(location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude), address: nil)
         item.name = name
-        item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
+        item.openInMaps(launchOptions: [
+            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking,
+            MKLaunchOptionsMapTypeKey: MKMapType.hybrid.rawValue
+        ])
     }
 
     private func importLocations(from selection: Result<[URL], Error>) {
@@ -1253,8 +1251,8 @@ private struct WorkspaceMap: View {
         return .init(
             center: center,
             span: .init(
-                latitudeDelta: max(0.006, (latitudes.max()! - latitudes.min()!) * 1.7),
-                longitudeDelta: max(0.006, (longitudes.max()! - longitudes.min()!) * 1.7)
+                latitudeDelta: max(0.0022, (latitudes.max()! - latitudes.min()!) * 1.35),
+                longitudeDelta: max(0.0022, (longitudes.max()! - longitudes.min()!) * 1.35)
             )
         )
     }
@@ -1267,18 +1265,40 @@ private struct WorkspaceMap: View {
             }
             ForEach(validLocations) { location in
                 if let coordinate = location.coordinate {
-                    Annotation("", coordinate: coordinate) {
-                        Circle()
-                            .fill(location.resolvedPinColor.color)
-                            .overlay(Circle().stroke(.white, lineWidth: 2))
-                            .frame(width: 18, height: 18)
-                            .shadow(radius: 3, y: 1)
-                            .accessibilityLabel(location.label)
+                    Annotation(location.label, coordinate: coordinate) {
+                        if isParkingLocation(location) {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(FieldWorkspacePalette.red)
+                                    .overlay(Circle().stroke(.white, lineWidth: 2))
+                                    .frame(width: 17, height: 17)
+                                Text("PARK HERE")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.white)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(.black.opacity(0.82), in: Capsule())
+                            .shadow(radius: 4, y: 2)
+                            .accessibilityLabel("Park here, \(location.label)")
+                        } else {
+                            Circle()
+                                .fill(location.resolvedPinColor.color)
+                                .overlay(Circle().stroke(.white, lineWidth: 2))
+                                .frame(width: 18, height: 18)
+                                .shadow(radius: 3, y: 1)
+                                .accessibilityLabel(location.label)
+                        }
                     }
                 }
             }
         }
         .mapStyle(.standard(elevation: .realistic))
+    }
+
+    private func isParkingLocation(_ location: FireVaultWorkspaceLocation) -> Bool {
+        let searchable = "\(location.label) \(location.type)".lowercased()
+        return searchable.contains("parking") || searchable.contains("park here")
     }
 }
 

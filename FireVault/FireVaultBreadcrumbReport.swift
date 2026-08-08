@@ -709,8 +709,6 @@ struct FireVaultBreadcrumbReportView: View {
     private func brandBlock(title: String, technician: String, company: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                FireVaultProIconBadge(size: 34, cornerRadius: 8)
-
                 FireVaultProWordmark(
                     fireColor: FireVaultTripLogReportPalette.red,
                     vaultColor: FireVaultTripLogReportPalette.navy,
@@ -1515,17 +1513,14 @@ enum FireVaultTripLogPDFRenderer {
         navy.setFill()
         UIBezierPath(roundedRect: masthead, cornerRadius: 18).fill()
 
-        let logoRect = CGRect(x: 42, y: 40, width: 58, height: 58)
-        drawFireVaultProIcon(in: logoRect, cornerRadius: 13)
-
-        drawFireVaultProWordmark(x: 116, y: 39, fontSize: 23)
-        drawText(title, font: .systemFont(ofSize: 10, weight: .bold), color: .white, x: 116, y: 70, width: 300)
+        drawFireVaultProWordmark(x: 42, y: 39, fontSize: 23)
+        drawText(title, font: .systemFont(ofSize: 10, weight: .bold), color: .white, x: 42, y: 70, width: 374)
 
         let identity = [
             company,
             technician.isEmpty ? "Technician not configured" : technician
         ].filter { !$0.isEmpty }.joined(separator: "  |  ")
-        drawText(identity, font: .systemFont(ofSize: 8.5, weight: .medium), color: UIColor.white.withAlphaComponent(0.72), x: 116, y: 91, width: 340)
+        drawText(identity, font: .systemFont(ofSize: 8.5, weight: .medium), color: UIColor.white.withAlphaComponent(0.72), x: 42, y: 91, width: 414)
 
         let badge = CGRect(x: 476, y: 37, width: 90, height: 80)
         UIColor.white.setFill()
@@ -1553,9 +1548,8 @@ enum FireVaultTripLogPDFRenderer {
         let bar = CGRect(x: 24, y: 22, width: 564, height: 58)
         navy.setFill()
         UIBezierPath(roundedRect: bar, cornerRadius: 16).fill()
-        drawFireVaultProIcon(in: CGRect(x: 38, y: 31, width: 40, height: 40), cornerRadius: 9)
-        drawFireVaultProWordmark(x: 90, y: 33, fontSize: 16)
-        drawText(title, font: .systemFont(ofSize: 8.5, weight: .bold), color: UIColor.white.withAlphaComponent(0.78), x: 90, y: 55, width: 220)
+        drawFireVaultProWordmark(x: 38, y: 33, fontSize: 16)
+        drawText(title, font: .systemFont(ofSize: 8.5, weight: .bold), color: UIColor.white.withAlphaComponent(0.78), x: 38, y: 55, width: 274)
         drawText(date, font: .systemFont(ofSize: 8.5, weight: .semibold), color: .white, x: 352, y: 45, width: 214, alignment: .right)
         drawFooter(page: page)
         return 97
@@ -1630,29 +1624,6 @@ enum FireVaultTripLogPDFRenderer {
         line.stroke()
         drawText("FIREVAULT PRO FIELD OPERATIONS", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 42, y: 766, width: 250)
         drawText("PAGE \(page)", font: .monospacedSystemFont(ofSize: 7, weight: .semibold), color: .gray, x: 470, y: 766, width: 100, alignment: .right)
-    }
-
-    private static func drawFireVaultProIcon(in rect: CGRect, cornerRadius: CGFloat) {
-        if let image = UIImage(named: "FireVaultLogo") {
-            image.draw(in: rect)
-            return
-        }
-
-        let path = UIBezierPath(roundedRect: rect, cornerRadius: cornerRadius)
-        UIColor(red: 0.055, green: 0.06, blue: 0.075, alpha: 1).setFill()
-        path.fill()
-
-        UIColor.white.withAlphaComponent(0.12).setStroke()
-        path.lineWidth = 1
-        path.stroke()
-
-        drawCenteredText(
-            "🔥",
-            font: .systemFont(ofSize: rect.height * 0.46, weight: .black),
-            color: red,
-            rect: rect.insetBy(dx: rect.width * 0.12, dy: rect.height * 0.1)
-        )
-
     }
 
     private static func drawFireVaultProWordmark(x: CGFloat, y: CGFloat, fontSize: CGFloat) {

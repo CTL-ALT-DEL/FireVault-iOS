@@ -235,7 +235,7 @@ struct NativeOverlaySettingsView: View {
             } header: {
                 Text("Preview")
             } footer: {
-                Text("Tap the photo to position and resize the overlay and FireVault Pro logo in a full-screen landscape editor.")
+                Text("Tap the photo to position and resize the overlay and FireVault Pro wordmark in a full-screen landscape editor.")
             }
 
             Section("Appearance") {
@@ -261,7 +261,7 @@ struct NativeOverlaySettingsView: View {
 
             Section {
                 Toggle(
-                    "Show FireVault Pro brand",
+                    "Show FireVault Pro wordmark",
                     isOn: overlayBinding(\.showLogo)
                 )
                 Toggle(
@@ -286,7 +286,7 @@ struct NativeOverlaySettingsView: View {
             } header: {
                 Text("Branding")
             } footer: {
-                Text("The FireVault Pro brand includes the app icon plus FIRE in red, VAULT in white, and the PRO stamp.")
+                Text("The photo wordmark uses FIRE in red, VAULT in white, and the PRO stamp. The flame icon remains reserved for app launch and the Home Screen.")
             }
 
             Section {
@@ -300,7 +300,7 @@ struct NativeOverlaySettingsView: View {
             }
 
             Section {
-                Button("Reset Overlay and Logo Placement", systemImage: "arrow.counterclockwise") {
+                Button("Reset Overlay and Wordmark Placement", systemImage: "arrow.counterclockwise") {
                     draft.overlay.scale = 0.50
                     draft.overlay.positionX = -0.78
                     draft.overlay.positionY = 0.78
@@ -360,7 +360,7 @@ struct NativeOverlaySettingsView: View {
     private var logoSizeControl: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Logo size")
+                Text("Wordmark size")
                 Spacer()
                 Text("\(Int((draft.overlay.logoScale * 100).rounded()))%")
                     .monospacedDigit()

@@ -247,9 +247,6 @@ private struct FireVaultBrandHeader: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
-            FireVaultProIconBadge(size: 30)
-                .padding(.top, 1)
-
             FireVaultProWordmark(fontSize: 15, proFontSize: 6.8, tracking: 1.35)
             .shadow(color: .black.opacity(0.78), radius: 2, x: 0, y: 1)
             .padding(.top, 2)
