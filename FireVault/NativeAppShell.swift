@@ -209,16 +209,6 @@ struct NativeAppShellView: View {
                                         : NativeShellPalette.navigationInactive)
                             )
                             .frame(width: 34, height: 26)
-                            .background {
-                                if isTripRecording {
-                                    Image(systemName: "circle.fill")
-                                        .font(.system(size: 25, weight: .bold))
-                                        .foregroundStyle(NativeShellPalette.green.opacity(0.48))
-                                        .blur(radius: 5)
-                                        .symbolEffect(.pulse, options: .repeating)
-                                        .accessibilityHidden(true)
-                                }
-                            }
                             .shadow(
                                 color: .black.opacity(isSelected || isTripRecording ? 0.52 : 0.18),
                                 radius: isSelected || isTripRecording ? 2.5 : 1.5,

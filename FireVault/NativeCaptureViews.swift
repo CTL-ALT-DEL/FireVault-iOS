@@ -1389,6 +1389,14 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
     private let onCancel: () -> Void
     private var overlayHost: UIHostingController<AnyView>?
     private var configured = false
+    private var videoInput: AVCaptureDeviceInput?
+    private var activeCamera: AVCaptureDevice?
+    private var availableLenses: [(title: String, device: AVCaptureDevice)] = []
+    private var flashMode: AVCaptureDevice.FlashMode = .auto
+    private var beginningZoomFactor: CGFloat = 1
+    private let flashButton = UIButton(type: .system)
+    private let zoomSlider = UISlider()
+    private let lensControl = UISegmentedControl()
 
     init(
         preferences: FireVaultOverlayPreferences,
@@ -1430,6 +1438,7 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
         view.addSubview(photoCanvas)
         previewLayer.videoGravity = .resizeAspectFill
         photoCanvas.layer.addSublayer(previewLayer)
+        photoCanvas.addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:))))
 
         if let overlayView = overlayHost?.view {
             photoCanvas.addSubview(overlayView)
@@ -1457,6 +1466,8 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
         shutter.accessibilityLabel = "Take photo"
         view.addSubview(shutter)
         shutter.translatesAutoresizingMaskIntoConstraints = false
+
+        configureCameraControls()
 
         NSLayoutConstraint.activate([
             cancel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
@@ -1498,12 +1509,138 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // Keep the live camera full-screen in every orientation. Only the
-        // SwiftUI overlay receives the new bounds and reflows its positions.
-        photoCanvas.frame = view.bounds
+        let orientation = view.window?.windowScene?.effectiveGeometry.interfaceOrientation
+        let photoAspect = orientation?.isLandscape == true
+            ? CGSize(width: 4, height: 3)
+            : CGSize(width: 3, height: 4)
+        photoCanvas.frame = AVMakeRect(aspectRatio: photoAspect, insideRect: view.bounds).integral
         previewLayer.frame = photoCanvas.bounds
         overlayHost?.view.frame = photoCanvas.bounds
         updateVideoRotation()
+    }
+
+    private func configureCameraControls() {
+        let candidates: [(String, AVCaptureDevice.DeviceType)] = [
+            ("0.5×", .builtInUltraWideCamera),
+            ("1×", .builtInWideAngleCamera),
+            ("2×", .builtInTelephotoCamera)
+        ]
+        availableLenses = candidates.compactMap { title, type in
+            AVCaptureDevice.default(type, for: .video, position: .back).map { (title, $0) }
+        }
+        for lens in availableLenses { lensControl.insertSegment(withTitle: lens.title, at: lensControl.numberOfSegments, animated: false) }
+        lensControl.selectedSegmentIndex = availableLenses.firstIndex { $0.title == "1×" } ?? 0
+        lensControl.selectedSegmentTintColor = .white
+        lensControl.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        lensControl.setTitleTextAttributes([.foregroundColor: UIColor.black], for: .selected)
+        lensControl.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .normal)
+        lensControl.addTarget(self, action: #selector(changeLens(_:)), for: .valueChanged)
+        lensControl.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(lensControl)
+
+        zoomSlider.minimumValue = 1
+        zoomSlider.maximumValue = 5
+        zoomSlider.value = 1
+        zoomSlider.minimumTrackTintColor = .white
+        zoomSlider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.34)
+        zoomSlider.thumbTintColor = .white
+        zoomSlider.addTarget(self, action: #selector(changeZoom(_:)), for: .valueChanged)
+        zoomSlider.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(zoomSlider)
+
+        flashButton.tintColor = .white
+        flashButton.backgroundColor = UIColor.black.withAlphaComponent(0.58)
+        flashButton.layer.cornerRadius = 22
+        flashButton.addTarget(self, action: #selector(changeFlashMode), for: .touchUpInside)
+        flashButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(flashButton)
+        updateFlashButton()
+
+        NSLayoutConstraint.activate([
+            flashButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            flashButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
+            flashButton.widthAnchor.constraint(equalToConstant: 44),
+            flashButton.heightAnchor.constraint(equalToConstant: 44),
+            lensControl.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            lensControl.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -92),
+            lensControl.widthAnchor.constraint(lessThanOrEqualToConstant: 210),
+            zoomSlider.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            zoomSlider.bottomAnchor.constraint(equalTo: lensControl.topAnchor, constant: -10),
+            zoomSlider.widthAnchor.constraint(equalToConstant: 190)
+        ])
+    }
+
+    private func preferredCamera() -> AVCaptureDevice? {
+        availableLenses.first(where: { $0.title == "1×" })?.device
+            ?? availableLenses.first?.device
+            ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+    }
+
+    @objc private func changeLens(_ sender: UISegmentedControl) {
+        guard availableLenses.indices.contains(sender.selectedSegmentIndex) else { return }
+        let device = availableLenses[sender.selectedSegmentIndex].device
+        sessionQueue.async { [weak self] in
+            guard let self, let input = try? AVCaptureDeviceInput(device: device) else { return }
+            session.beginConfiguration()
+            if let videoInput { session.removeInput(videoInput) }
+            if session.canAddInput(input) {
+                session.addInput(input)
+                videoInput = input
+                activeCamera = device
+            }
+            session.commitConfiguration()
+            DispatchQueue.main.async { [weak self] in self?.updateZoomControls() }
+        }
+    }
+
+    @objc private func changeZoom(_ sender: UISlider) {
+        setZoomFactor(CGFloat(sender.value))
+    }
+
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        if gesture.state == .began { beginningZoomFactor = activeCamera?.videoZoomFactor ?? 1 }
+        let proposed = beginningZoomFactor * gesture.scale
+        setZoomFactor(proposed)
+        if gesture.state == .ended || gesture.state == .cancelled { beginningZoomFactor = activeCamera?.videoZoomFactor ?? 1 }
+    }
+
+    private func setZoomFactor(_ factor: CGFloat) {
+        guard let camera = activeCamera else { return }
+        let resolved = min(max(factor, camera.minAvailableVideoZoomFactor), min(camera.maxAvailableVideoZoomFactor, 5))
+        do {
+            try camera.lockForConfiguration()
+            camera.videoZoomFactor = resolved
+            camera.unlockForConfiguration()
+            zoomSlider.value = Float(resolved)
+        } catch { }
+    }
+
+    private func updateZoomControls() {
+        guard let camera = activeCamera else { return }
+        zoomSlider.minimumValue = Float(camera.minAvailableVideoZoomFactor)
+        zoomSlider.maximumValue = Float(min(camera.maxAvailableVideoZoomFactor, 5))
+        zoomSlider.value = Float(camera.videoZoomFactor)
+    }
+
+    @objc private func changeFlashMode() {
+        flashMode = switch flashMode {
+        case .off: .auto
+        case .auto: .on
+        case .on: .off
+        @unknown default: .auto
+        }
+        updateFlashButton()
+    }
+
+    private func updateFlashButton() {
+        let symbol = switch flashMode {
+        case .off: "bolt.slash.fill"
+        case .auto: "bolt.badge.automatic.fill"
+        case .on: "bolt.fill"
+        @unknown default: "bolt.badge.automatic.fill"
+        }
+        flashButton.setImage(UIImage(systemName: symbol), for: .normal)
+        flashButton.accessibilityLabel = "Flash \(flashMode == .off ? "off" : flashMode == .on ? "on" : "automatic")"
     }
 
     private func requestCameraAndStart() {
@@ -1530,12 +1667,15 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
                 session.beginConfiguration()
                 session.sessionPreset = .photo
                 defer { session.commitConfiguration() }
-                guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                guard let camera = preferredCamera(),
                       let input = try? AVCaptureDeviceInput(device: camera),
                       session.canAddInput(input), session.canAddOutput(photoOutput) else { return }
                 session.addInput(input)
                 session.addOutput(photoOutput)
+                videoInput = input
+                activeCamera = camera
                 configured = true
+                DispatchQueue.main.async { [weak self] in self?.updateZoomControls() }
             }
             if !session.isRunning { session.startRunning() }
         }
@@ -1546,14 +1686,14 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
     @objc private func capturePhoto() {
         updateVideoRotation()
         let settings = AVCapturePhotoSettings()
-        settings.flashMode = .auto
+        settings.flashMode = photoOutput.supportedFlashModes.contains(flashMode) ? flashMode : .off
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
     private func updateVideoRotation() {
         let angle: CGFloat = switch view.window?.windowScene?.effectiveGeometry.interfaceOrientation {
-        case .landscapeLeft: 0
-        case .landscapeRight: 180
+        case .landscapeLeft: 180
+        case .landscapeRight: 0
         case .portraitUpsideDown: 270
         default: 90
         }
