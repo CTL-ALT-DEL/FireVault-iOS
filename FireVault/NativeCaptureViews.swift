@@ -104,6 +104,77 @@ struct FireVaultOverlayPanelSizing {
     }
 }
 
+enum FireVaultOverlayCanvasConstraints {
+    static func constrained(
+        _ preferences: FireVaultOverlayPreferences,
+        canvasSize: CGSize,
+        technicianName: String,
+        siteName: String,
+        address: String,
+        accountID: String,
+        category: String
+    ) -> FireVaultOverlayPreferences {
+        guard canvasSize.width > 0, canvasSize.height > 0 else { return preferences.normalized }
+        var value = preferences.normalized
+        let fields = FireVaultOverlayTemplateFormatter.resolvedFields(
+            preferences: value,
+            siteName: siteName,
+            address: address,
+            accountID: accountID,
+            category: category,
+            technicianName: technicianName,
+            timestamp: .now
+        )
+        let informationFields = fields.filter { $0.field != .technician }
+        let metrics = FireVaultOverlayPanelSizing.metrics(
+            siteName: siteName,
+            maximumFieldLength: informationFields.map(\.value.count).max() ?? 0,
+            hasTechnician: fields.contains { $0.field == .technician },
+            hasQRCode: value.showLocationQRCode,
+            canvasWidth: canvasSize.width,
+            scale: value.scale
+        )
+        let visibleLines = informationFields.count + (value.showTagline ? 1 : 0)
+        let unscaledPanelHeight = max(
+            value.showLocationQRCode ? 58 : 48,
+            CGFloat(visibleLines) * 12 + 18 + (value.glassThickness == "thick" ? 4 : 0)
+        )
+        value.positionX = normalizedPosition(
+            current: value.positionX,
+            canvasLength: canvasSize.width,
+            elementLength: metrics.panelWidth * value.scale
+        )
+        value.positionY = normalizedPosition(
+            current: value.positionY,
+            canvasLength: canvasSize.height,
+            elementLength: unscaledPanelHeight * value.scale
+        )
+        value.logoPositionX = normalizedPosition(
+            current: value.logoPositionX,
+            canvasLength: canvasSize.width,
+            elementLength: 118 * value.logoScale
+        )
+        value.logoPositionY = normalizedPosition(
+            current: value.logoPositionY,
+            canvasLength: canvasSize.height,
+            elementLength: 44 * value.logoScale
+        )
+        return value.normalized
+    }
+
+    private static func normalizedPosition(
+        current: Double,
+        canvasLength: CGFloat,
+        elementLength: CGFloat
+    ) -> Double {
+        let margin: CGFloat = 6
+        let halfElement = min(canvasLength / 2, elementLength / 2 + margin)
+        let proposedCenter = canvasLength * (0.5 + CGFloat(current) * 0.36)
+        let center = min(max(proposedCenter, halfElement), canvasLength - halfElement)
+        return Double((center / canvasLength - 0.5) / 0.36)
+    }
+}
+
 enum FireVaultLocationQRCode {
     static func payload(for account: FireVaultWorkspaceAccount) -> String? {
         guard let coordinate = account.coordinate else { return nil }
@@ -637,11 +708,14 @@ struct FireVaultOverlayPreview: View {
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.12), lineWidth: 1) }
         .onChange(of: preferences) { _, newValue in
-            editedPreferences = newValue
+            editedPreferences = constrainedPreferences(newValue, size: FireVaultOverlayPreviewGeometry.designSize)
             activeDragTarget = nil
             dragTranslation = .zero
         }
-        .onAppear { stageEdits() }
+        .onAppear {
+            editedPreferences = constrainedPreferences(editedPreferences, size: FireVaultOverlayPreviewGeometry.designSize)
+            stageEdits()
+        }
         .accessibilityIdentifier("overlay-interactive-preview")
         .accessibilityHint("Drag the glass overlay or FireVault Pro logo to place it on the photo")
     }
@@ -665,7 +739,7 @@ struct FireVaultOverlayPreview: View {
             editedPreferences.logoPositionY += yChange
         }
 
-        editedPreferences = editedPreferences.normalized
+        editedPreferences = constrainedPreferences(editedPreferences, size: designSize)
         stageEdits()
         UISelectionFeedbackGenerator().selectionChanged()
     }
@@ -758,7 +832,7 @@ struct FireVaultOverlayPreview: View {
 
     private func previewPreferences(size: CGSize) -> FireVaultOverlayPreferences {
         var value = editedPreferences
-        guard let activeDragTarget else { return value.normalized }
+        guard let activeDragTarget else { return constrainedPreferences(value, size: size) }
 
         let xChange = Double(dragTranslation.width / max(size.width * 0.36, 1))
         let yChange = Double(dragTranslation.height / max(size.height * 0.36, 1))
@@ -770,7 +844,22 @@ struct FireVaultOverlayPreview: View {
             value.logoPositionX += xChange
             value.logoPositionY += yChange
         }
-        return value.normalized
+        return constrainedPreferences(value, size: size)
+    }
+
+    private func constrainedPreferences(
+        _ value: FireVaultOverlayPreferences,
+        size: CGSize
+    ) -> FireVaultOverlayPreferences {
+        FireVaultOverlayCanvasConstraints.constrained(
+            value,
+            canvasSize: size,
+            technicianName: technicianName,
+            siteName: siteName,
+            address: address,
+            accountID: accountID,
+            category: category
+        )
     }
 
     private func stageEdits() { FireVaultOverlayEditorBridge.stage(editedPreferences) }
@@ -845,6 +934,7 @@ struct FireVaultOverlayPlacementEditor: View {
             }
             .onAppear {
                 FireVaultOrientationCoordinator.beginOverlayPlacement()
+                editedPreferences = constrainedPreferences(editedPreferences, size: Self.landscapeDesignSize)
                 hasEnteredLandscape = isLandscape
             }
             .onChange(of: isLandscape) { _, nowLandscape in
@@ -1032,7 +1122,7 @@ struct FireVaultOverlayPlacementEditor: View {
                 case .overlay: editedPreferences.scale = newValue
                 case .logo: editedPreferences.logoScale = newValue
                 }
-                editedPreferences = editedPreferences.normalized
+                editedPreferences = constrainedPreferences(editedPreferences, size: Self.landscapeDesignSize)
                 showControls()
             }
         )
@@ -1087,13 +1177,13 @@ struct FireVaultOverlayPlacementEditor: View {
             editedPreferences.logoPositionX += xChange
             editedPreferences.logoPositionY += yChange
         }
-        editedPreferences = editedPreferences.normalized
+        editedPreferences = constrainedPreferences(editedPreferences, size: designSize)
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
     private func previewPreferences(in size: CGSize) -> FireVaultOverlayPreferences {
         var value = editedPreferences
-        guard let activeDragTarget else { return value.normalized }
+        guard let activeDragTarget else { return constrainedPreferences(value, size: size) }
 
         let xChange = Double(dragTranslation.width / max(size.width * 0.36, 1))
         let yChange = Double(dragTranslation.height / max(size.height * 0.36, 1))
@@ -1105,7 +1195,22 @@ struct FireVaultOverlayPlacementEditor: View {
             value.logoPositionX += xChange
             value.logoPositionY += yChange
         }
-        return value.normalized
+        return constrainedPreferences(value, size: size)
+    }
+
+    private func constrainedPreferences(
+        _ value: FireVaultOverlayPreferences,
+        size: CGSize
+    ) -> FireVaultOverlayPreferences {
+        FireVaultOverlayCanvasConstraints.constrained(
+            value,
+            canvasSize: size,
+            technicianName: technicianName,
+            siteName: siteName,
+            address: address,
+            accountID: accountID,
+            category: category
+        )
     }
 
     private func overlayCenter(in size: CGSize) -> CGPoint {
@@ -1191,17 +1296,26 @@ enum FireVaultPhotoOverlayRenderer {
         let pixelWidth = max(image.size.width, 1)
         let outputScale = max(pixelWidth / 430, 1)
         let logicalSize = CGSize(width: image.size.width / outputScale, height: image.size.height / outputScale)
+        let adjustedPreferences = FireVaultOverlayCanvasConstraints.constrained(
+            preferences,
+            canvasSize: logicalSize,
+            technicianName: technicianName,
+            siteName: account.name,
+            address: account.address,
+            accountID: account.accountId,
+            category: account.category
+        )
         let content = ZStack {
             Image(uiImage: image).resizable().scaledToFill().frame(width: logicalSize.width, height: logicalSize.height).clipped()
             FireVaultPhotoOverlayView(
-                preferences: preferences,
+                preferences: adjustedPreferences,
                 technicianName: technicianName,
                 siteName: account.name,
                 address: account.address,
                 accountID: account.accountId,
                 category: account.category,
                 timestamp: timestamp,
-                locationQRCodePayload: preferences.showLocationQRCode
+                locationQRCodePayload: adjustedPreferences.showLocationQRCode
                     ? FireVaultLocationQRCode.payload(for: account)
                     : nil
             ).frame(width: logicalSize.width, height: logicalSize.height)
@@ -1232,6 +1346,39 @@ struct NativeCameraCaptureView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: FireVaultCameraViewController, context: Context) {}
 }
 
+private struct FireVaultCameraLiveOverlay: View {
+    let preferences: FireVaultOverlayPreferences
+    let technicianName: String
+    let account: FireVaultWorkspaceAccount
+
+    var body: some View {
+        GeometryReader { geometry in
+            let adjusted = FireVaultOverlayCanvasConstraints.constrained(
+                preferences,
+                canvasSize: geometry.size,
+                technicianName: technicianName,
+                siteName: account.name,
+                address: account.address,
+                accountID: account.accountId,
+                category: account.category
+            )
+            FireVaultPhotoOverlayView(
+                preferences: adjusted,
+                technicianName: technicianName,
+                siteName: account.name,
+                address: account.address,
+                accountID: account.accountId,
+                category: account.category,
+                timestamp: .now,
+                locationQRCodePayload: adjusted.showLocationQRCode
+                    ? FireVaultLocationQRCode.payload(for: account)
+                    : nil
+            )
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+    }
+}
+
 final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptureDelegate {
     private let session = AVCaptureSession()
     private let photoOutput = AVCapturePhotoOutput()
@@ -1256,17 +1403,10 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
         super.init(nibName: nil, bundle: nil)
 
         if let account {
-            let overlay = FireVaultPhotoOverlayView(
+            let overlay = FireVaultCameraLiveOverlay(
                 preferences: preferences,
                 technicianName: technicianName,
-                siteName: account.name,
-                address: account.address,
-                accountID: account.accountId,
-                category: account.category,
-                timestamp: .now,
-                locationQRCodePayload: preferences.showLocationQRCode
-                    ? FireVaultLocationQRCode.payload(for: account)
-                    : nil
+                account: account
             )
             .allowsHitTesting(false)
             let host = UIHostingController(rootView: AnyView(overlay))
@@ -1278,6 +1418,9 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
+
+    override var shouldAutorotate: Bool { true }
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .allButUpsideDown }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -1329,14 +1472,28 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        FireVaultOrientationCoordinator.beginCameraCapture()
         requestCameraAndStart()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        FireVaultOrientationCoordinator.finishCameraCapture()
         sessionQueue.async { [session] in
             if session.isRunning { session.stopRunning() }
         }
+    }
+
+    override func viewWillTransition(
+        to size: CGSize,
+        with coordinator: any UIViewControllerTransitionCoordinator
+    ) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: { [weak self] _ in
+            self?.view.setNeedsLayout()
+            self?.view.layoutIfNeeded()
+            self?.updateVideoRotation()
+        })
     }
 
     override func viewDidLayoutSubviews() {
@@ -1407,7 +1564,7 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
     }
 
     private func updateVideoRotation() {
-        let angle: CGFloat = switch view.window?.windowScene?.interfaceOrientation {
+        let angle: CGFloat = switch view.window?.windowScene?.effectiveGeometry.interfaceOrientation {
         case .landscapeLeft: 0
         case .landscapeRight: 180
         case .portraitUpsideDown: 270

@@ -135,7 +135,17 @@ enum FireVaultOrientationCoordinator {
         updateSupportedOrientations(preferred: .landscape)
     }
 
+    static func beginCameraCapture() {
+        supportedOrientations = .allButUpsideDown
+        updateSupportedOrientations()
+    }
+
     static func finishOverlayPlacement() {
+        supportedOrientations = .portrait
+        updateSupportedOrientations(preferred: .portrait)
+    }
+
+    static func finishCameraCapture() {
         supportedOrientations = .portrait
         updateSupportedOrientations(preferred: .portrait)
     }
