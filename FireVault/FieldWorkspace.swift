@@ -967,7 +967,7 @@ struct FireVaultLocationCSVImporter {
         headers.firstIndex(where: aliases.contains)
     }
 
-    private static func normalize(_ value: String) -> String {
+    nonisolated private static func normalize(_ value: String) -> String {
         value.lowercased().filter(\.isLetter)
     }
 
@@ -1548,7 +1548,7 @@ struct FireVaultEquipmentCSVImporter {
         headers.firstIndex(where: aliases.contains)
     }
 
-    private static func normalize(_ value: String) -> String {
+    nonisolated private static func normalize(_ value: String) -> String {
         value.lowercased().filter(\.isLetter)
     }
 
