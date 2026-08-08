@@ -55,6 +55,7 @@ struct ContentView: View {
         .preferredColorScheme(preferredColorScheme)
         .task {
             prepareActiveVault()
+            store.configureCategoryRules(settings.preferences.categoryRules ?? [])
             privacyLock.configure(enabled: settings.preferences.privacy.enabled)
             handlePendingQuickAction()
             guard showsSplash else { return }
@@ -89,6 +90,9 @@ struct ContentView: View {
         .onChange(of: settings.preferences.privacy.enabled) { _, enabled in
             privacyLock.configure(enabled: enabled)
             if enabled { privacyLock.authenticate() }
+        }
+        .onChange(of: settings.preferences.categoryRules) { _, rules in
+            store.configureCategoryRules(rules ?? [])
         }
         .onChange(of: store.demoMode) { _, _ in
             prepareActiveVault()

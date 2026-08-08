@@ -2243,16 +2243,11 @@ private struct NativeSettingsView: View {
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var search = ""
-    @State private var expandedSettingGroups: Set<String> = []
+    @State private var expandedSettingGroupID: String?
     private let versionInfo = FireVaultVersionInfo()
 
     private var viewPreferences: FireVaultSettingsViewPreferences { settings.settingsView }
-    private var usesCollapsibleSections: Bool {
-        search.isEmpty && (
-            viewPreferences.mode == .compact
-                || (viewPreferences.mode == .advanced && viewPreferences.advancedCollapseSections)
-        )
-    }
+    private var usesCollapsibleSections: Bool { search.isEmpty }
     private var showsDescriptions: Bool {
         viewPreferences.mode == .advanced && viewPreferences.advancedShowDescriptions
     }
@@ -2313,10 +2308,9 @@ private struct NativeSettingsView: View {
                         }
                     }
                 }
-
-                aboutFooter
             }
             .listStyle(.insetGrouped)
+            .listSectionSpacing(.compact)
             .scrollContentBackground(.hidden)
             .background(NativeShellPalette.background)
             .contentMargins(.bottom, 96, for: .scrollContent)
@@ -2338,13 +2332,21 @@ private struct NativeSettingsView: View {
                         .foregroundStyle(NativeShellPalette.blue)
                         .accessibilityHidden(true)
 
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(settings.preferences.technician.name.isEmpty ? "Technician Profile" : settings.preferences.technician.name)
                             .font(.headline)
                             .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                        Text("FireVault Pro FREE TRIAL")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(NativeShellPalette.blue)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                         Text(payload.demoMode ? "Demo Mode" : "Field technician profile")
-                            .font(.subheadline)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
 
                     Spacer()
@@ -2402,12 +2404,10 @@ private struct NativeSettingsView: View {
         Section {
             DisclosureGroup(
                 isExpanded: Binding(
-                    get: { expandedSettingGroups.contains(group.id) },
+                    get: { expandedSettingGroupID == group.id },
                     set: { isExpanded in
-                        if isExpanded {
-                            expandedSettingGroups.insert(group.id)
-                        } else {
-                            expandedSettingGroups.remove(group.id)
+                        withAnimation(.snappy(duration: 0.22)) {
+                            expandedSettingGroupID = isExpanded ? group.id : nil
                         }
                     }
                 )
@@ -2420,8 +2420,11 @@ private struct NativeSettingsView: View {
                 Label(group.title, systemImage: group.symbol)
                     .font(.headline)
                     .foregroundStyle(NativeShellPalette.tint(group.tint))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
             }
         }
+        .listSectionSpacing(.compact)
     }
 
     private func settingsSection(_ group: FireVaultNativeSettingsGroup) -> some View {
@@ -2492,7 +2495,7 @@ private struct NativeSettingsView: View {
         case "microsoftStorage": NativeMicrosoftStorageSettingsView(settings: settings)
         case "sync": NativeSyncSettingsView(settings: settings)
         case "customerImport": NativeCSVImportView(store: store)
-        case "categories": NativeCategoriesSettingsView(settings: settings)
+        case "categories": NativeCategoriesSettingsView(settings: settings, store: store)
         case "backup": NativeBackupRestoreView(store: store)
         case "webdav": NativeWebDAVSettingsView(settings: settings)
         case "privacy": NativePrivacySettingsView(settings: settings)
@@ -2514,20 +2517,6 @@ private struct NativeSettingsView: View {
         }
     }
 
-    private var aboutFooter: some View {
-        Section {
-            HStack {
-                Text("FireVault Pro")
-                Spacer()
-                Text(versionInfo.displayText)
-                    .foregroundStyle(.secondary)
-            }
-            .font(.footnote)
-            .accessibilityElement(children: .combine)
-        } footer: {
-            Text("A field workspace for notes, files, scans, photos, equipment, and account maps.")
-        }
-    }
 }
 
 private struct NativeGPSSettingsView: View {

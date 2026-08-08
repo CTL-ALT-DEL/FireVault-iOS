@@ -67,6 +67,7 @@ final class FireVaultStore: ObservableObject {
     private let defaults: UserDefaults
     private let demoCoordinate = CLLocationCoordinate2D(latitude: 43.6150, longitude: -116.2023)
     private var geocodingTask: Task<Void, Never>?
+    private var categoryRules: [FireVaultCategoryRule] = []
 
     private enum Key {
         static let demoMode = "firevault.native.demo-mode.v1"
@@ -109,6 +110,12 @@ final class FireVaultStore: ObservableObject {
         accounts.lazy.filter {
             $0.coordinate == nil && FireVaultPostalAddress(combinedAddress: $0.address) != nil
         }.count
+    }
+
+    func configureCategoryRules(_ rules: [FireVaultCategoryRule]) {
+        categoryRules = rules
+        applyCategoryRules()
+        persistAccounts()
     }
 
     func appPayload(
@@ -966,8 +973,38 @@ final class FireVaultStore: ObservableObject {
     }
 
     private func persist() {
+        applyCategoryRules()
+        persistAccounts()
+    }
+
+    private func persistAccounts() {
         guard let data = try? JSONEncoder().encode(accounts) else { return }
         defaults.set(data, forKey: demoMode ? Key.demoAccounts : Key.productionAccounts)
+    }
+
+    private func applyCategoryRules() {
+        for index in accounts.indices {
+            for rule in categoryRules where rule.isEnabled {
+                let needle = rule.value.trimmingCharacters(in: .whitespacesAndNewlines)
+                let tag = rule.categoryTag.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !needle.isEmpty, !tag.isEmpty else { continue }
+                let source: String = switch rule.field {
+                case .accountName: accounts[index].name
+                case .address: accounts[index].address
+                case .accountID: accounts[index].accountId
+                case .category: accounts[index].category
+                case .phone: accounts[index].phone
+                }
+                let matches = switch rule.condition {
+                case .contains: source.localizedCaseInsensitiveContains(needle)
+                case .beginsWith: source.lowercased().hasPrefix(needle.lowercased())
+                case .equals: source.caseInsensitiveCompare(needle) == .orderedSame
+                }
+                if matches, !accounts[index].tags.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) {
+                    accounts[index].tags.append(tag)
+                }
+            }
+        }
     }
 
     private static func savedAccounts(defaults: UserDefaults, key: String) -> [FireVaultWorkspaceAccount]? {

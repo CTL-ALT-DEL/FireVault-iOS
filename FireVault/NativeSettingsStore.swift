@@ -38,6 +38,41 @@ struct FireVaultTechnicianPreferences: Codable, Equatable {
     var name = ""; var company = ""; var phone = ""; var email = ""; var license = ""
 }
 
+enum FireVaultCategoryRuleField: String, Codable, CaseIterable, Identifiable {
+    case accountName, address, accountID, category, phone
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .accountName: "Account name"
+        case .address: "Address"
+        case .accountID: "Account ID"
+        case .category: "Category"
+        case .phone: "Phone"
+        }
+    }
+}
+
+enum FireVaultCategoryRuleCondition: String, Codable, CaseIterable, Identifiable {
+    case contains, beginsWith, equals
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .contains: "contains"
+        case .beginsWith: "begins with"
+        case .equals: "equals"
+        }
+    }
+}
+
+struct FireVaultCategoryRule: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var isEnabled = true
+    var field = FireVaultCategoryRuleField.accountName
+    var condition = FireVaultCategoryRuleCondition.contains
+    var value = ""
+    var categoryTag = ""
+}
+
 struct FireVaultOverlayPreferences: Codable, Equatable {
     var alignment = "bottom"
     var horizontalPosition = "left"
@@ -352,12 +387,19 @@ struct FireVaultNativePreferences: Codable, Equatable {
     var webDAV = FireVaultWebDAVPreferences()
     var privacy = FireVaultPrivacyPreferences()
     var categories: [String] = ["Commercial", "Healthcare", "Education", "Government", "Residential"]
+    var categoryRules: [FireVaultCategoryRule]? = []
     var normalized: Self {
         var copy = self
         copy.gps = gps.normalized
         copy.overlay = overlay.normalized
         copy.reports = reports.normalized
         copy.categories = categories.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        copy.categoryRules = (categoryRules ?? []).map {
+            var rule = $0
+            rule.value = rule.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            rule.categoryTag = rule.categoryTag.trimmingCharacters(in: .whitespacesAndNewlines)
+            return rule
+        }
         return copy
     }
 }

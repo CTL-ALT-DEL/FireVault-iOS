@@ -237,23 +237,115 @@ struct NativeSyncSettingsView: View {
 
 struct NativeCategoriesSettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var store: FireVaultStore
     @State private var draft: FireVaultNativePreferences
     @State private var newCategory = ""
     @FocusState private var focused: Bool
-    init(settings: FireVaultNativeSettingsStore) { self.settings = settings; _draft = State(initialValue: settings.preferences) }
+    init(settings: FireVaultNativeSettingsStore, store: FireVaultStore) {
+        self.settings = settings
+        self.store = store
+        _draft = State(initialValue: settings.preferences)
+    }
     var body: some View {
         List {
-            Section("Categories") { ForEach(draft.categories, id: \.self) { Text($0) }.onDelete { draft.categories.remove(atOffsets: $0) } }
+            Section("Category Tags") {
+                ForEach(draft.categories, id: \.self) { category in
+                    Label(category, systemImage: "tag.fill")
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                .onDelete { draft.categories.remove(atOffsets: $0) }
+            }
             Section("Add Category") {
-                TextField("Category name", text: $newCategory).focused($focused)
+                TextField("Category tag", text: $newCategory).focused($focused)
                 Button("Add", systemImage: "plus") {
                     let value = newCategory.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !value.isEmpty, !draft.categories.contains(where: { $0.caseInsensitiveCompare(value) == .orderedSame }) else { return }
                     draft.categories.append(value); newCategory = ""
                 }
             }
+
+            Section {
+                ForEach(ruleIndices, id: \.self) { index in
+                    categoryRule(at: index)
+                }
+                .onDelete { offsets in
+                    var rules = draft.categoryRules ?? []
+                    rules.remove(atOffsets: offsets)
+                    draft.categoryRules = rules
+                }
+
+                Button("Create Rule", systemImage: "plus.circle.fill") {
+                    var rules = draft.categoryRules ?? []
+                    rules.append(FireVaultCategoryRule(categoryTag: draft.categories.first ?? ""))
+                    draft.categoryRules = rules
+                }
+                .disabled(draft.categories.isEmpty)
+            } header: {
+                Text("Automatic IF / THEN Rules")
+            } footer: {
+                Text("Enabled rules add matching category tags to accounts automatically. Existing tags are preserved.")
+            }
         }
-        .nativeSettingsForm(title: "Account Categories", focused: $focused) { settings.save(draft) }
+        .nativeSettingsForm(title: "Account Categories", focused: $focused) { save() }
+    }
+
+    private var ruleIndices: [Int] { Array((draft.categoryRules ?? []).indices) }
+
+    private func ruleBinding(at index: Int) -> Binding<FireVaultCategoryRule> {
+        Binding(
+            get: { (draft.categoryRules ?? [])[index] },
+            set: { value in
+                var rules = draft.categoryRules ?? []
+                guard rules.indices.contains(index) else { return }
+                rules[index] = value
+                draft.categoryRules = rules
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func categoryRule(at index: Int) -> some View {
+        let rule = ruleBinding(at: index)
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle("Rule \(index + 1)", isOn: rule.isEnabled)
+                .font(.subheadline.weight(.semibold))
+
+            HStack(spacing: 6) {
+                Text("IF")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                Picker("Field", selection: rule.field) {
+                    ForEach(FireVaultCategoryRuleField.allCases) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                Picker("Condition", selection: rule.condition) {
+                    ForEach(FireVaultCategoryRuleCondition.allCases) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+            }
+
+            TextField("Match text", text: rule.value)
+                .textInputAutocapitalization(.words)
+                .focused($focused)
+
+            HStack(spacing: 8) {
+                Text("THEN ADD")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Picker("Category tag", selection: rule.categoryTag) {
+                    ForEach(draft.categories, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden()
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func save() {
+        settings.save(draft)
+        store.configureCategoryRules(draft.categoryRules ?? [])
     }
 }
 
