@@ -201,6 +201,11 @@ struct NativeAppShellView: View {
                         Image(systemName: tab.symbol)
                             .font(.system(size: 20, weight: isSelected ? .bold : .semibold))
                             .symbolVariant(isSelected ? .fill : .none)
+                            .symbolEffect(
+                                .pulse,
+                                options: .repeating,
+                                isActive: isTripRecording
+                            )
                             .foregroundStyle(
                                 isTripRecording
                                     ? NativeShellPalette.green
@@ -436,18 +441,20 @@ private struct NativeNearbyView: View {
     }
 
     private var statusHeader: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(tripLogStatusText)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(tripLogStatusTint)
                 .lineLimit(1)
-            Spacer()
+            Text("•")
+                .font(.caption.bold())
+                .foregroundStyle(.tertiary)
             Text(payload.locationStatus)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
-                .multilineTextAlignment(.trailing)
+            Spacer(minLength: 0)
         }
     }
 
@@ -820,6 +827,13 @@ private struct NativeNearbyView: View {
                             focusScrolledAccount()
                         }
                     }
+                    .onChange(of: scrollAccountID) { _, newID in
+                        guard accountScrollWasActive, newID != nil,
+                              settings.gps.hapticsAreEnabled else { return }
+                        let feedback = UISelectionFeedbackGenerator()
+                        feedback.prepare()
+                        feedback.selectionChanged()
+                    }
                     .accessibilityIdentifier("nearby-account-scroll")
                 }
             }
@@ -891,9 +905,7 @@ private struct NativeNearbyView: View {
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                selectedID == row.id
-                    ? NativeShellPalette.blue.opacity(0.12)
-                    : NativeShellPalette.surface,
+                NativeShellPalette.surface,
                 in: RoundedRectangle(cornerRadius: 16, style: .continuous)
             )
             .overlay {
@@ -906,10 +918,11 @@ private struct NativeNearbyView: View {
                     )
             }
             .shadow(
-                color: .black.opacity(selectedID == row.id ? 0.32 : 0.20),
-                radius: selectedID == row.id ? 9 : 6,
-                y: selectedID == row.id ? 5 : 3
+                color: .black.opacity(selectedID == row.id ? 0.46 : 0.16),
+                radius: selectedID == row.id ? 13 : 5,
+                y: selectedID == row.id ? 8 : 3
             )
+            .scaleEffect(selectedID == row.id ? 1.012 : 1)
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -964,7 +977,7 @@ private struct NativeNearbyView: View {
               let row = nearbyRows.first(where: { $0.id == scrollAccountID }) else {
             return
         }
-        selectAccount(row, scrollToCard: false, haptic: true)
+        selectAccount(row, scrollToCard: false, haptic: false)
     }
 
     private func selectAccount(

@@ -129,6 +129,11 @@ struct FireVaultIPadWorkspaceV2: View {
                     Image(systemName: tab.symbol)
                         .font(.system(size: 17, weight: .semibold))
                         .symbolVariant(selected ? .fill : .none)
+                        .symbolEffect(
+                            .pulse,
+                            options: .repeating,
+                            isActive: tab == .trip && breadcrumbs.isRecording
+                        )
                         .foregroundStyle(
                             tab == .trip && breadcrumbs.isRecording
                                 ? NativeShellPalette.green
