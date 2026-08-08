@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Combine
+import Charts
 import MapKit
 import PhotosUI
 import UIKit
@@ -162,7 +163,13 @@ struct NativeAppShellView: View {
                         showsCloseButton: false
                     )
                 case .photo: NativePhotoView(store: store, settings: settings)
-                case .settings: NativeSettingsView(payload: payload, store: store, settings: settings)
+                case .settings:
+                    NativeSettingsView(
+                        payload: payload,
+                        store: store,
+                        settings: settings,
+                        locationService: locationService
+                    )
                 }
             }
         }
@@ -673,7 +680,8 @@ private struct NativeNearbyView: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.fraction(0.78), .large])
+        .presentationDragIndicator(.visible)
     }
 
     private func tripLogDetailChoice(_ detail: FireVaultTripLogDetail) -> some View {
@@ -2348,6 +2356,7 @@ private struct NativeSettingsView: View {
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var locationService: FireVaultLocationService
     @State private var search = ""
     @State private var expandedSettingGroupID: String?
     @State private var isTechnicianGroupExpanded = false
@@ -2502,9 +2511,7 @@ private struct NativeSettingsView: View {
                             .lineLimit(1)
                     }
 
-                    Spacer(minLength: 8)
-                    technicianAchievementStrip
-                        .frame(maxWidth: 132, alignment: .center)
+                    Spacer(minLength: 4)
                 }
                 .padding(.vertical, 5)
                 .contentShape(Rectangle())
@@ -2541,46 +2548,6 @@ private struct NativeSettingsView: View {
             }
         }
         .listSectionSpacing(.compact)
-    }
-
-    @ViewBuilder
-    private var technicianAchievementStrip: some View {
-        let selectedBadges = FireVaultTechnicianBadge.allCases.filter {
-            Set(settings.preferences.technician.achievementBadges ?? []).contains($0.rawValue)
-        }
-        if !selectedBadges.isEmpty {
-            HStack(spacing: -3) {
-                ForEach(Array(selectedBadges.prefix(3))) { badge in
-                    Image(systemName: badge.symbol)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 27, height: 27)
-                        .background(technicianBadgeTint(badge), in: Circle())
-                        .overlay { Circle().stroke(.white.opacity(0.85), lineWidth: 1.5) }
-                        .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
-                        .accessibilityLabel(badge.title)
-                }
-                if selectedBadges.count > 3 {
-                    Text("+\(selectedBadges.count - 3)")
-                        .font(.caption2.bold())
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 6)
-                }
-            }
-            .accessibilityElement(children: .contain)
-        }
-    }
-
-    private func technicianBadgeTint(_ badge: FireVaultTechnicianBadge) -> Color {
-        switch badge {
-        case .developer: NativeShellPalette.red
-        case .betaTester: NativeShellPalette.blue
-        case .contributor: .purple
-        case .anniversaryOne: .teal
-        case .anniversaryThree: .indigo
-        case .anniversaryFive: NativeShellPalette.amber
-        case .anniversaryTen: .orange
-        }
     }
 
     private func settingsSection(_ group: FireVaultNativeSettingsGroup) -> some View {
@@ -2643,7 +2610,7 @@ private struct NativeSettingsView: View {
         switch id {
         case "tech": NativeTechnicianSettingsView(settings: settings)
         case "overlay": NativeOverlaySettingsView(settings: settings)
-        case "gps": NativeGPSSettingsView(settings: settings)
+        case "gps": NativeGPSSettingsView(settings: settings, locationService: locationService)
         case "plusCodes": NativePlusCodeSettingsView(settings: settings)
         case "reports": NativeReportSettingsView(settings: settings)
         case "email": NativeEmailSettingsView(settings: settings)
@@ -2677,11 +2644,13 @@ private struct NativeSettingsView: View {
 
 private struct NativeGPSSettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var locationService: FireVaultLocationService
     @State private var draft: FireVaultGPSPreferences
     @State private var saved = false
 
-    init(settings: FireVaultNativeSettingsStore) {
+    init(settings: FireVaultNativeSettingsStore, locationService: FireVaultLocationService) {
         self.settings = settings
+        self.locationService = locationService
         let current = settings.gps
         _draft = State(initialValue: current)
     }
@@ -2720,6 +2689,30 @@ private struct NativeGPSSettingsView: View {
                 Toggle("Address assistance", isOn: $draft.addressAssistanceEnabled)
             }
 
+            Section("Diagnostics") {
+                NavigationLink {
+                    FireVaultGPSDiagnosticsView(
+                        locationService: locationService,
+                        highAccuracy: draft.highAccuracy
+                    )
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("GPS Diagnostics")
+                                .font(.headline)
+                            Text("Live accuracy, speed, direction, altitude, and signal charts")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    } icon: {
+                        Image(systemName: "waveform.path.ecg.rectangle")
+                            .font(.title3)
+                            .foregroundStyle(NativeShellPalette.blue)
+                    }
+                }
+            }
+
             if saved {
                 Section {
                     Label("GPS & Maps settings saved", systemImage: "checkmark.circle.fill")
@@ -2744,6 +2737,262 @@ private struct NativeGPSSettingsView: View {
     private func save() {
         settings.saveGPS(draft)
         saved = true
+    }
+}
+
+private struct FireVaultGPSDiagnosticSample: Identifiable {
+    let id = UUID()
+    let time: Date
+    let horizontalAccuracyFeet: Double
+    let altitudeFeet: Double
+    let speedMPH: Double
+}
+
+private struct FireVaultGPSDiagnosticsView: View {
+    @ObservedObject var locationService: FireVaultLocationService
+    let highAccuracy: Bool
+    @State private var samples: [FireVaultGPSDiagnosticSample] = []
+
+    private var location: CLLocation? { locationService.latestLocation }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 14) {
+                statusCard
+                liveMetrics
+                signalChart
+                altitudeChart
+                speedChart
+                systemDetails
+            }
+            .padding(16)
+        }
+        .background(NativeShellPalette.background)
+        .navigationTitle("GPS Diagnostics")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    locationService.requestCurrentLocation(highAccuracy: true)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .accessibilityLabel("Refresh GPS reading")
+            }
+        }
+        .onAppear {
+            locationService.startDiagnosticsUpdates(highAccuracy: highAccuracy)
+            append(locationService.latestLocation)
+        }
+        .onDisappear {
+            locationService.stopDiagnosticsUpdates()
+        }
+        .onReceive(locationService.$latestLocation.compactMap { $0 }) { updated in
+            append(updated)
+        }
+    }
+
+    private var statusCard: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(statusTint.opacity(0.15))
+                Image(systemName: "location.fill")
+                    .font(.title2.bold())
+                    .foregroundStyle(statusTint)
+            }
+            .frame(width: 48, height: 48)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(locationService.isDiagnosticsTracking ? "LIVE GPS SIGNAL" : "GPS STATUS")
+                    .font(.caption.bold())
+                    .tracking(1)
+                    .foregroundStyle(.secondary)
+                Text(locationService.statusText)
+                    .font(.subheadline.bold())
+                    .lineLimit(2)
+                Text(highAccuracy ? "High-accuracy preference enabled" : "Balanced-accuracy preference enabled")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var liveMetrics: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            diagnosticHeader("Live Measurements", symbol: "dot.radiowaves.left.and.right")
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 9) {
+                metric("Latitude", coordinate(location?.coordinate.latitude), "location.north")
+                metric("Longitude", coordinate(location?.coordinate.longitude), "location.north")
+                metric("Accuracy", feet(location?.horizontalAccuracy, prefix: "±"), "scope")
+                metric("Vertical Accuracy", feet(location?.verticalAccuracy, prefix: "±"), "arrow.up.and.down")
+                metric("Altitude", feet(location?.altitude), "mountain.2")
+                metric("Speed", speed(location?.speed), "speedometer")
+                metric("Direction", course(location?.course), "location.north.fill")
+                metric("Reading Age", readingAge, "clock")
+            }
+        }
+        .diagnosticPanel()
+    }
+
+    private var signalChart: some View {
+        chartPanel("Horizontal Accuracy", subtitle: "Lower is better", symbol: "scope") {
+            Chart(samples) { sample in
+                AreaMark(x: .value("Time", sample.time), y: .value("Feet", sample.horizontalAccuracyFeet))
+                    .foregroundStyle(NativeShellPalette.blue.opacity(0.18))
+                LineMark(x: .value("Time", sample.time), y: .value("Feet", sample.horizontalAccuracyFeet))
+                    .foregroundStyle(NativeShellPalette.blue)
+                    .interpolationMethod(.catmullRom)
+            }
+        }
+    }
+
+    private var altitudeChart: some View {
+        chartPanel("Elevation", subtitle: "GPS altitude in feet", symbol: "mountain.2.fill") {
+            Chart(samples) { sample in
+                LineMark(x: .value("Time", sample.time), y: .value("Feet", sample.altitudeFeet))
+                    .foregroundStyle(NativeShellPalette.green)
+                    .interpolationMethod(.catmullRom)
+            }
+        }
+    }
+
+    private var speedChart: some View {
+        chartPanel("Speed", subtitle: "Live movement in miles per hour", symbol: "speedometer") {
+            Chart(samples) { sample in
+                BarMark(x: .value("Time", sample.time), y: .value("MPH", sample.speedMPH))
+                    .foregroundStyle(NativeShellPalette.amber.gradient)
+            }
+        }
+    }
+
+    private var systemDetails: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            diagnosticHeader("Receiver & Source", symbol: "antenna.radiowaves.left.and.right")
+            detailRow("Permission", authorizationText)
+            detailRow("Satellites detected", "Unavailable — iOS does not expose satellite count")
+            detailRow("Floor", location?.floor.map { "Level \($0.level)" } ?? "Unavailable")
+            detailRow("Timestamp", location?.timestamp.formatted(date: .abbreviated, time: .standard) ?? "Waiting for GPS")
+            detailRow("Simulated by software", sourceText(software: true))
+            detailRow("External accessory", sourceText(software: false))
+            Text("Satellite count, constellation identities, signal-to-noise ratios, and raw GNSS measurements are not available through Apple's public Core Location API.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+        }
+        .diagnosticPanel()
+    }
+
+    private func append(_ location: CLLocation?) {
+        guard let location, location.horizontalAccuracy >= 0 else { return }
+        guard samples.last?.time != location.timestamp else { return }
+        samples.append(.init(
+            time: location.timestamp,
+            horizontalAccuracyFeet: location.horizontalAccuracy * 3.28084,
+            altitudeFeet: location.altitude * 3.28084,
+            speedMPH: max(0, location.speed) * 2.236_936
+        ))
+        if samples.count > 90 { samples.removeFirst(samples.count - 90) }
+    }
+
+    private func metric(_ title: String, _ value: String, _ symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label(title, systemImage: symbol)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(value)
+                .font(.subheadline.bold().monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .padding(10)
+        .background(NativeShellPalette.navigationBackground, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func diagnosticHeader(_ title: String, symbol: String) -> some View {
+        Label(title, systemImage: symbol).font(.headline)
+    }
+
+    private func detailRow(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).foregroundStyle(.secondary)
+            Spacer(minLength: 12)
+            Text(value).fontWeight(.semibold).multilineTextAlignment(.trailing)
+        }
+        .font(.subheadline)
+    }
+
+    private func chartPanel<Content: View>(
+        _ title: String,
+        subtitle: String,
+        symbol: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            diagnosticHeader(title, symbol: symbol)
+            Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            content().frame(height: 130)
+            if samples.count < 2 {
+                Text("Collecting live samples…").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .diagnosticPanel()
+    }
+
+    private var statusTint: Color {
+        locationService.isDiagnosticsTracking ? NativeShellPalette.green : NativeShellPalette.amber
+    }
+
+    private var authorizationText: String {
+        switch locationService.authorizationStatus {
+        case .authorizedAlways: "Always"
+        case .authorizedWhenInUse: "While Using App"
+        case .denied: "Denied"
+        case .restricted: "Restricted"
+        case .notDetermined: "Not Requested"
+        @unknown default: "Unknown"
+        }
+    }
+
+    private var readingAge: String {
+        guard let timestamp = location?.timestamp else { return "—" }
+        return String(format: "%.1f sec", max(0, Date().timeIntervalSince(timestamp)))
+    }
+
+    private func coordinate(_ value: CLLocationDegrees?) -> String {
+        guard let value else { return "—" }
+        return String(format: "%.6f°", value)
+    }
+
+    private func feet(_ meters: CLLocationDistance?, prefix: String = "") -> String {
+        guard let meters, meters >= 0 else { return "—" }
+        return "\(prefix)\(Int((meters * 3.28084).rounded())) ft"
+    }
+
+    private func speed(_ metersPerSecond: CLLocationSpeed?) -> String {
+        guard let metersPerSecond, metersPerSecond >= 0 else { return "—" }
+        return String(format: "%.1f mph", metersPerSecond * 2.236_936)
+    }
+
+    private func course(_ degrees: CLLocationDirection?) -> String {
+        guard let degrees, degrees >= 0 else { return "—" }
+        return "\(Int(degrees.rounded()))°"
+    }
+
+    private func sourceText(software: Bool) -> String {
+        guard let source = location?.sourceInformation else { return "Unavailable" }
+        return (software ? source.isSimulatedBySoftware : source.isProducedByAccessory) ? "Yes" : "No"
+    }
+}
+
+private extension View {
+    func diagnosticPanel() -> some View {
+        padding(14)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 

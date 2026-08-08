@@ -248,10 +248,12 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
     @Published private(set) var authorizationStatus: CLAuthorizationStatus
     @Published private(set) var isLocating = false
     @Published private(set) var isLiveNearbyTracking = false
+    @Published private(set) var isDiagnosticsTracking = false
     @Published private(set) var mapRecenterRequestID = UUID()
 
     private let manager: CLLocationManager
     private var wantsLiveNearbyTracking = false
+    private var wantsDiagnosticsTracking = false
 
     override init() {
         let manager = CLLocationManager()
@@ -332,6 +334,44 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
             : "Nearby live updates paused"
     }
 
+    func startDiagnosticsUpdates(highAccuracy: Bool) {
+        wantsDiagnosticsTracking = true
+        manager.activityType = .other
+        manager.distanceFilter = kCLDistanceFilterNone
+        manager.desiredAccuracy = highAccuracy ? kCLLocationAccuracyBest : kCLLocationAccuracyNearestTenMeters
+        manager.pausesLocationUpdatesAutomatically = false
+        authorizationStatus = manager.authorizationStatus
+
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            isLocating = true
+            statusText = "Waiting for location permission…"
+            manager.requestWhenInUseAuthorization()
+        case .authorizedAlways, .authorizedWhenInUse:
+            beginDiagnosticsUpdates()
+        case .denied:
+            statusText = "Location access is off for FireVault Pro"
+        case .restricted:
+            statusText = "Location access is restricted"
+        @unknown default:
+            statusText = "Location is unavailable"
+        }
+    }
+
+    func stopDiagnosticsUpdates() {
+        wantsDiagnosticsTracking = false
+        isDiagnosticsTracking = false
+        if wantsLiveNearbyTracking {
+            beginLiveNearbyUpdates()
+        } else {
+            manager.stopUpdatingLocation()
+            isLocating = false
+            statusText = coordinate == nil
+                ? "Tap the location button to find nearby accounts"
+                : "GPS diagnostics stopped"
+        }
+    }
+
     func openAppSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
@@ -341,7 +381,9 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         authorizationStatus = manager.authorizationStatus
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse:
-            if wantsLiveNearbyTracking {
+            if wantsDiagnosticsTracking {
+                beginDiagnosticsUpdates()
+            } else if wantsLiveNearbyTracking {
                 beginLiveNearbyUpdates()
             } else if isLocating {
                 statusText = "Finding this iPhone…"
@@ -373,9 +415,11 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         latestLocation = location
         coordinate = location.coordinate
         isLocating = false
-        statusText = isLiveNearbyTracking
-            ? "Live • updated \(Date().formatted(date: .omitted, time: .shortened))"
-            : "Updated \(Date().formatted(date: .omitted, time: .shortened))"
+        statusText = isDiagnosticsTracking
+            ? "Diagnostics live • updated \(Date().formatted(date: .omitted, time: .standard))"
+            : (isLiveNearbyTracking
+                ? "Live • updated \(Date().formatted(date: .omitted, time: .shortened))"
+                : "Updated \(Date().formatted(date: .omitted, time: .shortened))")
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -392,6 +436,15 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         isLocating = true
         isLiveNearbyTracking = true
         statusText = coordinate == nil ? "Starting live Nearby…" : "Nearby updating live"
+        manager.startUpdatingLocation()
+    }
+
+    private func beginDiagnosticsUpdates() {
+        guard wantsDiagnosticsTracking else { return }
+        isLocating = true
+        isDiagnosticsTracking = true
+        isLiveNearbyTracking = false
+        statusText = "Starting GPS diagnostics…"
         manager.startUpdatingLocation()
     }
 }
