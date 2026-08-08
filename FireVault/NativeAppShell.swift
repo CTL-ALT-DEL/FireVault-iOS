@@ -431,6 +431,7 @@ private struct NativeNearbyView: View {
         }
         .padding(.top, 4)
         .task {
+            mapLayer = FireVaultMapLayer(rawValue: settings.gps.resolvedDefaultMapLayer) ?? .standard
             scrollAccountID = nearbyRows.first?.id
             if payload.demoMode {
                 cameraPosition = overviewCameraPosition
@@ -2611,7 +2612,7 @@ private struct NativeSettingsView: View {
         case "tech": NativeTechnicianSettingsView(settings: settings)
         case "overlay": NativeOverlaySettingsView(settings: settings)
         case "gps": NativeGPSSettingsView(settings: settings, locationService: locationService)
-        case "plusCodes": NativePlusCodeSettingsView(settings: settings)
+        case "plusCodes": NativePlusCodeSettingsView(settings: settings, locationService: locationService)
         case "reports": NativeReportSettingsView(settings: settings)
         case "email": NativeEmailSettingsView(settings: settings)
         case "cloudFiles": NativeStorageSettingsView(settings: settings)
@@ -2658,7 +2659,16 @@ private struct NativeGPSSettingsView: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Default map", value: "Apple Maps")
+                LabeledContent("Map provider", value: "Apple Maps")
+
+                Picker("Default map layer", selection: Binding(
+                    get: { draft.defaultMapLayer ?? "standard" },
+                    set: { draft.defaultMapLayer = $0 }
+                )) {
+                    Label("Standard", systemImage: "map").tag("standard")
+                    Label("Satellite", systemImage: "globe.americas.fill").tag("satellite")
+                    Label("Hybrid", systemImage: "square.3.layers.3d").tag("hybrid")
+                }
 
                 Toggle("High-accuracy GPS", isOn: $draft.highAccuracy)
 
@@ -2723,6 +2733,7 @@ private struct NativeGPSSettingsView: View {
         }
         .navigationTitle("GPS & Maps")
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaPadding(.bottom, 82)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Save", action: save)
@@ -2766,6 +2777,7 @@ private struct FireVaultGPSDiagnosticsView: View {
                 systemDetails
             }
             .padding(16)
+            .padding(.bottom, 90)
         }
         .background(NativeShellPalette.background)
         .navigationTitle("GPS Diagnostics")
@@ -2871,15 +2883,10 @@ private struct FireVaultGPSDiagnosticsView: View {
         VStack(alignment: .leading, spacing: 10) {
             diagnosticHeader("Receiver & Source", symbol: "antenna.radiowaves.left.and.right")
             detailRow("Permission", authorizationText)
-            detailRow("Satellites detected", "Unavailable — iOS does not expose satellite count")
             detailRow("Floor", location?.floor.map { "Level \($0.level)" } ?? "Unavailable")
             detailRow("Timestamp", location?.timestamp.formatted(date: .abbreviated, time: .standard) ?? "Waiting for GPS")
             detailRow("Simulated by software", sourceText(software: true))
             detailRow("External accessory", sourceText(software: false))
-            Text("Satellite count, constellation identities, signal-to-noise ratios, and raw GNSS measurements are not available through Apple's public Core Location API.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 2)
         }
         .diagnosticPanel()
     }
@@ -3186,35 +3193,42 @@ private struct NativeAboutFireVaultView: View {
     var body: some View {
         List {
             Section {
-                VStack(spacing: 14) {
+                VStack(spacing: 10) {
                     FireVaultBrandMark()
-                        .scaleEffect(1.45)
-                        .padding(.vertical, 10)
-                    Text("Built for the field")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(NativeShellPalette.red)
+                        .scaleEffect(1.32)
+                        .padding(.vertical, 8)
+                    Text("Field information, organized around the service call.")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 22)
+                .padding(.vertical, 18)
                 .accessibilityElement(children: .combine)
             }
 
-            Section("Built for Fire Alarm Technicians") {
+            Section("Purpose") {
                 FireVaultJustifiedText(
-                    "FireVault Pro is a field-first workspace for fire alarm technicians. It brings nearby accounts, site history, service notes, photographs, document scans, equipment, locations, and Trip Log reporting into one focused application so the important details are ready when you need them."
+                    "FireVault Pro is a field workspace for organizing customer accounts, equipment, arrival points, service notes, photographs, scanned documents, and Trip Log records. It is intended to reduce time spent searching for site information before and during a service visit."
                 )
+                FireVaultJustifiedText(
+                    "The application supports both iPhone and iPad workflows, keeps demonstration records separate from live data, and provides configurable reporting, mapping, storage, privacy, and photo-overlay tools."
+                )
+            }
 
-                FireVaultJustifiedText(
-                    "Designed for fire alarm technicians by a fire alarm technician, FireVault Pro is shaped around real service calls, site visits, inspections, troubleshooting, and follow-up work. Its purpose is simple: reduce the time spent hunting for information and leave behind clearer records after every visit."
-                )
+            Section("Data & Privacy") {
+                Label("Live and Demo workspaces remain separate.", systemImage: "square.stack.3d.up.fill")
+                Label("Location access is used for Nearby, Arrival Maps, and Trip Log features.", systemImage: "location.fill")
+                Label("Storage and report-delivery services operate only when configured.", systemImage: "externaldrive.fill")
+                Text("Review individual permissions and service connections in Settings. FireVault does not treat a configured destination as connected until its authentication is complete.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Developer") {
                 LabeledContent("Designed and developed by", value: "David Bannerman")
-                Link("David@Bannerman.us", destination: URL(string: "mailto:David@Bannerman.us")!)
-                Text("A fire alarm technician building practical tools for the fire alarm field.")
-                    .font(.custom("Snell Roundhand", size: 18))
-                    .foregroundStyle(.secondary)
+                LabeledContent("Professional background", value: "Fire alarm technician")
+                Link("Contact David Bannerman", destination: URL(string: "mailto:David@Bannerman.us")!)
             }
 
             Section("Application") {
@@ -3226,11 +3240,20 @@ private struct NativeAboutFireVaultView: View {
                     }
                     .accessibilityHint("Version information")
                 LabeledContent("Build", value: versionInfo.build)
+                LabeledContent("Updated", value: updatedAtText)
             }
         }
         .contentMargins(.bottom, 96, for: .scrollContent)
-        .navigationTitle("About FireVault Pro")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("About FireVault Pro")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+        }
         .navigationDestination(isPresented: $showsDeveloperCenter) {
             FireVaultDeveloperCenterView(
                 versionInfo: versionInfo,
@@ -3239,6 +3262,13 @@ private struct NativeAboutFireVaultView: View {
                 settings: settings
             )
         }
+    }
+
+    private var updatedAtText: String {
+        let date = Bundle.main.executableURL
+            .flatMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }
+            ?? Date()
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 }
 

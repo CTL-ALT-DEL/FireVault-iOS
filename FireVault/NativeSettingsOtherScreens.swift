@@ -9,11 +9,17 @@ import SwiftUI
 import UniformTypeIdentifiers
 import Foundation
 import LocalAuthentication
+import CoreLocation
 
 struct NativePlusCodeSettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var locationService: FireVaultLocationService
     @State private var draft: FireVaultNativePreferences
-    init(settings: FireVaultNativeSettingsStore) { self.settings = settings; _draft = State(initialValue: settings.preferences) }
+    init(settings: FireVaultNativeSettingsStore, locationService: FireVaultLocationService) {
+        self.settings = settings
+        self.locationService = locationService
+        _draft = State(initialValue: settings.preferences)
+    }
     var body: some View {
         Form {
             Section("Availability") {
@@ -27,8 +33,67 @@ struct NativePlusCodeSettingsView: View {
                 Picker("Location precision", selection: $draft.plusCodes.locationLength) { Text("10 digits").tag(10); Text("11 digits").tag(11) }
                 Picker("Reverify", selection: $draft.plusCodes.verifyAfterDays) { Text("90 days").tag(90); Text("180 days").tag(180); Text("1 year").tag(365) }
             }
+            Section {
+                LabeledContent("CURRENT LOCATION") {
+                    Text(currentPlusCode)
+                        .font(.headline.monospaced())
+                        .foregroundStyle(NativeShellPalette.blue)
+                        .textSelection(.enabled)
+                }
+                Button {
+                    locationService.requestCurrentLocation(highAccuracy: true)
+                } label: {
+                    Label("Refresh Current Location", systemImage: "location.fill")
+                }
+            } footer: {
+                Text("The full Plus Code is generated locally from the current GPS coordinate. No address lookup is required.")
+            }
         }
         .nativeSettingsForm(title: "Plus Codes") { settings.save(draft) }
+    }
+
+    private var currentPlusCode: String {
+        guard let coordinate = locationService.coordinate else { return "Waiting for GPS…" }
+        return FireVaultPlusCodeEncoder.encode(coordinate, length: draft.plusCodes.accountLength)
+    }
+}
+
+private enum FireVaultPlusCodeEncoder {
+    private static let alphabet = Array("23456789CFGHJMPQRVWX")
+    private static let pairResolutions = [20.0, 1.0, 0.05, 0.0025, 0.000125]
+
+    static func encode(_ coordinate: CLLocationCoordinate2D, length: Int = 10) -> String {
+        var latitude = min(90, max(-90, coordinate.latitude))
+        if latitude == 90 { latitude -= 0.000000001 }
+        var longitude = coordinate.longitude
+        while longitude < -180 { longitude += 360 }
+        while longitude >= 180 { longitude -= 360 }
+        latitude += 90
+        longitude += 180
+
+        var code = ""
+        for resolution in pairResolutions {
+            let latitudeDigit = min(19, Int(latitude / resolution))
+            let longitudeDigit = min(19, Int(longitude / resolution))
+            code.append(alphabet[latitudeDigit])
+            code.append(alphabet[longitudeDigit])
+            latitude -= Double(latitudeDigit) * resolution
+            longitude -= Double(longitudeDigit) * resolution
+        }
+
+        if length > 10 {
+            let latitudeDigit = min(4, Int(latitude / (0.000125 / 5)))
+            let longitudeDigit = min(3, Int(longitude / (0.000125 / 4)))
+            code.append(alphabet[latitudeDigit * 4 + longitudeDigit])
+        }
+
+        code.insert("+", at: code.index(code.startIndex, offsetBy: 8))
+        let requested = min(11, max(8, length))
+        let charactersWithoutSeparator = code.filter { $0 != "+" }
+        let end = charactersWithoutSeparator.index(charactersWithoutSeparator.startIndex, offsetBy: requested)
+        let trimmed = String(charactersWithoutSeparator[..<end])
+        let separator = trimmed.index(trimmed.startIndex, offsetBy: 8)
+        return String(trimmed[..<separator]) + "+" + String(trimmed[separator...])
     }
 }
 
@@ -1248,6 +1313,14 @@ struct NativeDemoSettingsView: View {
     @ObservedObject var store: FireVaultStore
     var body: some View {
         List {
+            Section("What Demo Mode Does") {
+                Text("Demo Mode opens a separate sample workspace populated with fictional accounts, equipment, notes, saved locations, and Trip Log history. It is designed for learning FireVault and demonstrating its workflows without changing live customer records.")
+                    .font(.subheadline)
+                Label("Demo records remain separate from your live vault.", systemImage: "lock.shield")
+                Label("You can edit sample content and reset it afterward.", systemImage: "arrow.counterclockwise")
+                Label("Location permission is not required to review sample Trip Log routes.", systemImage: "location.slash")
+            }
+
             Section {
                 Label(store.demoMode ? "Demo Mode is active" : "Demo Mode is off", systemImage: store.demoMode ? "theatermasks.fill" : "checkmark.shield.fill")
                 if store.demoMode {
@@ -1256,6 +1329,12 @@ struct NativeDemoSettingsView: View {
                 } else {
                     Button("Enter Demo Mode") { store.enterDemoMode() }
                 }
+            } header: {
+                Text("Controls")
+            } footer: {
+                Text(store.demoMode
+                    ? "Exit Demo Mode to return to your live workspace. Reset restores the original sample data only."
+                    : "Enter Demo Mode to explore the complete sample workspace. Your live FireVault records are not modified.")
             }
         }
         .contentMargins(.bottom, 96, for: .scrollContent)
@@ -1267,22 +1346,56 @@ struct NativeDemoSettingsView: View {
 struct NativeManualView: View {
     var body: some View {
         List {
-            Section("Quick Start") {
-                Label("Use Nearby to locate mapped accounts.", systemImage: "location")
-                Label("Search Accounts by name, address, or ID.", systemImage: "magnifyingglass")
-                Label("Open an account for notes, files, equipment, and locations.", systemImage: "building.2")
-                Label("Use Settings for preferences and CSV import.", systemImage: "gearshape")
+            Section("Getting Around") {
+                manualItem("Nearby", "Review mapped accounts, select a site, call it, open its details, or begin a route.", "location.fill")
+                manualItem("Accounts", "Search the vault by name, address, account ID, category, or saved information. Pull down to refresh.", "magnifyingglass")
+                manualItem("Trip Log", "Record a workday, review detected stops, and create daily or weekly PDF reports.", "truck.box.fill")
+                manualItem("Photo", "Capture field images with optional live account information and logo overlays.", "camera.fill")
             }
-            Section("Trip Log") {
-                Label("Start Trip Log at the beginning of the workday to record your route and detected stops.", systemImage: "play.circle")
-                Label("Pause or resume Trip Log when route recording should temporarily stop.", systemImage: "pause.circle")
-                Label("Review each detected stop before exporting the final Trip Log report.", systemImage: "checklist")
-                Label("Trip Log Reports can be configured in Settings under Reports.", systemImage: "doc.text")
+
+            Section("Accounts & Arrival Maps") {
+                manualItem("Account workspace", "Keep service notes, files and scans, equipment records, and arrival locations together.", "building.2")
+                manualItem("Arrival Map", "Review parking and entrance points, edit saved locations, or start walking directions to a selected point.", "figure.walk")
+                manualItem("Category rules", "Create IF/THEN rules, run them immediately, and automatically apply category labels to matching accounts.", "tag.fill")
+                manualItem("CSV import", "Import account records, review the results, and map usable addresses before adding them to the vault.", "tablecells")
+            }
+
+            Section("Trip Log & Reports") {
+                manualItem("Record", "Start at the beginning of the workday. Pause when tracking should stop temporarily and finish the session when the day is complete.", "record.circle")
+                manualItem("Live details", "Choose Speed, Trip, Direction, Elevation, or GPS. Auto Rotate can cycle through any selected combination.", "gauge.with.dots.needle.50percent")
+                manualItem("History", "Open a saved day to review route geometry, account visits, detected stops, and recorded times.", "clock.arrow.circlepath")
+                manualItem("Reports", "Export clean daily or weekly PDFs with route maps, stop summaries, mileage, elapsed time, and elevation information.", "doc.richtext")
+            }
+
+            Section("Photos, Maps & Location") {
+                manualItem("Photo overlays", "Resize and position the account-information overlay inside the 4:3 capture area. Configure the FireVault logo separately.", "camera.filters")
+                manualItem("Map layers", "Choose Standard, Satellite, or Hybrid as the default layer under GPS & Maps.", "square.3.layers.3d")
+                manualItem("GPS Diagnostics", "Inspect live coordinates, accuracy, elevation, speed, direction, source data, and rolling charts.", "waveform.path.ecg.rectangle")
+                manualItem("Plus Codes", "Generate compact location codes from GPS coordinates for accounts and saved arrival points.", "plus.square.dashed")
+            }
+
+            Section("Storage, Privacy & Demonstration") {
+                manualItem("File Storage", "Choose photo and document destinations, quality, folder organization, scan format, and upload behavior.", "folder.fill")
+                manualItem("Privacy", "Configure application locking, background behavior, and app-switcher protection.", "lock.shield.fill")
+                manualItem("Demo Mode", "Explore fictional accounts and seven days of sample history in a workspace isolated from live data.", "theatermasks.fill")
+                manualItem("Reset Demo Data", "Restore the sample workspace without changing live accounts or authentication.", "arrow.counterclockwise")
             }
         }
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Help & User Manual")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func manualItem(_ title: String, _ detail: String, _ symbol: String) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.bold())
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 2)
+        } icon: {
+            Image(systemName: symbol).foregroundStyle(NativeShellPalette.blue)
+        }
     }
 }
 

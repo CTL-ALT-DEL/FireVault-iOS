@@ -225,12 +225,17 @@ struct FireVaultGPSPreferences: Codable, Equatable {
     var includeCoordinatesInReports = true
     var addressAssistanceEnabled = true
     var hapticsEnabled: Bool? = true
+    var defaultMapLayer: String?
     var hapticsAreEnabled: Bool { hapticsEnabled ?? true }
+    var resolvedDefaultMapLayer: String { defaultMapLayer ?? "standard" }
     var normalized: Self {
         var copy = self
         let clamped = min(Self.allowedRadius.upperBound, max(Self.allowedRadius.lowerBound, nearbyRadiusMiles))
         copy.nearbyRadiusMiles = Self.radiusOptions.min { abs($0 - clamped) < abs($1 - clamped) } ?? 1
         if copy.hapticsEnabled == nil { copy.hapticsEnabled = true }
+        if !["standard", "satellite", "hybrid"].contains(copy.resolvedDefaultMapLayer) {
+            copy.defaultMapLayer = "standard"
+        }
         return copy
     }
     var radiusStatus: String { "\(nearbyRadiusMiles.formatted(.number.precision(.fractionLength(0...2)))) mi" }

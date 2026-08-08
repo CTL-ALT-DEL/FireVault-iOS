@@ -507,7 +507,11 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
     }
 
     private func resetMap() {
-        mapLayer = .standard
+        mapLayer = switch settings.gps.resolvedDefaultMapLayer {
+        case "satellite": .imagery
+        case "hybrid": .hybrid
+        default: .standard
+        }
         selectedID = nearbyRows.first?.id
         scrollingID = selectedID
         zoomLevel = selectedID == nil ? 0.35 : 0.72

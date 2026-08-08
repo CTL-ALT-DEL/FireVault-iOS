@@ -616,6 +616,11 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
     }
 
     private func resetMapSelection() {
+        mapLayer = switch settings.gps.resolvedDefaultMapLayer {
+        case "satellite": .imagery
+        case "hybrid": .hybrid
+        default: .standard
+        }
         selectedID = nearbyRows.first?.id
         scrollingID = selectedID
         accountScrollIsActive = false
