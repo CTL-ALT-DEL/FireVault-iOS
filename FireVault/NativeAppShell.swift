@@ -533,12 +533,21 @@ private struct NativeNearbyView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(height: 44)
-        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(NativeShellPalette.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(tripLogStatusTint.opacity(0.18), lineWidth: 1)
+                .stroke(.black.opacity(0.34), lineWidth: 2)
+                .blur(radius: 0.7)
+                .offset(y: 1)
+                .mask(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .shadow(color: .black.opacity(0.14), radius: 7, y: 4)
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(.white.opacity(0.32), lineWidth: 1)
+                .offset(y: 1.5)
+                .mask(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .shadow(color: .white.opacity(0.18), radius: 1, y: 1)
     }
 
     private var tripLogDetailMenu: some View {
@@ -2326,7 +2335,9 @@ private struct NativeSettingsView: View {
             .contentMargins(.bottom, 96, for: .scrollContent)
             .searchable(text: $search, prompt: "Search settings")
             .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(NativeShellPalette.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .accessibilityIdentifier("native-settings-list")
         }
     }

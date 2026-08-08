@@ -298,7 +298,21 @@ struct FireVaultReportPreferences: Codable, Equatable {
     }
 }
 struct FireVaultEmailPreferences: Codable, Equatable { var defaultTo = ""; var cc = ""; var defaultSubject = "FireVault Pro Service Report"; var signature = "" }
-struct FireVaultStoragePreferences: Codable, Equatable { var photoProvider = "local"; var documentProvider = "local"; var photoFolder = "FireVault/Photos"; var documentFolder = "FireVault/Documents"; var microsoftProfileLabel = ""; var microsoftEmail = ""; var sharePointSiteURL = ""; var libraryName = "Documents" }
+struct FireVaultStoragePreferences: Codable, Equatable {
+    var photoProvider = "local"
+    var documentProvider = "local"
+    var photoFolder = "FireVault/Photos"
+    var documentFolder = "FireVault/Documents"
+    var microsoftProfileLabel = ""
+    var microsoftEmail = ""
+    var sharePointSiteURL = ""
+    var libraryName = "Documents"
+    var useAccountFolders: Bool?
+    var preserveOriginals: Bool?
+    var wifiOnlyUploads: Bool?
+    var photoQuality: String?
+    var scanFormat: String?
+}
 struct FireVaultSyncPreferences: Codable, Equatable { var organization = ""; var workspace = "FireVault Pro Shared Vault"; var conflictPolicy = "review" }
 struct FireVaultWebDAVPreferences: Codable, Equatable { var enabled = false; var serverURL = ""; var username = ""; var folder = "/FireVault" }
 struct FireVaultPrivacyPreferences: Codable, Equatable { var enabled = false; var autoLockMinutes = 5; var lockOnBackground = true; var hideInAppSwitcher = true }

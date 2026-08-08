@@ -1028,9 +1028,17 @@ final class FireVaultStore: ObservableObject {
                 case .beginsWith: source.lowercased().hasPrefix(needle.lowercased())
                 case .equals: source.caseInsensitiveCompare(needle) == .orderedSame
                 }
-                if matches, !accounts[index].tags.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) {
-                    accounts[index].tags.append(tag)
-                    additions += 1
+                if matches {
+                    var changed = false
+                    if accounts[index].category.caseInsensitiveCompare(tag) != .orderedSame {
+                        accounts[index].category = tag
+                        changed = true
+                    }
+                    if !accounts[index].tags.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) {
+                        accounts[index].tags.append(tag)
+                        changed = true
+                    }
+                    if changed { additions += 1 }
                 }
             }
         }

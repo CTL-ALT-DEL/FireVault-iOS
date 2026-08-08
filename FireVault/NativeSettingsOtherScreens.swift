@@ -187,16 +187,121 @@ struct NativeStorageSettingsView: View {
     init(settings: FireVaultNativeSettingsStore) { self.settings = settings; _draft = State(initialValue: settings.preferences) }
     var body: some View {
         Form {
-            Section("Photos") {
-                Picker("Destination", selection: $draft.storage.photoProvider) { Text("On this iPhone").tag("local"); Text("Microsoft profile").tag("microsoft") }
-                TextField("Folder", text: $draft.storage.photoFolder).focused($focused)
+            Section {
+                storageDestinationPicker("Photo destination", selection: $draft.storage.photoProvider)
+                TextField("Photo folder", text: $draft.storage.photoFolder)
+                    .textInputAutocapitalization(.never)
+                    .focused($focused)
+                Picker("Photo quality", selection: optionalString(\.photoQuality, default: "original")) {
+                    Text("Original quality").tag("original")
+                    Text("Storage optimized").tag("optimized")
+                    Text("Small file").tag("compact")
+                }
+            } header: {
+                Label("Photos", systemImage: "photo.fill")
+            } footer: {
+                providerDescription(draft.storage.photoProvider)
             }
-            Section("Documents") {
-                Picker("Destination", selection: $draft.storage.documentProvider) { Text("On this iPhone").tag("local"); Text("Microsoft profile").tag("microsoft") }
-                TextField("Folder", text: $draft.storage.documentFolder).focused($focused)
+
+            Section {
+                storageDestinationPicker("Document destination", selection: $draft.storage.documentProvider)
+                TextField("Document folder", text: $draft.storage.documentFolder)
+                    .textInputAutocapitalization(.never)
+                    .focused($focused)
+                Picker("Scanned document format", selection: optionalString(\.scanFormat, default: "pdf")) {
+                    Text("Searchable PDF").tag("pdf")
+                    Text("Individual images").tag("images")
+                }
+            } header: {
+                Label("Documents & Scans", systemImage: "doc.text.fill")
+            } footer: {
+                providerDescription(draft.storage.documentProvider)
+            }
+
+            Section("Organization") {
+                Toggle("Create a folder for each account", isOn: optionalBool(\.useAccountFolders, default: true))
+                Toggle("Keep originals on this device", isOn: optionalBool(\.preserveOriginals, default: true))
+                Toggle("Upload using Wi-Fi only", isOn: optionalBool(\.wifiOnlyUploads, default: false))
+            }
+
+            Section {
+                NavigationLink {
+                    NativeMicrosoftStorageSettingsView(settings: settings)
+                } label: {
+                    storageConnectionRow(
+                        "Microsoft OneDrive & SharePoint",
+                        symbol: "cloud.fill",
+                        configured: !draft.storage.microsoftEmail.isEmpty || !draft.storage.sharePointSiteURL.isEmpty
+                    )
+                }
+                NavigationLink {
+                    NativeWebDAVSettingsView(settings: settings)
+                } label: {
+                    storageConnectionRow(
+                        "WebDAV Server",
+                        symbol: "server.rack",
+                        configured: draft.webDAV.enabled
+                    )
+                }
+                storageConnectionRow("iCloud Drive", symbol: "icloud.fill", configured: true)
+                storageConnectionRow("FireVault Cloud", symbol: "shield.lefthalf.filled", configured: false)
+            } header: {
+                Text("Storage Connections")
+            } footer: {
+                Text("FireVault Cloud storage requires a Pro subscription. External services must be configured before they can receive uploads.")
             }
         }
         .nativeSettingsForm(title: "File Storage", focused: $focused) { settings.save(draft) }
+    }
+
+    private func storageDestinationPicker(_ title: String, selection: Binding<String>) -> some View {
+        Picker(title, selection: selection) {
+            Text("On this iPhone or iPad").tag("local")
+            Text("FireVault Cloud").tag("firevault")
+            Text("iCloud Drive").tag("icloud")
+            Text("Microsoft OneDrive").tag("onedrive")
+            Text("Microsoft SharePoint").tag("sharepoint")
+            Text("WebDAV Server").tag("webdav")
+        }
+    }
+
+    private func providerDescription(_ provider: String) -> Text {
+        switch provider {
+        case "firevault": Text("Pro storage keeps FireVault files available in the cloud for the configured retention period.")
+        case "icloud": Text("Files are organized in FireVault folders in iCloud Drive.")
+        case "onedrive", "sharepoint", "microsoft": Text("Complete the Microsoft connection profile before uploading files.")
+        case "webdav": Text("Complete the WebDAV server profile before uploading files.")
+        default: Text("Files remain stored locally in FireVault on this device.")
+        }
+    }
+
+    private func optionalBool(_ keyPath: WritableKeyPath<FireVaultStoragePreferences, Bool?>, default defaultValue: Bool) -> Binding<Bool> {
+        Binding(
+            get: { draft.storage[keyPath: keyPath] ?? defaultValue },
+            set: { draft.storage[keyPath: keyPath] = $0 }
+        )
+    }
+
+    private func optionalString(_ keyPath: WritableKeyPath<FireVaultStoragePreferences, String?>, default defaultValue: String) -> Binding<String> {
+        Binding(
+            get: { draft.storage[keyPath: keyPath] ?? defaultValue },
+            set: { draft.storage[keyPath: keyPath] = $0 }
+        )
+    }
+
+    private func storageConnectionRow(_ title: String, symbol: String, configured: Bool) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: symbol)
+                .foregroundStyle(configured ? NativeShellPalette.green : NativeShellPalette.blue)
+                .frame(width: 24)
+            Text(title)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+            Spacer()
+            Text(configured ? "Ready" : "Setup")
+                .font(.caption.bold())
+                .foregroundStyle(configured ? NativeShellPalette.green : .secondary)
+        }
     }
 }
 
