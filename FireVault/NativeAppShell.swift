@@ -292,6 +292,28 @@ private enum FireVaultMapLayer: String, CaseIterable, Identifiable {
     }
 }
 
+private enum FireVaultTripLogDetail: String, CaseIterable, Identifiable {
+    case speed = "SPEED"
+    case trip = "TRIP"
+    case direction = "DIRECTION"
+    case elevation = "ELEVATION"
+    case stopped = "STOPPED"
+    case gps = "GPS"
+
+    var id: String { rawValue }
+
+    var symbol: String {
+        switch self {
+        case .speed: "speedometer"
+        case .trip: "road.lanes"
+        case .direction: "location.north.fill"
+        case .elevation: "mountain.2.fill"
+        case .stopped: "pause.circle.fill"
+        case .gps: "scope"
+        }
+    }
+}
+
 private struct NativeNearbyView: View {
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
@@ -313,6 +335,7 @@ private struct NativeNearbyView: View {
     @State private var showsTripLogControls = false
     @State private var tripLogControlsCollapseTask: Task<Void, Never>?
     @State private var tripLogDetailIndex = 0
+    @State private var selectedTripLogDetail: FireVaultTripLogDetail?
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -454,7 +477,8 @@ private struct NativeNearbyView: View {
     }
 
     private var statusHeader: some View {
-        Button {
+        HStack(spacing: 0) {
+            Button {
             if showsTripLogControls {
                 closeTripLogControls()
             } else {
@@ -463,103 +487,223 @@ private struct NativeNearbyView: View {
                 }
                 scheduleTripLogControlsClose()
             }
-        } label: {
-            HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(tripLogStatusTint.opacity(0.14))
-                Image(systemName: breadcrumbs.isRecording ? "location.fill" : "location")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(tripLogStatusTint)
-                    .symbolEffect(.pulse, options: .repeating, isActive: breadcrumbs.isRecording)
-            }
-            .frame(width: 34, height: 34)
+            } label: {
+                HStack(spacing: 9) {
+                    ZStack {
+                        Circle()
+                            .fill(tripLogStatusTint.opacity(0.14))
+                        Image(systemName: breadcrumbs.isRecording ? "location.fill" : "location")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(tripLogStatusTint)
+                            .symbolEffect(.pulse, options: .repeating, isActive: breadcrumbs.isRecording)
+                    }
+                    .frame(width: 34, height: 34)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text("TRIP LOG")
-                    .font(.caption2.bold())
-                    .tracking(1.05)
-                    .foregroundStyle(.secondary)
-                Text(tripLogStateText)
-                    .font(.subheadline.bold())
-                    .foregroundStyle(tripLogStatusTint)
-            }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("TRIP LOG")
+                            .font(.caption2.bold())
+                            .tracking(1.05)
+                            .foregroundStyle(.secondary)
+                        Text(tripLogStateText)
+                            .font(.subheadline.bold())
+                            .foregroundStyle(tripLogStatusTint)
+                    }
 
-                Divider()
-                    .frame(height: 28)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(tripLogDetailText)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .contentTransition(.opacity)
-                        .id(tripLogDetailIndex)
-                    Text("Tap for Trip Log controls")
-                        .font(.caption2)
+                    Image(systemName: showsTripLogControls ? "chevron.up" : "chevron.down")
+                        .font(.caption2.bold())
                         .foregroundStyle(.secondary)
                 }
-
-                Spacer(minLength: 0)
-
-                Image(systemName: showsTripLogControls ? "chevron.up" : "chevron.down")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
+                .padding(.leading, 11)
+                .padding(.trailing, 9)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityLabel("Trip Log, \(tripLogStateText)")
+            .accessibilityHint("Shows start, pause, resume, and stop controls")
+
+            Divider()
+                .frame(height: 45)
+
+            tripLogDetailMenu
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 11)
-        .padding(.vertical, 8)
+        .frame(minHeight: 62)
         .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(tripLogStatusTint.opacity(0.18), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.14), radius: 7, y: 4)
-        .accessibilityLabel("Trip Log, \(tripLogStateText), \(tripLogDetailText)")
-        .accessibilityHint("Shows start, pause, resume, and stop controls")
     }
 
-    private var tripLogDetailText: String {
-        switch tripLogDetailIndex {
-        case 0:
-            return headingDetail
-        case 1:
-            return speedDetail
-        default:
-            return altitudeDetail
+    private var tripLogDetailMenu: some View {
+        Menu {
+            Button {
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    selectedTripLogDetail = nil
+                }
+            } label: {
+                Label("Auto Rotate", systemImage: selectedTripLogDetail == nil ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath")
+            }
+
+            Divider()
+
+            ForEach(FireVaultTripLogDetail.allCases) { detail in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        selectedTripLogDetail = detail
+                    }
+                } label: {
+                    Label(detail.rawValue.capitalized, systemImage: selectedTripLogDetail == detail ? "checkmark" : detail.symbol)
+                }
+            }
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: displayedTripLogDetail.symbol)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(NativeShellPalette.blue)
+                    .frame(width: 27)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(displayedTripLogDetail.rawValue)
+                        .font(.caption2.bold())
+                        .tracking(0.8)
+                        .foregroundStyle(.secondary)
+                    Text(tripLogDetailPrimaryText)
+                        .font(.subheadline.bold().monospacedDigit())
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .contentTransition(.opacity)
+                    Text(tripLogDetailSecondaryText)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .contentTransition(.opacity)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Trip Log detail, \(displayedTripLogDetail.rawValue), \(tripLogDetailPrimaryText), \(tripLogDetailSecondaryText)")
+        .accessibilityHint("Choose which Trip Log detail to display")
     }
 
-    private var headingDetail: String {
+    private var displayedTripLogDetail: FireVaultTripLogDetail {
+        selectedTripLogDetail ?? FireVaultTripLogDetail.allCases[tripLogDetailIndex % FireVaultTripLogDetail.allCases.count]
+    }
+
+    private var tripLogDetailPrimaryText: String {
         if payload.demoMode {
-            return "HEADING  247° WSW"
+            return switch displayedTripLogDetail {
+            case .speed: "64 mph"
+            case .trip: "42.6 mi"
+            case .direction: "NW"
+            case .elevation: "5,284 ft"
+            case .stopped: "4m 32s"
+            case .gps: "±10 ft"
+            }
+        } else {
+            switch displayedTripLogDetail {
+            case .speed:
+                guard let speed = locationService.latestLocation?.speed, speed >= 0 else { return "— mph" }
+                return "\(Int((speed * 2.236_936).rounded())) mph"
+            case .trip:
+                guard let day = breadcrumbs.today else { return "0.0 mi" }
+                return String(format: "%.1f mi", day.totalDistanceMeters / 1_609.344)
+            case .direction:
+                guard let course = locationService.latestLocation?.course, course >= 0 else { return "—" }
+                return cardinalDirection(for: course)
+            case .elevation:
+                guard let altitude = currentAltitudeMeters else { return "— ft" }
+                return "\(Int((altitude * 3.280_84).rounded()).formatted()) ft"
+            case .stopped:
+                return compactDuration(totalStoppedTime)
+            case .gps:
+                guard let accuracy = locationService.latestLocation?.horizontalAccuracy, accuracy >= 0 else { return "±— ft" }
+                return "±\(Int((accuracy * 3.280_84).rounded()).formatted()) ft"
+            }
         }
-        guard let course = locationService.latestLocation?.course, course >= 0 else {
-            return "HEADING  —"
-        }
-        return "HEADING  \(Int(course.rounded()))° \(cardinalDirection(for: course))"
     }
 
-    private var speedDetail: String {
+    private var tripLogDetailSecondaryText: String {
         if payload.demoMode {
-            return "SPEED  36 MPH"
+            return switch displayedTripLogDetail {
+            case .speed: "Avg 57 · Max 71"
+            case .trip: "00:48:17"
+            case .direction: "312°"
+            case .elevation: "Gain +327 ft"
+            case .stopped: "2 stops"
+            case .gps: "Excellent"
+            }
+        } else {
+            switch displayedTripLogDetail {
+            case .speed:
+                let speeds = breadcrumbs.today?.points.compactMap(\.speedMetersPerSecond).filter { $0 >= 0 } ?? []
+                guard !speeds.isEmpty else { return "Avg — · Max —" }
+                let average = speeds.reduce(0, +) / Double(speeds.count) * 2.236_936
+                let maximum = (speeds.max() ?? 0) * 2.236_936
+                return "Avg \(Int(average.rounded())) · Max \(Int(maximum.rounded()))"
+            case .trip:
+                return clockDuration(breadcrumbs.today?.elapsedTime ?? 0)
+            case .direction:
+                guard let course = locationService.latestLocation?.course, course >= 0 else { return "—°" }
+                return "\(Int(course.rounded()))°"
+            case .elevation:
+                let gain = elevationGainMeters * 3.280_84
+                return "Gain +\(Int(gain.rounded()).formatted()) ft"
+            case .stopped:
+                let count = breadcrumbs.today?.stops.count ?? 0
+                return "\(count) \(count == 1 ? "stop" : "stops")"
+            case .gps:
+                guard let accuracy = locationService.latestLocation?.horizontalAccuracy, accuracy >= 0 else { return "Unavailable" }
+                if accuracy <= 5 { return "Excellent" }
+                if accuracy <= 15 { return "Good" }
+                if accuracy <= 35 { return "Fair" }
+                return "Weak"
+            }
         }
-        guard let speed = locationService.latestLocation?.speed, speed >= 0 else {
-            return "SPEED  —"
-        }
-        return String(format: "SPEED  %.0f MPH", speed * 2.236_936)
     }
 
-    private var altitudeDetail: String {
-        if payload.demoMode {
-            return "ALTITUDE  5,280 FT"
+    private var currentAltitudeMeters: Double? {
+        if let location = locationService.latestLocation, location.verticalAccuracy >= 0 {
+            return location.altitude
         }
-        guard let location = locationService.latestLocation, location.verticalAccuracy >= 0 else {
-            return "ALTITUDE  —"
+        return breadcrumbs.today?.points.compactMap(\.altitude).last
+    }
+
+    private var elevationGainMeters: Double {
+        let values = breadcrumbs.today?.points.compactMap(\.altitude) ?? []
+        return zip(values, values.dropFirst()).reduce(0) { total, pair in
+            total + max(0, pair.1 - pair.0)
         }
-        return "ALTITUDE  \(Int((location.altitude * 3.280_84).rounded()).formatted()) FT"
+    }
+
+    private var totalStoppedTime: TimeInterval {
+        guard let day = breadcrumbs.today else { return 0 }
+        return day.stops.reduce(0) { $0 + day.stopDuration(for: $1) }
+    }
+
+    private func compactDuration(_ interval: TimeInterval) -> String {
+        let seconds = max(0, Int(interval.rounded()))
+        let hours = seconds / 3_600
+        let minutes = (seconds % 3_600) / 60
+        let remainder = seconds % 60
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        return "\(minutes)m \(remainder)s"
+    }
+
+    private func clockDuration(_ interval: TimeInterval) -> String {
+        let seconds = max(0, Int(interval.rounded()))
+        return String(format: "%02d:%02d:%02d", seconds / 3_600, (seconds % 3_600) / 60, seconds % 60)
     }
 
     private func cardinalDirection(for course: CLLocationDirection) -> String {
@@ -577,7 +721,7 @@ private struct NativeNearbyView: View {
                 return
             }
             withAnimation(.easeInOut(duration: 0.55)) {
-                tripLogDetailIndex = (tripLogDetailIndex + 1) % 3
+                tripLogDetailIndex = (tripLogDetailIndex + 1) % FireVaultTripLogDetail.allCases.count
             }
         }
     }
