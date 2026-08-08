@@ -290,8 +290,10 @@ struct FireVaultProWordmark: View {
             HStack(spacing: max(4, fontSize * 0.18)) {
                 Rectangle()
                     .fill(vaultColor.opacity(0.72))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: max(0.75, fontSize * 0.045))
+                    .frame(
+                        width: max(14, fontSize * 3.25),
+                        height: max(0.75, fontSize * 0.045)
+                    )
 
                 Text("PRO")
                     .font(.system(size: proFontSize, weight: .black, design: .rounded))
