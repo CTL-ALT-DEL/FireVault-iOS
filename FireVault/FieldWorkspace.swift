@@ -210,7 +210,7 @@ struct FieldWorkspaceView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
-                    .padding(.bottom, 184)
+                    .padding(.bottom, 104)
                 }
                 .scrollIndicators(.hidden)
             }
@@ -222,11 +222,11 @@ struct FieldWorkspaceView: View {
                     Button {
                         store.closeAccount()
                     } label: {
-                        Label("Back", systemImage: "chevron.left")
+                        Label("Accounts", systemImage: "chevron.left")
                     }
                     .buttonStyle(.glass)
                 }
-                ToolbarItemGroup(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         store.toggleFavorite(account.id)
                     } label: {
@@ -235,28 +235,10 @@ struct FieldWorkspaceView: View {
                     }
                     .buttonStyle(.glass)
                     .accessibilityLabel(account.favorite ? "Remove Favorite" : "Add Favorite")
-
-                    Menu {
-                        Button("Edit Account", systemImage: "pencil") {
-                            isShowingAccountEditor = true
-                        }
-                        if !account.phone.isEmpty {
-                            Button("Call", systemImage: "phone") { store.call(account.phone) }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                    }
-                    .buttonStyle(.glass)
-                    .accessibilityLabel("Account actions")
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 10) {
-                    fieldActionDock
-                    appNavigation
-                }
-                .padding(.top, 10)
-                .background(FieldWorkspacePalette.background.ignoresSafeArea(edges: .bottom))
+                appNavigation
             }
         }
         .tint(FieldWorkspacePalette.blue)
@@ -324,24 +306,7 @@ struct FieldWorkspaceView: View {
                     Spacer()
                 }
 
-                HStack(spacing: 9) {
-                    if !account.phone.isEmpty {
-                        Button {
-                            store.call(account.phone)
-                        } label: {
-                            Label("Call", systemImage: "phone.fill")
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    Button {
-                        store.openRoute(for: account)
-                    } label: {
-                        Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(account.coordinate == nil)
-                    Spacer()
-                }
+                accountQuickActions
 
                 if !account.tags.isEmpty {
                     ScrollView(.horizontal) {
@@ -357,6 +322,41 @@ struct FieldWorkspaceView: View {
             .padding(15)
         }
         .padding(.top, 4)
+    }
+
+    private var accountQuickActions: some View {
+        HStack(spacing: 8) {
+            WorkspaceQuickAction(
+                title: "Call",
+                symbol: "phone.fill",
+                tint: FieldWorkspacePalette.green,
+                disabled: account.phone.isEmpty
+            ) {
+                store.call(account.phone)
+            }
+            WorkspaceQuickAction(
+                title: "Route",
+                symbol: "arrow.triangle.turn.up.right.diamond.fill",
+                tint: FieldWorkspacePalette.blue,
+                disabled: account.coordinate == nil
+            ) {
+                store.openRoute(for: account)
+            }
+            WorkspaceQuickAction(
+                title: "Note",
+                symbol: "square.and.pencil",
+                tint: FieldWorkspacePalette.amber
+            ) {
+                isShowingNoteEditor = true
+            }
+            WorkspaceQuickAction(
+                title: "Edit",
+                symbol: "pencil",
+                tint: FieldWorkspacePalette.purple
+            ) {
+                isShowingAccountEditor = true
+            }
+        }
     }
 
     private var accountBriefAction: some View {
@@ -542,40 +542,6 @@ struct FieldWorkspaceView: View {
                 }
             }
         }
-    }
-
-    private var fieldActionDock: some View {
-        HStack(spacing: 6) {
-            if settings.isFeatureVisible("account.action.scan") {
-                WorkspaceDockButton(title: "Scan", symbol: "doc.viewfinder", tint: FieldWorkspacePalette.blue) {
-                    store.addDocument(to: account.id, scan: true)
-                }
-            }
-            if settings.isFeatureVisible("account.action.note") {
-                WorkspaceDockButton(title: "Note", symbol: "square.and.pencil", tint: FieldWorkspacePalette.amber) {
-                    isShowingNoteEditor = true
-                }
-            }
-            if settings.isFeatureVisible("account.action.camera") {
-                WorkspaceDockButton(title: "Camera", symbol: "camera.fill", tint: FieldWorkspacePalette.red) {
-                    store.closeAccount(to: .photo)
-                }
-            }
-            if settings.isFeatureVisible("account.action.route") {
-                WorkspaceDockButton(title: "Route", symbol: "arrow.triangle.turn.up.right.diamond.fill", tint: FieldWorkspacePalette.green) {
-                    store.openRoute(for: account)
-                }
-            }
-        }
-        .padding(7)
-        .background(FieldWorkspacePalette.actionSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(FieldWorkspacePalette.actionDivider, lineWidth: 1)
-        }
-        .padding(.horizontal, 14)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Field actions")
     }
 
     private var appNavigation: some View {
@@ -2337,23 +2303,37 @@ private struct WorkspaceRecentRow: View {
     }
 }
 
-private struct WorkspaceDockButton: View {
+private struct WorkspaceQuickAction: View {
     let title: String
     let symbol: String
     let tint: Color
+    var disabled = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: symbol).font(.headline)
-                Text(title).font(.caption2.weight(.semibold)).lineLimit(1)
+            VStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.system(size: 17, weight: .bold))
+                    .frame(width: 32, height: 32)
+                    .background(tint.opacity(0.14), in: Circle())
+                Text(title).font(.caption2.bold()).lineLimit(1)
             }
             .foregroundStyle(tint)
             .frame(maxWidth: .infinity)
-            .frame(height: 50)
+            .frame(height: 64)
+            .background(
+                FieldWorkspacePalette.surfaceRaised.opacity(0.48),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(tint.opacity(0.16), lineWidth: 1)
+            }
         }
         .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.42 : 1)
         .contentShape(Rectangle())
     }
 }

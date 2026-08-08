@@ -441,27 +441,52 @@ private struct NativeNearbyView: View {
     }
 
     private var statusHeader: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(tripLogStatusText)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(tripLogStatusTint)
-                .lineLimit(1)
-            Text("•")
-                .font(.caption.bold())
-                .foregroundStyle(.tertiary)
-            Text(payload.locationStatus)
-                .font(.subheadline)
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(tripLogStatusTint.opacity(0.14))
+                Image(systemName: breadcrumbs.isRecording ? "location.fill" : "location")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(tripLogStatusTint)
+                    .symbolEffect(.pulse, options: .repeating, isActive: breadcrumbs.isRecording)
+            }
+            .frame(width: 34, height: 34)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("TRIP LOG")
+                    .font(.caption2.bold())
+                    .tracking(1.05)
+                    .foregroundStyle(.secondary)
+                Text(tripLogStateText)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tripLogStatusTint)
+            }
+
+            Divider()
+                .frame(height: 28)
+
+            Label(payload.locationStatus, systemImage: "clock")
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.72)
+                .minimumScaleFactor(0.75)
+
             Spacer(minLength: 0)
         }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(tripLogStatusTint.opacity(0.18), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.14), radius: 7, y: 4)
     }
 
-    private var tripLogStatusText: String {
-        if breadcrumbs.isRecording { return "Trip Log - Recording" }
-        if breadcrumbs.activeDay?.isPaused == true { return "Trip Log - Paused" }
-        return "Trip Log - Stopped"
+    private var tripLogStateText: String {
+        if breadcrumbs.isRecording { return "RECORDING" }
+        if breadcrumbs.activeDay?.isPaused == true { return "PAUSED" }
+        return "STOPPED"
     }
 
     private var tripLogStatusTint: Color {
@@ -800,6 +825,7 @@ private struct NativeNearbyView: View {
                                         .id(row.id)
                                 }
                             }
+                            .padding(.top, 10)
                             .scrollTargetLayout()
 
                             Color.clear
@@ -1272,40 +1298,50 @@ private struct NativePhotoView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 14) {
-                    destinationAccountCard
-                    captureControls
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(spacing: 16) {
+                        destinationAccountCard
 
-                    if let selectedImage {
-                        imagePreview(selectedImage)
+                        if let selectedImage {
+                            imagePreview(selectedImage)
 
-                        if scannedPages.count > 1 {
-                            scannedPageStrip
+                            if scannedPages.count > 1 {
+                                scannedPageStrip
+                            }
+
+                            HStack(spacing: 8) {
+                                Label(
+                                    mediaKind == .scan
+                                        ? "\(scannedPages.count) page\(scannedPages.count == 1 ? "" : "s")"
+                                        : "Overlay applied",
+                                    systemImage: mediaKind == .scan
+                                        ? "doc.viewfinder.fill"
+                                        : "camera.filters"
+                                )
+                                .foregroundStyle(.secondary)
+
+                                if !saveStatus.isEmpty {
+                                    Spacer(minLength: 4)
+                                    Label("Saved", systemImage: "checkmark.circle.fill")
+                                        .foregroundStyle(NativeShellPalette.green)
+                                        .accessibilityIdentifier("native-media-save-status")
+                                }
+                            }
+                            .font(.caption.bold())
+                            .padding(.horizontal, 4)
+                        } else {
+                            captureReadyCard
+                                .frame(
+                                    minHeight: max(220, geometry.size.height - 286)
+                                )
                         }
 
-                        Label(
-                            mediaKind == .scan
-                                ? "\(scannedPages.count) scanned page\(scannedPages.count == 1 ? "" : "s")"
-                                : "Photo overlay applied",
-                            systemImage: mediaKind == .scan
-                                ? "doc.viewfinder.fill"
-                                : "camera.filters"
-                        )
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                        if !saveStatus.isEmpty {
-                            Label(saveStatus, systemImage: "checkmark.circle.fill")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(NativeShellPalette.green)
-                                .accessibilityIdentifier("native-media-save-status")
-                        }
-                    } else {
-                        captureReadyCard
+                        captureControls
                     }
+                    .frame(minHeight: geometry.size.height, alignment: .top)
+                    .padding(16)
                 }
-                .padding(16)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(NativeShellPalette.background)
@@ -1526,7 +1562,7 @@ private struct NativePhotoView: View {
         } label: {
             VStack(spacing: 7) {
                 Image(systemName: symbol)
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(.system(size: 27, weight: .bold))
                 VStack(spacing: 1) {
                     Text(title)
                         .font(.caption.bold())
@@ -1538,7 +1574,7 @@ private struct NativePhotoView: View {
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .frame(height: 82)
+            .frame(height: 94)
             .background(
                 LinearGradient(
                     colors: [tint.opacity(0.92), tint.opacity(0.55)],
@@ -1557,30 +1593,48 @@ private struct NativePhotoView: View {
     }
 
     private var captureReadyCard: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "camera.aperture")
-                .font(.system(size: 32, weight: .semibold))
-                .foregroundStyle(NativeShellPalette.blue)
-                .frame(width: 58, height: 58)
-                .background(NativeShellPalette.blue.opacity(0.12), in: Circle())
+        ZStack {
+            Circle()
+                .fill(NativeShellPalette.blue.opacity(0.08))
+                .frame(width: 190, height: 190)
+                .blur(radius: 2)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Ready for Field Media")
-                    .font(.headline)
-                Text("Photos receive your saved overlay. Scan supports multi-page documents.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 13) {
+                Image(systemName: "camera.aperture")
+                    .font(.system(size: 48, weight: .semibold))
+                    .foregroundStyle(NativeShellPalette.blue)
+                    .frame(width: 88, height: 88)
+                    .background(NativeShellPalette.blue.opacity(0.12), in: Circle())
+                    .overlay {
+                        Circle().stroke(NativeShellPalette.blue.opacity(0.24), lineWidth: 1)
+                    }
+
+                VStack(spacing: 5) {
+                    Text("Field Capture")
+                        .font(.system(size: 23, weight: .bold, design: .rounded))
+                    Text("Photograph equipment, scan documents, or import an existing image.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack(spacing: 8) {
+                    Label("Saved to account", systemImage: "building.2")
+                    Label("Overlay ready", systemImage: "camera.filters")
+                }
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
             }
-            Spacer(minLength: 0)
+            .padding(24)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 20))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 20)
-                .stroke(.white.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(NativeShellPalette.blue.opacity(0.16), lineWidth: 1)
         }
+        .shadow(color: .black.opacity(0.16), radius: 10, y: 5)
         .accessibilityElement(children: .combine)
     }
 

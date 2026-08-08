@@ -291,7 +291,7 @@ struct FireVaultProWordmark: View {
                 Rectangle()
                     .fill(vaultColor.opacity(0.72))
                     .frame(
-                        width: max(14, fontSize * 3.25),
+                        width: max(18, fontSize * 4.75),
                         height: max(0.75, fontSize * 0.045)
                     )
 
