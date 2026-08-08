@@ -297,7 +297,6 @@ private enum FireVaultTripLogDetail: String, CaseIterable, Identifiable {
     case trip = "TRIP"
     case direction = "DIRECTION"
     case elevation = "ELEVATION"
-    case stopped = "STOPPED"
     case gps = "GPS"
 
     var id: String { rawValue }
@@ -308,7 +307,6 @@ private enum FireVaultTripLogDetail: String, CaseIterable, Identifiable {
         case .trip: "road.lanes"
         case .direction: "location.north.fill"
         case .elevation: "mountain.2.fill"
-        case .stopped: "pause.circle.fill"
         case .gps: "scope"
         }
     }
@@ -336,7 +334,8 @@ private struct NativeNearbyView: View {
     @State private var tripLogControlsCollapseTask: Task<Void, Never>?
     @State private var tripLogDetailIndex = 0
     @State private var selectedTripLogDetail: FireVaultTripLogDetail?
-    @State private var autoRotateTripLogDetails = Set(FireVaultTripLogDetail.allCases)
+    @State private var showsAutoRotateEditor = false
+    @AppStorage("tripLog.autoRotateDetails") private var storedAutoRotateTripLogDetails = FireVaultTripLogDetail.allCases.map(\.rawValue).joined(separator: ",")
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -475,6 +474,9 @@ private struct NativeNearbyView: View {
         } message: {
             Text("FireVault Pro sends only street, city, state, and ZIP fields to the U.S. Census Geocoder, then uses Apple Maps for unmatched addresses. Account names, IDs, notes, photos, and files remain on this iPhone. Returned coordinates are saved locally.")
         }
+        .sheet(isPresented: $showsAutoRotateEditor) {
+            autoRotateEditor
+        }
     }
 
     private var statusHeader: some View {
@@ -550,17 +552,10 @@ private struct NativeNearbyView: View {
 
             Divider()
 
-            Menu("Auto Rotate Items") {
-                ForEach(FireVaultTripLogDetail.allCases) { detail in
-                    Button {
-                        toggleAutoRotateDetail(detail)
-                    } label: {
-                        Label(
-                            detail.rawValue.capitalized,
-                            systemImage: autoRotateTripLogDetails.contains(detail) ? "checkmark" : detail.symbol
-                        )
-                    }
-                }
+            Button {
+                showsAutoRotateEditor = true
+            } label: {
+                Label("Choose Auto Rotate Items", systemImage: "checklist")
             }
 
             Divider()
@@ -576,6 +571,8 @@ private struct NativeNearbyView: View {
             }
         } label: {
             HStack(spacing: 7) {
+                Spacer(minLength: 0)
+
                 Image(systemName: displayedTripLogDetail.symbol)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(NativeShellPalette.blue)
@@ -599,8 +596,6 @@ private struct NativeNearbyView: View {
                     .contentTransition(.opacity)
                 }
 
-                Spacer(minLength: 0)
-
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.secondary)
@@ -621,18 +616,58 @@ private struct NativeNearbyView: View {
     }
 
     private var activeAutoRotateTripLogDetails: [FireVaultTripLogDetail] {
-        let choices = FireVaultTripLogDetail.allCases.filter(autoRotateTripLogDetails.contains)
+        let selectedIDs = Set(storedAutoRotateTripLogDetails.split(separator: ",").map(String.init))
+        let choices = FireVaultTripLogDetail.allCases.filter { selectedIDs.contains($0.rawValue) }
         return choices.isEmpty ? FireVaultTripLogDetail.allCases : choices
     }
 
     private func toggleAutoRotateDetail(_ detail: FireVaultTripLogDetail) {
-        if autoRotateTripLogDetails.contains(detail) {
-            guard autoRotateTripLogDetails.count > 1 else { return }
-            autoRotateTripLogDetails.remove(detail)
+        var choices = Set(activeAutoRotateTripLogDetails)
+        if choices.contains(detail) {
+            guard choices.count > 1 else { return }
+            choices.remove(detail)
         } else {
-            autoRotateTripLogDetails.insert(detail)
+            choices.insert(detail)
         }
+        storedAutoRotateTripLogDetails = FireVaultTripLogDetail.allCases
+            .filter(choices.contains)
+            .map(\.rawValue)
+            .joined(separator: ",")
         tripLogDetailIndex = 0
+    }
+
+    private var autoRotateEditor: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(FireVaultTripLogDetail.allCases) { detail in
+                        Button {
+                            toggleAutoRotateDetail(detail)
+                        } label: {
+                            HStack {
+                                Label(detail.rawValue.capitalized, systemImage: detail.symbol)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if activeAutoRotateTripLogDetails.contains(detail) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(NativeShellPalette.blue)
+                                }
+                            }
+                        }
+                    }
+                } footer: {
+                    Text("Select any combination of details to cycle. Your choices save automatically.")
+                }
+            }
+            .navigationTitle("Auto Rotate Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showsAutoRotateEditor = false }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 
     private var tripLogDetailPrimaryText: String {
@@ -642,7 +677,6 @@ private struct NativeNearbyView: View {
             case .trip: "42.6 mi"
             case .direction: "NW"
             case .elevation: "5,284 ft"
-            case .stopped: "4m 32s"
             case .gps: "±10 ft"
             }
         } else {
@@ -659,8 +693,6 @@ private struct NativeNearbyView: View {
             case .elevation:
                 guard let altitude = currentAltitudeMeters else { return "— ft" }
                 return "\(Int((altitude * 3.280_84).rounded()).formatted()) ft"
-            case .stopped:
-                return compactDuration(totalStoppedTime)
             case .gps:
                 guard let accuracy = locationService.latestLocation?.horizontalAccuracy, accuracy >= 0 else { return "±— ft" }
                 return "±\(Int((accuracy * 3.280_84).rounded()).formatted()) ft"
@@ -675,7 +707,6 @@ private struct NativeNearbyView: View {
             case .trip: "00:48:17"
             case .direction: "312°"
             case .elevation: "Gain +327 ft"
-            case .stopped: "2 stops"
             case .gps: "Excellent"
             }
         } else {
@@ -694,9 +725,6 @@ private struct NativeNearbyView: View {
             case .elevation:
                 let gain = elevationGainMeters * 3.280_84
                 return "Gain +\(Int(gain.rounded()).formatted()) ft"
-            case .stopped:
-                let count = breadcrumbs.today?.stops.count ?? 0
-                return "\(count) \(count == 1 ? "stop" : "stops")"
             case .gps:
                 guard let accuracy = locationService.latestLocation?.horizontalAccuracy, accuracy >= 0 else { return "Unavailable" }
                 if accuracy <= 5 { return "Excellent" }
@@ -719,20 +747,6 @@ private struct NativeNearbyView: View {
         return zip(values, values.dropFirst()).reduce(0) { total, pair in
             total + max(0, pair.1 - pair.0)
         }
-    }
-
-    private var totalStoppedTime: TimeInterval {
-        guard let day = breadcrumbs.today else { return 0 }
-        return day.stops.reduce(0) { $0 + day.stopDuration(for: $1) }
-    }
-
-    private func compactDuration(_ interval: TimeInterval) -> String {
-        let seconds = max(0, Int(interval.rounded()))
-        let hours = seconds / 3_600
-        let minutes = (seconds % 3_600) / 60
-        let remainder = seconds % 60
-        if hours > 0 { return "\(hours)h \(minutes)m" }
-        return "\(minutes)m \(remainder)s"
     }
 
     private func clockDuration(_ interval: TimeInterval) -> String {
