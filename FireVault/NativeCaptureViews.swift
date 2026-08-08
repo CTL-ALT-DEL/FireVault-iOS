@@ -279,7 +279,7 @@ struct FireVaultProWordmark: View {
     var tracking: CGFloat = 0.9
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: max(1, fontSize * 0.03)) {
+        VStack(alignment: .trailing, spacing: max(2, fontSize * 0.08)) {
             HStack(spacing: 0) {
                 Text("FIRE").foregroundStyle(fireColor)
                 Text("VAULT").foregroundStyle(vaultColor)
@@ -287,18 +287,17 @@ struct FireVaultProWordmark: View {
             .font(.system(size: fontSize, weight: .bold, design: .rounded))
             .tracking(tracking)
 
-            Text("PRO")
-                .font(.system(size: proFontSize, weight: .black, design: .rounded))
-                .tracking(0.6)
-                .foregroundStyle(proColor)
-                .padding(.horizontal, max(3, proFontSize * 0.45))
-                .padding(.vertical, max(1.5, proFontSize * 0.22))
-                .background(proBackground, in: RoundedRectangle(cornerRadius: max(2, proFontSize * 0.32), style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: max(2, proFontSize * 0.32), style: .continuous)
-                        .stroke(.white.opacity(0.45), lineWidth: 0.7)
-                }
-                .shadow(color: proBackground.opacity(0.34), radius: 3, y: 1)
+            HStack(spacing: max(4, fontSize * 0.18)) {
+                Rectangle()
+                    .fill(vaultColor.opacity(0.72))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: max(0.75, fontSize * 0.045))
+
+                Text("PRO")
+                    .font(.system(size: proFontSize, weight: .black, design: .rounded))
+                    .tracking(0.8)
+                    .foregroundStyle(proColor)
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("FireVault Pro")

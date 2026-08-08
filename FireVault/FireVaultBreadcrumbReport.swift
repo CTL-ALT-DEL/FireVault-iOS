@@ -1668,12 +1668,13 @@ enum FireVaultTripLogPDFRenderer {
             width: fontSize * 1.35,
             height: fontSize * 0.64
         )
-        red.setFill()
-        UIBezierPath(roundedRect: proRect, cornerRadius: fontSize * 0.14).fill()
-        UIColor.white.withAlphaComponent(0.4).setStroke()
-        let outline = UIBezierPath(roundedRect: proRect, cornerRadius: fontSize * 0.14)
-        outline.lineWidth = 0.5
-        outline.stroke()
+        UIColor.white.withAlphaComponent(0.72).setStroke()
+        let underline = UIBezierPath()
+        underline.move(to: CGPoint(x: x, y: proRect.midY))
+        underline.addLine(to: CGPoint(x: proRect.minX - fontSize * 0.2, y: proRect.midY))
+        underline.lineWidth = max(0.7, fontSize * 0.045)
+        underline.stroke()
+
         drawCenteredText("PRO", font: .systemFont(ofSize: fontSize * 0.32, weight: .black), color: .white, rect: proRect)
     }
 
