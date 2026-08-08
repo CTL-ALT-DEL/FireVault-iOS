@@ -447,7 +447,7 @@ struct FieldWorkspaceView: View {
 
                     HStack {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("MAP & ARRIVAL")
+                            Text("ARRIVAL MAP")
                                 .font(.caption2.bold())
                                 .tracking(1.2)
                                 .foregroundStyle(FieldWorkspacePalette.blue)
@@ -465,7 +465,7 @@ struct FieldWorkspaceView: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Open Map and Arrival")
+        .accessibilityLabel("Open Arrival Map")
     }
 
     private var destinations: some View {
@@ -547,19 +547,22 @@ struct FieldWorkspaceView: View {
     private var appNavigation: some View {
         HStack(spacing: 0) {
             if settings.isFeatureVisible("tab.nearby") {
-                WorkspaceNavButton(title: "Nearby", symbol: "location.circle") { store.closeAccount(to: .nearby) }
+                WorkspaceNavButton(title: "Nearby", symbol: "location.fill") { store.closeAccount(to: .nearby) }
             }
             if settings.isFeatureVisible("tab.accounts") {
                 WorkspaceNavButton(title: "Accounts", symbol: "magnifyingglass") { store.closeAccount(to: .accounts) }
             }
+            if settings.isFeatureVisible("tab.trip") {
+                WorkspaceNavButton(title: "Trip Log", symbol: "truck.box.fill") { store.closeAccount(to: .trip) }
+            }
             if settings.isFeatureVisible("tab.photo") {
-                WorkspaceNavButton(title: "Photo", symbol: "photo") { store.closeAccount(to: .photo) }
+                WorkspaceNavButton(title: "Photo", symbol: "camera.fill") { store.closeAccount(to: .photo) }
             }
             WorkspaceNavButton(title: "Settings", symbol: "slider.horizontal.3") { store.closeAccount(to: .settings) }
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 5)
-        .padding(.bottom, 2)
+        .padding(.horizontal, 6)
+        .padding(.top, 2)
+        .padding(.bottom, 0)
         .background(FieldWorkspacePalette.navigationBackground.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) {
             Rectangle()
@@ -680,22 +683,46 @@ private struct MapArrivalView: View {
     @State private var importNotice: FireVaultLocationImportNotice?
 
     var body: some View {
-        List {
-            Section {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    Label("ARRIVAL MAP", systemImage: "mappin.and.ellipse")
+                        .font(.caption.bold())
+                        .tracking(0.8)
+                        .foregroundStyle(FieldWorkspacePalette.blue)
+                    Spacer()
+                    Text("\(account.locations.count) saved")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
                 WorkspaceMap(account: account)
                     .frame(height: 300)
-                    .listRowInsets(.init())
-                    .listRowBackground(Color.clear)
                     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .allowsHitTesting(false)
+                    .accessibilityLabel("Static arrival map showing all saved locations")
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+            .background(FieldWorkspacePalette.background)
 
-            Section("Saved arrival points") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("SAVED ARRIVAL POINTS")
+                    .font(.caption.bold())
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+
+                ScrollView {
+                    LazyVStack(spacing: 8) {
                 if account.locations.isEmpty {
                     ContentUnavailableView(
                         "No Saved Locations",
                         systemImage: "mappin.slash",
                         description: Text("Add an entrance, parking area, panel, riser, FDC, or other exact field location.")
                     )
+                    .padding(.top, 30)
                 } else {
                     ForEach(account.locations) { location in
                         Button {
@@ -721,7 +748,15 @@ private struct MapArrivalView: View {
                                         .foregroundStyle(FieldWorkspacePalette.blue)
                                 }
                             }
-                            .padding(.vertical, 4)
+                            .padding(12)
+                            .background(
+                                FieldWorkspacePalette.surfaceRaised,
+                                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            )
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .stroke(.white.opacity(0.07), lineWidth: 1)
+                            }
                         }
                         .buttonStyle(.plain)
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
@@ -739,11 +774,16 @@ private struct MapArrivalView: View {
                         }
                     }
                 }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 96)
+                }
+                .scrollIndicators(.hidden)
             }
+            .frame(maxHeight: .infinity)
         }
-        .scrollContentBackground(.hidden)
         .background(FieldWorkspacePalette.background)
-        .navigationTitle("Map & Arrival")
+        .navigationTitle("Arrival Map")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 10) {
@@ -2345,13 +2385,17 @@ private struct WorkspaceNavButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: symbol).font(.system(size: 20, weight: .semibold))
+            VStack(spacing: 1) {
+                Image(systemName: symbol)
+                    .font(.system(size: 20, weight: .semibold))
+                    .frame(width: 34, height: 26)
+                    .shadow(color: .black.opacity(0.18), radius: 1.5, x: 0, y: 2)
                 Text(title).font(.caption2.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
             }
             .foregroundStyle(FieldWorkspacePalette.navigationInactive)
             .frame(maxWidth: .infinity)
-            .frame(minHeight: 58)
+            .frame(minHeight: 48)
+            .offset(y: 3)
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())

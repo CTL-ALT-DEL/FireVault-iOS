@@ -310,7 +310,7 @@ enum FireVaultDeveloperFeatureCatalog {
         .init(id: "nearby.map", page: "Nearby", title: "Map"),
         .init(id: "nearby.list", page: "Nearby", title: "Nearby Account List"),
         .init(id: "account.brief", page: "Account Detail", title: "Generate Account Brief"),
-        .init(id: "account.map", page: "Account Detail", title: "Map & Arrival"),
+        .init(id: "account.map", page: "Account Detail", title: "Arrival Map"),
         .init(id: "account.notes", page: "Account Detail", title: "Notes"),
         .init(id: "account.files", page: "Account Detail", title: "Files & Scans"),
         .init(id: "account.equipment", page: "Account Detail", title: "Equipment"),

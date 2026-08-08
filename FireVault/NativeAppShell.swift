@@ -310,6 +310,7 @@ private struct NativeNearbyView: View {
     @State private var hasCenteredOnInitialLiveLocation = false
     @State private var radiusPickerExpanded = false
     @State private var radiusCollapseTask: Task<Void, Never>?
+    @State private var showsTripLogControls = false
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -366,6 +367,12 @@ private struct NativeNearbyView: View {
         VStack(spacing: 8) {
             statusHeader
                 .padding(.horizontal, 16)
+
+            if showsTripLogControls {
+                tripLogQuickControls
+                    .padding(.horizontal, 16)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
 
             if shouldShowCoordinateSetup {
                 coordinateSetup
@@ -441,7 +448,12 @@ private struct NativeNearbyView: View {
     }
 
     private var statusHeader: some View {
-        HStack(spacing: 10) {
+        Button {
+            withAnimation(.snappy(duration: 0.24)) {
+                showsTripLogControls.toggle()
+            }
+        } label: {
+            HStack(spacing: 10) {
             ZStack {
                 Circle()
                     .fill(tripLogStatusTint.opacity(0.14))
@@ -462,17 +474,28 @@ private struct NativeNearbyView: View {
                     .foregroundStyle(tripLogStatusTint)
             }
 
-            Divider()
-                .frame(height: 28)
+                Divider()
+                    .frame(height: 28)
 
-            Label(payload.locationStatus, systemImage: "clock")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(tripLogDetailText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text("Tap for Trip Log controls")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
+
+                Image(systemName: showsTripLogControls ? "chevron.up" : "chevron.down")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .padding(.horizontal, 11)
         .padding(.vertical, 8)
         .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -481,6 +504,60 @@ private struct NativeNearbyView: View {
                 .stroke(tripLogStatusTint.opacity(0.18), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.14), radius: 7, y: 4)
+        .accessibilityLabel("Trip Log, \(tripLogStateText), \(tripLogDetailText)")
+        .accessibilityHint("Shows start, pause, resume, and stop controls")
+    }
+
+    private var tripLogDetailText: String {
+        guard let day = breadcrumbs.today else { return "No trip recorded today" }
+        return "\(day.stops.count) stops • \(day.points.count) route points"
+    }
+
+    private var tripLogQuickControls: some View {
+        HStack(spacing: 10) {
+            if breadcrumbs.activeDay == nil {
+                tripLogControl(title: "Start", symbol: "play.fill", tint: NativeShellPalette.green) {
+                    breadcrumbs.startWorkday(accounts: store.accounts)
+                }
+            } else if breadcrumbs.activeDay?.isPaused == true {
+                tripLogControl(title: "Resume", symbol: "play.fill", tint: NativeShellPalette.green) {
+                    breadcrumbs.resumeWorkday(accounts: store.accounts)
+                }
+                tripLogControl(title: "Stop", symbol: "stop.fill", tint: NativeShellPalette.red) {
+                    breadcrumbs.endWorkday()
+                }
+            } else {
+                tripLogControl(title: "Pause", symbol: "pause.fill", tint: NativeShellPalette.amber) {
+                    breadcrumbs.pauseWorkday()
+                }
+                tripLogControl(title: "Stop", symbol: "stop.fill", tint: NativeShellPalette.red) {
+                    breadcrumbs.endWorkday()
+                }
+            }
+        }
+        .padding(10)
+        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+        }
+    }
+
+    private func tripLogControl(
+        title: String,
+        symbol: String,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.subheadline.bold())
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 42)
+                .background(tint, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private var tripLogStateText: String {
@@ -944,11 +1021,11 @@ private struct NativeNearbyView: View {
                     )
             }
             .shadow(
-                color: .black.opacity(selectedID == row.id ? 0.46 : 0.16),
-                radius: selectedID == row.id ? 13 : 5,
-                y: selectedID == row.id ? 8 : 3
+                color: .black.opacity(selectedID == row.id ? 0.38 : 0.14),
+                radius: selectedID == row.id ? 7 : 4,
+                y: selectedID == row.id ? 7 : 3
             )
-            .scaleEffect(selectedID == row.id ? 1.012 : 1)
+            .scaleEffect(selectedID == row.id ? 1.008 : 1)
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -1298,9 +1375,8 @@ private struct NativePhotoView: View {
 
     var body: some View {
         NavigationStack {
-            GeometryReader { geometry in
-                ScrollView {
-                    VStack(spacing: 16) {
+            ScrollView {
+                VStack(spacing: 14) {
                         destinationAccountCard
 
                         if let selectedImage {
@@ -1332,20 +1408,19 @@ private struct NativePhotoView: View {
                             .padding(.horizontal, 4)
                         } else {
                             captureReadyCard
-                                .frame(
-                                    minHeight: max(220, geometry.size.height - 286)
-                                )
+                                .aspectRatio(1, contentMode: .fit)
                         }
 
                         captureControls
-                    }
-                    .frame(minHeight: geometry.size.height, alignment: .top)
-                    .padding(16)
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 18)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(NativeShellPalette.background)
             .navigationTitle("Photo")
+            .navigationBarTitleDisplayMode(.inline)
             .task {
                 handleCaptureQuickAction()
             }
@@ -1594,41 +1669,46 @@ private struct NativePhotoView: View {
 
     private var captureReadyCard: some View {
         ZStack {
-            Circle()
-                .fill(NativeShellPalette.blue.opacity(0.08))
-                .frame(width: 190, height: 190)
-                .blur(radius: 2)
+            LinearGradient(
+                colors: [NativeShellPalette.blue.opacity(0.14), NativeShellPalette.surface],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
 
-            VStack(spacing: 13) {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(NativeShellPalette.blue.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [7, 7]))
+                .padding(16)
+
+            VStack(spacing: 14) {
                 Image(systemName: "camera.aperture")
-                    .font(.system(size: 48, weight: .semibold))
+                    .font(.system(size: 44, weight: .semibold))
                     .foregroundStyle(NativeShellPalette.blue)
-                    .frame(width: 88, height: 88)
+                    .frame(width: 82, height: 82)
                     .background(NativeShellPalette.blue.opacity(0.12), in: Circle())
                     .overlay {
                         Circle().stroke(NativeShellPalette.blue.opacity(0.24), lineWidth: 1)
                     }
 
                 VStack(spacing: 5) {
-                    Text("Field Capture")
-                        .font(.system(size: 23, weight: .bold, design: .rounded))
-                    Text("Photograph equipment, scan documents, or import an existing image.")
+                    Text("FIELD CAPTURE")
+                        .font(.system(size: 21, weight: .bold, design: .rounded))
+                        .tracking(1.1)
+                    Text("Photo • Scan • Import")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 HStack(spacing: 8) {
-                    Label("Saved to account", systemImage: "building.2")
+                    Label("Account linked", systemImage: "building.2.fill")
                     Label("Overlay ready", systemImage: "camera.filters")
                 }
                 .font(.caption2.bold())
                 .foregroundStyle(.secondary)
             }
-            .padding(24)
+            .padding(28)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
         .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 24, style: .continuous)

@@ -279,7 +279,7 @@ struct FireVaultProWordmark: View {
     var tracking: CGFloat = 0.9
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: max(2, fontSize * 0.08)) {
+        VStack(alignment: .leading, spacing: max(2, fontSize * 0.08)) {
             HStack(spacing: 0) {
                 Text("FIRE").foregroundStyle(fireColor)
                 Text("VAULT").foregroundStyle(vaultColor)
