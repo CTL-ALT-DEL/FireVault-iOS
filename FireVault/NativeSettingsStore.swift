@@ -36,6 +36,52 @@ enum FireVaultOverlayField: String, CaseIterable, Identifiable {
 
 struct FireVaultTechnicianPreferences: Codable, Equatable {
     var name = ""; var company = ""; var phone = ""; var email = ""; var license = ""
+    var achievementBadges: [String]?
+}
+
+enum FireVaultTechnicianBadge: String, CaseIterable, Identifiable {
+    case developer
+    case betaTester
+    case contributor
+    case anniversaryOne
+    case anniversaryThree
+    case anniversaryFive
+    case anniversaryTen
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .developer: "Developer"
+        case .betaTester: "Beta Tester"
+        case .contributor: "Contributor"
+        case .anniversaryOne: "1 Year"
+        case .anniversaryThree: "3 Years"
+        case .anniversaryFive: "5 Years"
+        case .anniversaryTen: "10 Years"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .developer: "FireVault development"
+        case .betaTester: "Early build testing"
+        case .contributor: "Product contribution"
+        case .anniversaryOne: "First anniversary"
+        case .anniversaryThree: "Three-year anniversary"
+        case .anniversaryFive: "Five-year anniversary"
+        case .anniversaryTen: "Ten-year anniversary"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .developer: "hammer.fill"
+        case .betaTester: "testtube.2"
+        case .contributor: "star.fill"
+        case .anniversaryOne, .anniversaryThree, .anniversaryFive, .anniversaryTen: "rosette"
+        }
+    }
 }
 
 enum FireVaultCategoryRuleField: String, Codable, CaseIterable, Identifiable {

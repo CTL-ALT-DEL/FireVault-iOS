@@ -189,6 +189,19 @@ struct NativeTechnicianSettingsView: View {
             }
 
             Section {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 142), spacing: 10)], spacing: 10) {
+                    ForEach(FireVaultTechnicianBadge.allCases) { badge in
+                        technicianBadgeButton(badge)
+                    }
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("Achievements")
+            } footer: {
+                Text("Select every badge earned by this technician. Anniversary ribbons can be added as milestones are reached.")
+            }
+
+            Section {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -254,6 +267,78 @@ struct NativeTechnicianSettingsView: View {
             Spacer(minLength: 0)
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(NativeShellPalette.green)
+        }
+    }
+
+    private func technicianBadgeButton(_ badge: FireVaultTechnicianBadge) -> some View {
+        let selected = selectedTechnicianBadges.contains(badge.rawValue)
+        return Button {
+            var badges = selectedTechnicianBadges
+            if selected {
+                badges.remove(badge.rawValue)
+            } else {
+                badges.insert(badge.rawValue)
+            }
+            draft.technician.achievementBadges = badges.sorted()
+        } label: {
+            HStack(spacing: 9) {
+                ZStack {
+                    Circle()
+                        .fill(badgeTint(badge).opacity(selected ? 1 : 0.13))
+                    Image(systemName: badge.symbol)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(selected ? Color.white : badgeTint(badge))
+                }
+                .frame(width: 34, height: 34)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(badge.title)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(badge.detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.caption.bold())
+                    .foregroundStyle(selected ? badgeTint(badge) : Color.secondary.opacity(0.45))
+            }
+            .padding(.horizontal, 10)
+            .frame(minHeight: 54)
+            .background(
+                badgeTint(badge).opacity(selected ? 0.10 : 0.035),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(badgeTint(badge).opacity(selected ? 0.62 : 0.16), lineWidth: selected ? 1.5 : 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(badge.title)
+        .accessibilityValue(selected ? "Assigned" : "Not assigned")
+    }
+
+    private var selectedTechnicianBadges: Set<String> {
+        Set(draft.technician.achievementBadges ?? [])
+    }
+
+    private func badgeTint(_ badge: FireVaultTechnicianBadge) -> Color {
+        switch badge {
+        case .developer: NativeShellPalette.red
+        case .betaTester: NativeShellPalette.blue
+        case .contributor: .purple
+        case .anniversaryOne: .teal
+        case .anniversaryThree: .indigo
+        case .anniversaryFive: NativeShellPalette.amber
+        case .anniversaryTen: .orange
         }
     }
 }
