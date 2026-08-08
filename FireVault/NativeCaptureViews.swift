@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import AVFoundation
 import VisionKit
 import CoreImage.CIFilterBuiltins
 import CoreLocation
@@ -1219,16 +1220,43 @@ struct NativeCameraCaptureView: UIViewControllerRepresentable {
     let account: FireVaultWorkspaceAccount?
     let onCapture: (UIImage) -> Void
     let onCancel: () -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(onCapture: onCapture, onCancel: onCancel) }
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let controller = UIImagePickerController()
-        controller.sourceType = .camera
-        controller.cameraCaptureMode = .photo
-        controller.allowsEditing = false
-        controller.delegate = context.coordinator
+    func makeUIViewController(context: Context) -> FireVaultCameraViewController {
+        FireVaultCameraViewController(
+            preferences: preferences,
+            technicianName: technicianName,
+            account: account,
+            onCapture: onCapture,
+            onCancel: onCancel
+        )
+    }
+    func updateUIViewController(_ uiViewController: FireVaultCameraViewController, context: Context) {}
+}
+
+final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptureDelegate {
+    private let session = AVCaptureSession()
+    private let photoOutput = AVCapturePhotoOutput()
+    private let sessionQueue = DispatchQueue(label: "us.bannerman.firevault.camera")
+    private let photoCanvas = UIView()
+    private let previewLayer: AVCaptureVideoPreviewLayer
+    private let onCapture: (UIImage) -> Void
+    private let onCancel: () -> Void
+    private var overlayHost: UIHostingController<AnyView>?
+    private var configured = false
+
+    init(
+        preferences: FireVaultOverlayPreferences,
+        technicianName: String,
+        account: FireVaultWorkspaceAccount?,
+        onCapture: @escaping (UIImage) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.onCapture = onCapture
+        self.onCancel = onCancel
+        previewLayer = AVCaptureVideoPreviewLayer(session: session)
+        super.init(nibName: nil, bundle: nil)
 
         if let account {
-            let preview = FireVaultPhotoOverlayView(
+            let overlay = FireVaultPhotoOverlayView(
                 preferences: preferences,
                 technicianName: technicianName,
                 siteName: account.name,
@@ -1241,66 +1269,164 @@ struct NativeCameraCaptureView: UIViewControllerRepresentable {
                     : nil
             )
             .allowsHitTesting(false)
-            .ignoresSafeArea()
-
-            let host = UIHostingController(rootView: AnyView(preview))
+            let host = UIHostingController(rootView: AnyView(overlay))
             host.view.backgroundColor = .clear
             host.view.isUserInteractionEnabled = false
-            let overlayContainer = FireVaultCameraOverlayContainerView(contentView: host.view)
-            overlayContainer.frame = controller.view.bounds
-            overlayContainer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            controller.cameraOverlayView = overlayContainer
-            context.coordinator.overlayHost = host
+            overlayHost = host
         }
-
-        return controller
-    }
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
-    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
-        let onCapture: (UIImage) -> Void; let onCancel: () -> Void
-        var overlayHost: UIHostingController<AnyView>?
-        init(onCapture: @escaping (UIImage) -> Void, onCancel: @escaping () -> Void) { self.onCapture = onCapture; self.onCancel = onCancel }
-        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-            guard let image = info[.originalImage] as? UIImage else { onCancel(); return }
-            onCapture(image)
-        }
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { onCancel() }
-    }
-}
-
-private final class FireVaultCameraOverlayContainerView: UIView {
-    private let contentView: UIView
-
-    init(contentView: UIView) {
-        self.contentView = contentView
-        super.init(frame: .zero)
-        backgroundColor = .clear
-        isUserInteractionEnabled = false
-        addSubview(contentView)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        guard bounds.width > 0, bounds.height > 0 else { return }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        photoCanvas.backgroundColor = .black
+        photoCanvas.clipsToBounds = true
+        view.addSubview(photoCanvas)
+        previewLayer.videoGravity = .resizeAspectFill
+        photoCanvas.layer.addSublayer(previewLayer)
 
-        let photoSize: CGSize
-        if bounds.width > bounds.height {
-            let height = bounds.height
-            photoSize = CGSize(width: min(bounds.width, height * 4 / 3), height: height)
-        } else {
-            let width = bounds.width
-            photoSize = CGSize(width: width, height: min(bounds.height, width * 4 / 3))
+        if let overlayView = overlayHost?.view {
+            photoCanvas.addSubview(overlayView)
         }
 
-        contentView.frame = CGRect(
-            x: (bounds.width - photoSize.width) / 2,
-            y: (bounds.height - photoSize.height) / 2,
-            width: photoSize.width,
-            height: photoSize.height
-        )
+        let cancel = UIButton(type: .system)
+        cancel.setImage(UIImage(systemName: "xmark"), for: .normal)
+        cancel.tintColor = .white
+        cancel.backgroundColor = UIColor.black.withAlphaComponent(0.58)
+        cancel.layer.cornerRadius = 22
+        cancel.addTarget(self, action: #selector(cancelCapture), for: .touchUpInside)
+        cancel.accessibilityLabel = "Cancel photo"
+        cancel.frame.size = CGSize(width: 44, height: 44)
+        view.addSubview(cancel)
+        cancel.translatesAutoresizingMaskIntoConstraints = false
+
+        let shutter = UIButton(type: .system)
+        shutter.setImage(UIImage(systemName: "camera.fill"), for: .normal)
+        shutter.tintColor = .black
+        shutter.backgroundColor = .white
+        shutter.layer.cornerRadius = 34
+        shutter.layer.borderWidth = 4
+        shutter.layer.borderColor = UIColor.white.withAlphaComponent(0.42).cgColor
+        shutter.addTarget(self, action: #selector(capturePhoto), for: .touchUpInside)
+        shutter.accessibilityLabel = "Take photo"
+        view.addSubview(shutter)
+        shutter.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            cancel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            cancel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
+            cancel.widthAnchor.constraint(equalToConstant: 44),
+            cancel.heightAnchor.constraint(equalToConstant: 44),
+            shutter.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            shutter.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+            shutter.widthAnchor.constraint(equalToConstant: 68),
+            shutter.heightAnchor.constraint(equalToConstant: 68)
+        ])
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        requestCameraAndStart()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        sessionQueue.async { [session] in
+            if session.isRunning { session.stopRunning() }
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let available = view.bounds.inset(by: view.safeAreaInsets).insetBy(dx: 0, dy: 76)
+        let landscape = available.width > available.height
+        let canvasSize: CGSize
+        if landscape {
+            let height = available.height
+            canvasSize = CGSize(width: min(available.width, height * 4 / 3), height: height)
+        } else {
+            let width = available.width
+            canvasSize = CGSize(width: width, height: min(available.height, width * 4 / 3))
+        }
+        photoCanvas.frame = CGRect(
+            x: available.midX - canvasSize.width / 2,
+            y: available.midY - canvasSize.height / 2,
+            width: canvasSize.width,
+            height: canvasSize.height
+        ).integral
+        previewLayer.frame = photoCanvas.bounds
+        overlayHost?.view.frame = photoCanvas.bounds
+        updateVideoRotation()
+    }
+
+    private func requestCameraAndStart() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            configureAndStart()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                guard granted else {
+                    DispatchQueue.main.async { self?.onCancel() }
+                    return
+                }
+                self?.configureAndStart()
+            }
+        default:
+            onCancel()
+        }
+    }
+
+    private func configureAndStart() {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            if !configured {
+                session.beginConfiguration()
+                session.sessionPreset = .photo
+                defer { session.commitConfiguration() }
+                guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                      let input = try? AVCaptureDeviceInput(device: camera),
+                      session.canAddInput(input), session.canAddOutput(photoOutput) else { return }
+                session.addInput(input)
+                session.addOutput(photoOutput)
+                configured = true
+            }
+            if !session.isRunning { session.startRunning() }
+        }
+    }
+
+    @objc private func cancelCapture() { onCancel() }
+
+    @objc private func capturePhoto() {
+        updateVideoRotation()
+        let settings = AVCapturePhotoSettings()
+        settings.flashMode = .auto
+        photoOutput.capturePhoto(with: settings, delegate: self)
+    }
+
+    private func updateVideoRotation() {
+        let angle: CGFloat = switch view.window?.windowScene?.interfaceOrientation {
+        case .landscapeLeft: 0
+        case .landscapeRight: 180
+        case .portraitUpsideDown: 270
+        default: 90
+        }
+        if let connection = previewLayer.connection, connection.isVideoRotationAngleSupported(angle) {
+            connection.videoRotationAngle = angle
+        }
+        if let connection = photoOutput.connection(with: .video), connection.isVideoRotationAngleSupported(angle) {
+            connection.videoRotationAngle = angle
+        }
+    }
+
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        guard error == nil, let data = photo.fileDataRepresentation(), let image = UIImage(data: data) else {
+            onCancel()
+            return
+        }
+        onCapture(image)
     }
 }
 

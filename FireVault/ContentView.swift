@@ -247,6 +247,9 @@ private struct FireVaultBrandHeader: View {
         return "\(today.formatted(.dateTime.month(.wide))) \(components.day ?? 0) \(components.year ?? 0)"
     }
 
+    private var dayNumber: String { Date().formatted(.dateTime.day()) }
+    private var monthYear: String { Date().formatted(.dateTime.month(.abbreviated).year()).uppercased() }
+
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
             FireVaultProWordmark(fontSize: 15, proFontSize: 6.8, tracking: 1.35)
@@ -254,25 +257,46 @@ private struct FireVaultBrandHeader: View {
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(weekday)
-                    .font(.system(size: 17, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black, radius: 3.5, x: 0, y: 2)
-                    .shadow(color: .black.opacity(0.82), radius: 1, x: 0, y: 1)
-                    .lineLimit(1)
+            HStack(spacing: 7) {
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(weekday.uppercased())
+                        .font(.system(size: 13, weight: .black, design: .rounded))
+                        .tracking(0.7)
+                        .foregroundStyle(.white)
+                        .shadow(color: .black, radius: 3.5, x: 0, y: 2)
+                        .lineLimit(1)
 
-                Text(displayDate)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.86))
-                    .shadow(
-                        color: colorScheme == .light ? .black : .black.opacity(0.82),
-                        radius: colorScheme == .light ? 3.25 : 2,
-                        x: 0,
-                        y: colorScheme == .light ? 2 : 1
-                    )
-                    .shadow(color: .black.opacity(0.72), radius: 1, x: 0, y: 1)
-                    .lineLimit(1)
+                    Text(monthYear)
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .tracking(0.55)
+                        .foregroundStyle(.white.opacity(0.86))
+                        .shadow(
+                            color: colorScheme == .light ? .black : .black.opacity(0.82),
+                            radius: colorScheme == .light ? 3.25 : 2,
+                            x: 0,
+                            y: colorScheme == .light ? 2 : 1
+                        )
+                        .lineLimit(1)
+                }
+
+                Text(dayNumber)
+                    .font(.system(size: 19, weight: .black, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background {
+                        LinearGradient(
+                            colors: [NativeShellPalette.red, NativeShellPalette.red.opacity(0.68)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(.white.opacity(0.28), lineWidth: 1)
+                    }
+                    .shadow(color: .black.opacity(colorScheme == .light ? 0.72 : 0.48), radius: 4, y: 2)
             }
             .frame(height: 37, alignment: .center)
             .accessibilityElement(children: .ignore)
