@@ -243,6 +243,7 @@ struct NativeAppShellView: View {
             NativeShellPalette.navigationBackground,
             in: RoundedRectangle(cornerRadius: 18, style: .continuous)
         )
+        .shadow(color: .black.opacity(0.24), radius: 9, x: 0, y: 4)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(NativeShellPalette.background.ignoresSafeArea(edges: .bottom))
@@ -536,9 +537,16 @@ private struct NativeNearbyView: View {
         .background(NativeShellPalette.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(.black.opacity(0.34), lineWidth: 2)
-                .blur(radius: 0.7)
-                .offset(y: 1)
+                .stroke(.black.opacity(0.58), lineWidth: 3)
+                .blur(radius: 1.25)
+                .offset(y: 1.6)
+                .mask(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.black.opacity(0.24), lineWidth: 1.5)
+                .blur(radius: 2.2)
+                .padding(2)
                 .mask(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .overlay {
@@ -2263,6 +2271,7 @@ private struct NativeSettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var search = ""
     @State private var expandedSettingGroupID: String?
+    @State private var isTechnicianGroupExpanded = false
     private let versionInfo = FireVaultVersionInfo()
 
     private var viewPreferences: FireVaultSettingsViewPreferences { settings.settingsView }
@@ -2344,8 +2353,44 @@ private struct NativeSettingsView: View {
 
     private var profileSection: some View {
         Section {
-            NavigationLink {
-                NativeTechnicianSettingsView(settings: settings)
+            DisclosureGroup(isExpanded: $isTechnicianGroupExpanded) {
+                NavigationLink {
+                    NativeTechnicianSettingsView(settings: settings)
+                } label: {
+                    Label("Technician Profile", systemImage: "person.text.rectangle")
+                }
+
+                NavigationLink {
+                    NativeSettingsViewPreferencesView(settings: settings)
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Preferred Settings View")
+                            Text(settings.settingsView.mode.title)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "rectangle.3.group")
+                            .foregroundStyle(NativeShellPalette.blue)
+                    }
+                }
+
+                NavigationLink {
+                    NativeAppearanceSettingsView(settings: settings)
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Appearance")
+                            Text(settings.appearance.title)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: settings.appearance == .light ? "sun.max.fill" : "circle.lefthalf.filled")
+                            .foregroundStyle(NativeShellPalette.amber)
+                    }
+                }
             } label: {
                 HStack(spacing: 14) {
                     Image(systemName: "person.crop.circle.fill")
@@ -2370,54 +2415,14 @@ private struct NativeSettingsView: View {
                             .lineLimit(1)
                     }
 
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption.bold())
-                        .foregroundStyle(.tertiary)
+                    Spacer(minLength: 4)
                 }
                 .padding(.vertical, 5)
                 .contentShape(Rectangle())
             }
             .accessibilityLabel(settings.preferences.technician.name.isEmpty ? "Technician Profile" : settings.preferences.technician.name)
             .accessibilityValue(payload.demoMode ? "Demo Mode" : "Field technician profile")
-            .accessibilityElement(children: .combine)
-            .accessibilityHint("Opens technician profile settings")
-
-            NavigationLink {
-                NativeSettingsViewPreferencesView(settings: settings)
-            } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Preferred Settings View")
-                        Text(settings.settingsView.mode.title)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "rectangle.3.group")
-                        .foregroundStyle(NativeShellPalette.blue)
-                }
-            }
-            .accessibilityValue(settings.settingsView.mode.title)
-            .accessibilityHint("Choose Compact, Simple, or Advanced Settings")
-
-            NavigationLink {
-                NativeAppearanceSettingsView(settings: settings)
-            } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Appearance")
-                        Text(settings.appearance.title)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: settings.appearance == .light ? "sun.max.fill" : "circle.lefthalf.filled")
-                        .foregroundStyle(NativeShellPalette.amber)
-                }
-            }
-            .accessibilityValue(settings.appearance.title)
-            .accessibilityHint("Choose Dark, Light, or System Default")
+            .accessibilityHint(isTechnicianGroupExpanded ? "Collapses technician settings" : "Expands technician settings")
         }
     }
 
