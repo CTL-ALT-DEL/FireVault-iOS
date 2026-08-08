@@ -226,7 +226,7 @@ struct FireVaultTripLogPortraitView: View {
     }
 
     private func controlDock(_ day: FireVaultBreadcrumbDay) -> some View {
-        VStack(spacing: 9) {
+        VStack(spacing: 7) {
             HStack(spacing: 10) {
                 recordingIndicator(day)
                 Spacer(minLength: 8)
@@ -237,6 +237,19 @@ struct FireVaultTripLogPortraitView: View {
                 historyMenu
                 reportButton
             }
+            .padding(9)
+            .background {
+                LinearGradient(
+                    colors: [NativeShellPalette.blue.opacity(0.17), NativeShellPalette.blue.opacity(0.07)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .stroke(NativeShellPalette.blue.opacity(0.32), lineWidth: 1)
+            }
 
             if breadcrumbs.permissionState.requiresSettings {
                 Button("Open Location Settings", systemImage: "gearshape") {
@@ -246,24 +259,6 @@ struct FireVaultTripLogPortraitView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(11)
-        .background {
-            LinearGradient(
-                colors: [
-                    indicatorTint.opacity(0.16),
-                    NativeShellPalette.surface,
-                    NativeShellPalette.blue.opacity(0.08)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(indicatorTint.opacity(0.34), lineWidth: 1)
-        }
-        .shadow(color: indicatorTint.opacity(0.10), radius: 9, y: 4)
         .accessibilityIdentifier("trip-log-portrait-controls")
     }
 
@@ -317,10 +312,13 @@ struct FireVaultTripLogPortraitView: View {
                 }
             }
         } label: {
-            Label("HISTORY", systemImage: "calendar.badge.clock")
-                .font(.subheadline.bold())
+            VStack(spacing: 3) {
+                Image(systemName: "calendar.badge.clock")
+                    .font(.system(size: 25, weight: .bold))
+                Text("HISTORY").font(.caption.bold())
+            }
                 .frame(maxWidth: .infinity)
-                .frame(height: 48)
+                .frame(height: 54)
         }
         .buttonStyle(.bordered)
         .disabled(breadcrumbs.days.isEmpty)
@@ -331,10 +329,13 @@ struct FireVaultTripLogPortraitView: View {
         Button {
             showsReport = true
         } label: {
-            Label("REPORT", systemImage: "doc.text.fill")
-                .font(.subheadline.bold())
+            VStack(spacing: 3) {
+                Image(systemName: "doc.text.fill")
+                    .font(.system(size: 25, weight: .bold))
+                Text("REPORT").font(.caption.bold())
+            }
                 .frame(maxWidth: .infinity)
-                .frame(height: 48)
+                .frame(height: 54)
         }
         .buttonStyle(.borderedProminent)
         .disabled(selectedDay == nil)
@@ -427,29 +428,27 @@ struct FireVaultTripLogPortraitView: View {
     private func summary(_ day: FireVaultBreadcrumbDay) -> some View {
         HStack(spacing: 1) {
             portraitMetric(title: "MILES", value: day.totalDistanceMeters.tripLogMiles, symbol: "road.lanes")
-            Divider().frame(height: 36)
+            Divider().frame(height: 26)
             portraitMetric(title: "STOPS", value: "\(day.stops.count)", symbol: "mappin.and.ellipse")
-            Divider().frame(height: 36)
+            Divider().frame(height: 26)
             portraitMetric(title: "TIME", value: day.elapsedTime.tripLogDuration, symbol: "clock")
         }
-        .padding(.vertical, 8)
-        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.vertical, 4)
+        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func portraitMetric(title: String, value: String, symbol: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: symbol)
-                .font(.caption)
-                .foregroundStyle(NativeShellPalette.blue)
-            Text(value)
-                .font(.headline.monospacedDigit())
+        HStack(spacing: 6) {
+            Image(systemName: symbol).font(.caption).foregroundStyle(NativeShellPalette.blue)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+                Text(value).font(.subheadline.bold().monospacedDigit())
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            Text(title)
-                .font(.caption2.bold())
-                .foregroundStyle(.secondary)
+            }
         }
+        .padding(.horizontal, 7)
         .frame(maxWidth: .infinity)
     }
 

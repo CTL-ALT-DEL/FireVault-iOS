@@ -433,13 +433,15 @@ final class FireVaultStore: ObservableObject {
     @discardableResult
     func addAccount(
         from stop: FireVaultBreadcrumbStop,
-        name: String
+        name: String,
+        address: String = ""
     ) -> FireVaultWorkspaceAccount {
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
         let account = FireVaultWorkspaceAccount(
             id: UUID().uuidString,
             name: normalizedName.isEmpty ? "New Account" : normalizedName,
-            address: "Location saved from Trip Log",
+            address: normalizedAddress.isEmpty ? "Location saved from Trip Log" : normalizedAddress,
             category: "Uncategorized",
             accountId: "",
             phone: "",

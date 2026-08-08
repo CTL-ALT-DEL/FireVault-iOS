@@ -152,7 +152,15 @@ struct FireVaultBreadcrumbDay: Codable, Identifiable, Equatable {
                 .filter { $0.id != stop.id && $0.arrival > stop.arrival }
                 .map(\.arrival)
                 .min()
-            resolved = max(stop.arrival, nextArrival ?? endedAt ?? referenceDate)
+            let boundary = nextArrival ?? endedAt ?? referenceDate
+            let stopLocation = CLLocation(latitude: stop.latitude, longitude: stop.longitude)
+            let lastNearbyPoint = points
+                .lazy
+                .filter { $0.timestamp >= stop.arrival && $0.timestamp <= boundary }
+                .filter { $0.location.distance(from: stopLocation) <= FireVaultBreadcrumbRules.stopRadius }
+                .map(\.timestamp)
+                .max()
+            resolved = max(stop.arrival, lastNearbyPoint ?? boundary)
         }
 
         guard let endedAt else { return resolved }
@@ -446,6 +454,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         departure: Date?,
         account: FireVaultWorkspaceAccount?,
         customTitle: String,
+        customAddress: String,
         technicianNote: String,
         isPersonal: Bool
     ) -> Bool {
@@ -466,6 +475,8 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             stop.assign(to: account)
             if account == nil {
                 stop.rename(customTitle)
+                let address = customAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+                stop.accountAddress = address.isEmpty ? nil : address
             }
         }
         days[dayIndex].stops[stopIndex] = stop
@@ -1171,10 +1182,12 @@ struct FireVaultBreadcrumbStopEditor: View {
     @State private var hasDeparture: Bool
     @State private var selectedAccountID: String?
     @State private var customTitle: String
+    @State private var customAddress: String
     @State private var technicianNote: String
     @State private var isPersonal: Bool
     @State private var showsAccountPicker = false
     @State private var confirmsDelete = false
+    @State private var showsGooglePlacesSetup = false
 
     init(
         breadcrumbs: FireVaultBreadcrumbStore,
@@ -1196,6 +1209,7 @@ struct FireVaultBreadcrumbStopEditor: View {
         _hasDeparture = State(initialValue: stop?.departure != nil)
         _selectedAccountID = State(initialValue: stop?.accountID)
         _customTitle = State(initialValue: stop?.customTitle ?? "")
+        _customAddress = State(initialValue: stop?.accountAddress ?? "")
         _technicianNote = State(initialValue: stop?.technicianNote ?? "")
         _isPersonal = State(initialValue: stop?.isPersonalStop ?? false)
     }
@@ -1256,6 +1270,11 @@ struct FireVaultBreadcrumbStopEditor: View {
             } message: {
                 Text("The route remains intact, but this stop will be removed from the daily log.")
             }
+            .alert("Google Places Setup Required", isPresented: $showsGooglePlacesSetup) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Connect the protected Google Places lookup through the FireVault Supabase backend before enabling automatic business matching. You can enter the stop name and address manually now.")
+            }
         }
         .tint(NativeShellPalette.blue)
     }
@@ -1305,6 +1324,13 @@ struct FireVaultBreadcrumbStopEditor: View {
                 if selectedAccount == nil {
                     TextField("Stop title", text: $customTitle)
                         .textInputAutocapitalization(.words)
+
+                    TextField("Address or location description", text: $customAddress)
+                        .textInputAutocapitalization(.words)
+
+                    Button("Check Google Places", systemImage: "mappin.and.ellipse") {
+                        showsGooglePlacesSetup = true
+                    }
 
                     Button("Add as New Account", systemImage: "building.2.crop.circle.badge.plus") {
                         createAccountFromStop()
@@ -1443,7 +1469,8 @@ struct FireVaultBreadcrumbStopEditor: View {
         }
         let account = store.addAccount(
             from: stop,
-            name: normalizedCustomTitle
+            name: normalizedCustomTitle,
+            address: customAddress
         )
         selectedAccountID = account.id
         isPersonal = false
@@ -1458,6 +1485,7 @@ struct FireVaultBreadcrumbStopEditor: View {
             departure: hasDeparture ? departure : nil,
             account: isPersonal ? nil : selectedAccount,
             customTitle: isPersonal || selectedAccount != nil ? "" : normalizedCustomTitle,
+            customAddress: isPersonal || selectedAccount != nil ? "" : customAddress,
             technicianNote: technicianNote,
             isPersonal: isPersonal
         )

@@ -64,6 +64,14 @@ struct FireVaultBreadcrumbReport: Equatable {
             arrival.formatted(date: .omitted, time: .shortened)
         }
 
+        var departureText: String {
+            departure?.formatted(date: .omitted, time: .shortened) ?? "In progress"
+        }
+
+        var reportTimeText: String {
+            "Arr \(arrivalText)\nDep \(departureText)"
+        }
+
         var durationText: String {
             FireVaultBreadcrumbReport.durationText(duration)
         }
@@ -82,9 +90,11 @@ struct FireVaultBreadcrumbReport: Equatable {
         var addressText: String {
             switch classification {
             case .account:
-                accountAddress
+                if !accountAddress.isEmpty { accountAddress }
+                else { "Approx. \(mapLatitude.formatted(.number.precision(.fractionLength(5)))), \(mapLongitude.formatted(.number.precision(.fractionLength(5))))" }
             case .unassigned:
-                "Needs review and account assignment"
+                if !accountAddress.isEmpty { accountAddress }
+                else { "Approx. \(mapLatitude.formatted(.number.precision(.fractionLength(5)))), \(mapLongitude.formatted(.number.precision(.fractionLength(5))))" }
             case .personal:
                 "Private location"
             }
@@ -372,11 +382,13 @@ struct FireVaultBreadcrumbReport: Equatable {
     }
 
     static func durationText(_ interval: TimeInterval) -> String {
-        let totalMinutes = max(0, Int(interval / 60))
-        let hours = totalMinutes / 60
-        let minutes = totalMinutes % 60
+        let totalSeconds = max(0, Int(interval.rounded()))
+        let hours = totalSeconds / 3_600
+        let minutes = (totalSeconds % 3_600) / 60
+        let seconds = totalSeconds % 60
         if hours > 0 { return "\(hours)h \(minutes)m" }
-        return "\(minutes)m"
+        if minutes > 0 { return "\(minutes)m \(seconds)s" }
+        return "\(seconds)s"
     }
 }
 
@@ -1014,7 +1026,7 @@ struct FireVaultBreadcrumbReportView: View {
     private var stopTableHeader: some View {
         HStack(spacing: 8) {
             Text("#").frame(width: 22, alignment: .leading)
-            Text("TIME").frame(width: 58, alignment: .leading)
+            Text("ARRIVE / DEPART").frame(width: 76, alignment: .leading)
             Text("LOCATION / ACCOUNT").frame(maxWidth: .infinity, alignment: .leading)
             Text("DURATION").frame(width: 58, alignment: .trailing)
         }
@@ -1029,8 +1041,12 @@ struct FireVaultBreadcrumbReportView: View {
         HStack(alignment: .top, spacing: 8) {
             Text("\(visit.sequence)")
                 .frame(width: 22, alignment: .leading)
-            Text(visit.arrivalText)
-                .frame(width: 58, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Arr \(visit.arrivalText)")
+                Text("Dep \(visit.departureText)")
+            }
+                .font(.caption2.monospacedDigit())
+                .frame(width: 76, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
                 Text(visit.title).fontWeight(.semibold)
                 if !visit.addressText.isEmpty {
@@ -1125,9 +1141,12 @@ struct FireVaultBreadcrumbReportView: View {
                     } else {
                         ForEach(day.visits) { visit in
                             HStack(alignment: .top, spacing: 8) {
-                                Text(visit.arrivalText)
-                                    .font(.caption.monospacedDigit())
-                                    .frame(width: 62, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("Arr \(visit.arrivalText)")
+                                    Text("Dep \(visit.departureText)")
+                                }
+                                    .font(.caption2.monospacedDigit())
+                                    .frame(width: 82, alignment: .leading)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(visit.title).font(.caption.bold())
                                     Text(visit.addressText)
@@ -1851,7 +1870,7 @@ enum FireVaultTripLogPDFRenderer {
         UIBezierPath(ovalIn: badge).fill()
         drawCenteredText("\(visit.sequence)", font: .systemFont(ofSize: 7.5, weight: .bold), color: .white, rect: badge)
 
-        drawText(visit.timeText, font: .monospacedSystemFont(ofSize: 7.2, weight: .regular), color: .darkGray, x: 76, y: y + 10, width: 88)
+        drawText(visit.reportTimeText, font: .monospacedSystemFont(ofSize: 7.2, weight: .regular), color: .darkGray, x: 76, y: y + 7, width: 88)
         var locationY = y + 7
         locationY += drawText(visit.title, font: .systemFont(ofSize: 9, weight: .semibold), color: navy, x: 170, y: locationY, width: 305) + 1
         if !visit.addressText.isEmpty {
