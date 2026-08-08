@@ -271,8 +271,8 @@ enum FireVaultOverlayTemplateFormatter {
 
 struct FireVaultProWordmark: View {
     var fireColor: Color = NativeShellPalette.red
-    var vaultColor: Color = .white
-    var proColor: Color = .white
+    var vaultColor: Color = .primary
+    var proColor: Color = .primary
     var proBackground: Color = NativeShellPalette.red
     var fontSize: CGFloat = 15
     var proFontSize: CGFloat = 7

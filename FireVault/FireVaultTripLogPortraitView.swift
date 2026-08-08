@@ -206,7 +206,7 @@ struct FireVaultTripLogPortraitView: View {
     }
 
     private func compactMapDate(_ day: FireVaultBreadcrumbDay) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .center, spacing: 3) {
             Text(day.startedAt.formatted(.dateTime.weekday(.wide)).uppercased())
                 .font(.caption2.bold())
                 .tracking(1)
@@ -217,6 +217,7 @@ struct FireVaultTripLogPortraitView: View {
             Text(day.startedAt.formatted(date: .abbreviated, time: .omitted))
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 8)
@@ -509,24 +510,25 @@ struct FireVaultTripLogPortraitView: View {
         tint: Color,
         showsDisclosure: Bool = false
     ) -> some View {
-        HStack(alignment: .top, spacing: 11) {
+        HStack(alignment: .center, spacing: 9) {
             Image(systemName: symbol)
-                .font(.subheadline.bold())
+                .font(.caption.bold())
                 .foregroundStyle(tint)
-                .frame(width: 36, height: 36)
+                .frame(width: 28, height: 28)
                 .background(tint.opacity(0.14), in: Circle())
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(timeText)
-                    .font(.caption.monospacedDigit())
+                    .font(.caption2.monospacedDigit().weight(.semibold))
                     .foregroundStyle(.secondary)
                 Text(title)
-                    .font(.headline)
+                    .font(.subheadline.bold())
                     .foregroundStyle(.primary)
                 Text(subtitle)
-                    .font(.footnote)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
             }
 
             Spacer(minLength: 0)
@@ -534,10 +536,9 @@ struct FireVaultTripLogPortraitView: View {
                 Image(systemName: "chevron.right")
                     .font(.caption.bold())
                     .foregroundStyle(.tertiary)
-                    .padding(.top, 20)
             }
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 7)
         .contentShape(Rectangle())
     }
 

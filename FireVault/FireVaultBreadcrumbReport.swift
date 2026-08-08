@@ -841,7 +841,7 @@ struct FireVaultBreadcrumbReportView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                .frame(height: 220)
+                .aspectRatio(1, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             } else {
                 Map(initialPosition: .region(region), interactionModes: []) {
@@ -864,7 +864,7 @@ struct FireVaultBreadcrumbReportView: View {
                     }
                 }
                 .mapStyle(.standard(elevation: .flat))
-                .frame(height: 220)
+                .aspectRatio(1, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -1124,7 +1124,7 @@ struct FireVaultBreadcrumbReportView: View {
                 routeSets: [report.routePoints],
                 stops: report.mapStops,
                 region: report.mapRegion,
-                size: .init(width: 540, height: 220)
+                size: .init(width: 480, height: 480)
             )
             let data = FireVaultTripLogPDFRenderer.daily(
                 report: report,
@@ -1137,7 +1137,7 @@ struct FireVaultBreadcrumbReportView: View {
                 routeSets: weeklyReport.routeSets,
                 stops: detail == .detailed ? weeklyReport.mapStops : [],
                 region: weeklyReport.mapRegion,
-                size: .init(width: 540, height: 220)
+                size: .init(width: 480, height: 480)
             )
             let data = FireVaultTripLogPDFRenderer.weekly(
                 report: weeklyReport,
@@ -1161,7 +1161,7 @@ struct FireVaultBreadcrumbReportView: View {
                 routeSets: [report.routePoints],
                 stops: report.mapStops,
                 region: report.mapRegion,
-                size: .init(width: 540, height: 220)
+                size: .init(width: 480, height: 480)
             )
             pdfData = FireVaultTripLogPDFRenderer.daily(
                 report: report,
@@ -1173,7 +1173,7 @@ struct FireVaultBreadcrumbReportView: View {
                 routeSets: weeklyReport.routeSets,
                 stops: detail == .detailed ? weeklyReport.mapStops : [],
                 region: weeklyReport.mapRegion,
-                size: .init(width: 540, height: 220)
+                size: .init(width: 480, height: 480)
             )
             pdfData = FireVaultTripLogPDFRenderer.weekly(
                 report: weeklyReport,
@@ -1579,7 +1579,9 @@ enum FireVaultTripLogPDFRenderer {
     private static func drawMap(_ image: UIImage?, y: CGFloat) -> CGFloat {
         _ = drawSectionTitle("ROUTE MAP", y: y)
         let imageY = y + 19
-        let rect = CGRect(x: 42, y: imageY, width: 528, height: image == nil ? 62 : 140)
+        let rect = image == nil
+            ? CGRect(x: 42, y: imageY, width: 528, height: 62)
+            : CGRect(x: 146, y: imageY, width: 320, height: 320)
         if let image {
             UIGraphicsGetCurrentContext()?.saveGState()
             UIBezierPath(roundedRect: rect, cornerRadius: 12).addClip()

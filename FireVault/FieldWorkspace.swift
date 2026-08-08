@@ -608,30 +608,75 @@ struct FireVaultEditAccountSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Account") {
-                    TextField("Account name", text: $name)
-                        .textContentType(.organizationName)
-                        .focused($isTextInputFocused)
-                    TextField("Address", text: $address, axis: .vertical)
-                        .textContentType(.fullStreetAddress)
-                        .lineLimit(2...4)
-                        .focused($isTextInputFocused)
-                    TextField("Category", text: $category)
-                        .focused($isTextInputFocused)
-                    TextField("Account ID", text: $accountId)
-                        .focused($isTextInputFocused)
-                    TextField("Phone number", text: $phone)
-                        .textContentType(.telephoneNumber)
-                        .keyboardType(.phonePad)
-                        .focused($isTextInputFocused)
+                Section {
+                    HStack(spacing: 13) {
+                        Image(systemName: "building.2.crop.circle.fill")
+                            .font(.system(size: 38, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 58, height: 58)
+                            .background(FieldWorkspacePalette.blue, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("ACCOUNT DETAILS")
+                                .font(.caption.bold())
+                                .tracking(1.1)
+                                .foregroundStyle(FieldWorkspacePalette.blue)
+                            Text(normalizedName.isEmpty ? "Unnamed Account" : normalizedName)
+                                .font(.title3.bold())
+                                .lineLimit(2)
+                            Text("Update the site identity and contact information below.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 7)
+                }
+                .listRowBackground(
+                    LinearGradient(
+                        colors: [FieldWorkspacePalette.blue.opacity(0.13), FieldWorkspacePalette.surface],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+                Section("Site Identity") {
+                    accountEditField("Account Name", symbol: "building.2.fill", text: $name)
+                    accountEditField("Street Address", symbol: "mappin.and.ellipse", text: $address, lineLimit: 3)
+                    accountEditField("Category", symbol: "tag.fill", text: $category)
+                    accountEditField("Account ID", symbol: "number", text: $accountId)
+                }
+
+                Section("Contact") {
+                    HStack(alignment: .top, spacing: 11) {
+                        Image(systemName: "phone.fill")
+                            .foregroundStyle(FieldWorkspacePalette.green)
+                            .frame(width: 32, height: 32)
+                            .background(FieldWorkspacePalette.green.opacity(0.13), in: Circle())
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("PHONE NUMBER")
+                                .font(.caption2.bold())
+                                .tracking(0.65)
+                                .foregroundStyle(.secondary)
+                            TextField("(xxx) xxx-xxxx", text: $phone)
+                                .textContentType(.telephoneNumber)
+                                .keyboardType(.phonePad)
+                                .font(.body.weight(.semibold))
+                                .focused($isTextInputFocused)
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
 
                 Section {
-                    Text("Editing these details will not change this account's map coordinates, field records, files, equipment, or history.")
+                    Label(
+                        "Map coordinates, field records, files, equipment, and history remain unchanged.",
+                        systemImage: "checkmark.shield.fill"
+                    )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(FieldWorkspacePalette.background)
             .navigationTitle("Edit Account")
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
@@ -659,8 +704,34 @@ struct FireVaultEditAccountSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
         .accessibilityIdentifier("edit-account-\(accountID)")
+    }
+
+    private func accountEditField(
+        _ title: String,
+        symbol: String,
+        text: Binding<String>,
+        lineLimit: Int = 1
+    ) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: symbol)
+                .foregroundStyle(FieldWorkspacePalette.blue)
+                .frame(width: 32, height: 32)
+                .background(FieldWorkspacePalette.blue.opacity(0.13), in: Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title.uppercased())
+                    .font(.caption2.bold())
+                    .tracking(0.65)
+                    .foregroundStyle(.secondary)
+                TextField(title, text: text, axis: lineLimit > 1 ? .vertical : .horizontal)
+                    .lineLimit(1...lineLimit)
+                    .font(.body.weight(.semibold))
+                    .focused($isTextInputFocused)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 
@@ -672,6 +743,15 @@ private struct MapArrivalView: View {
     @State private var isShowingEditor = false
     @State private var isImportingCSV = false
     @State private var importNotice: FireVaultLocationImportNotice?
+
+    private var sortedLocations: [FireVaultWorkspaceLocation] {
+        account.locations.sorted { lhs, rhs in
+            let leftRank = locationSortRank(lhs)
+            let rightRank = locationSortRank(rhs)
+            if leftRank != rightRank { return leftRank < rightRank }
+            return lhs.label.localizedCaseInsensitiveCompare(rhs.label) == .orderedAscending
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -713,11 +793,14 @@ private struct MapArrivalView: View {
                     )
                     .padding(.top, 30)
                 } else {
-                    ForEach(account.locations) { location in
-                        Button {
-                            if let coordinate = location.coordinate {
-                                openWalkingRoute(to: coordinate, named: location.label)
-                            }
+                    ForEach(sortedLocations) { location in
+                        NavigationLink {
+                            ArrivalPointDetailView(
+                                account: account,
+                                location: location,
+                                store: store,
+                                locationService: locationService
+                            )
                         } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: locationSymbol(location.type))
@@ -734,7 +817,7 @@ private struct MapArrivalView: View {
                                 }
                                 Spacer()
                                 if location.coordinate != nil {
-                                    Image(systemName: "figure.walk")
+                                    Image(systemName: "chevron.right")
                                         .foregroundStyle(FieldWorkspacePalette.blue)
                                 }
                             }
@@ -828,7 +911,7 @@ private struct MapArrivalView: View {
             if !account.locations.isEmpty {
                 Divider()
                 Section("Edit Saved Locations") {
-                    ForEach(account.locations) { location in
+                    ForEach(sortedLocations) { location in
                         Button(location.label, systemImage: locationSymbol(location.type)) {
                             editingLocation = location
                             isShowingEditor = true
@@ -845,13 +928,12 @@ private struct MapArrivalView: View {
         .accessibilityHint("Adds, imports, or edits saved arrival points")
     }
 
-    private func openWalkingRoute(to coordinate: CLLocationCoordinate2D, named name: String) {
-        let item = MKMapItem(location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude), address: nil)
-        item.name = name
-        item.openInMaps(launchOptions: [
-            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking,
-            MKLaunchOptionsMapTypeKey: MKMapType.hybrid.rawValue
-        ])
+    private func locationSortRank(_ location: FireVaultWorkspaceLocation) -> Int {
+        let searchable = "\(location.label) \(location.type)".lowercased()
+        if searchable.contains("parking") || searchable.contains("park here") { return 0 }
+        if searchable.contains("front entrance") || searchable.contains("main entrance") { return 1 }
+        if searchable.contains("entrance") { return 2 }
+        return 3
     }
 
     private func importLocations(from selection: Result<[URL], Error>) {
@@ -890,6 +972,198 @@ private struct MapArrivalView: View {
         if value.contains("panel") { return "rectangle.3.group.bubble.left" }
         if value.contains("riser") || value.contains("pump") { return "drop.fill" }
         return "mappin"
+    }
+}
+
+private struct ArrivalPointDetailView: View {
+    let account: FireVaultWorkspaceAccount
+    @ObservedObject var store: FireVaultStore
+    @ObservedObject var locationService: FireVaultLocationService
+
+    @State private var location: FireVaultWorkspaceLocation
+    @State private var coordinate: CLLocationCoordinate2D?
+    @State private var mapPosition: MapCameraPosition
+    @State private var isShowingEditor = false
+    @State private var positionStatus = "Drag on the map to move this pin"
+
+    init(
+        account: FireVaultWorkspaceAccount,
+        location: FireVaultWorkspaceLocation,
+        store: FireVaultStore,
+        locationService: FireVaultLocationService
+    ) {
+        self.account = account
+        self.store = store
+        self.locationService = locationService
+        _location = State(initialValue: location)
+        _coordinate = State(initialValue: location.coordinate)
+        let center = location.coordinate ?? account.coordinate ?? .init(latitude: 39.5, longitude: -98.35)
+        _mapPosition = State(initialValue: .region(.init(
+            center: center,
+            span: .init(latitudeDelta: 0.00032, longitudeDelta: 0.00032)
+        )))
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            MapReader { proxy in
+                Map(position: $mapPosition, interactionModes: []) {
+                    if let coordinate {
+                        Annotation(location.label, coordinate: coordinate) {
+                            VStack(spacing: 2) {
+                                Image(systemName: "mappin.circle.fill")
+                                    .font(.system(size: 34, weight: .bold))
+                                    .foregroundStyle(location.resolvedPinColor.color)
+                                    .background(.white, in: Circle())
+                                    .shadow(radius: 5, y: 3)
+                                Text(location.label)
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(.black.opacity(0.82), in: Capsule())
+                            }
+                        }
+                    }
+                }
+                .mapStyle(.hybrid(elevation: .realistic))
+                .gesture(
+                    DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                        .onChanged { value in
+                            guard let updated = proxy.convert(value.location, from: .local) else { return }
+                            coordinate = updated
+                            positionStatus = "Release to save pin position"
+                        }
+                        .onEnded { _ in
+                            savePinPosition()
+                        }
+                )
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(.white.opacity(0.16), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.28), radius: 10, y: 6)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 9) {
+                    Image(systemName: "hand.draw.fill")
+                        .foregroundStyle(FieldWorkspacePalette.blue)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(positionStatus)
+                            .font(.subheadline.bold())
+                        if let coordinate {
+                            Text(String(format: "%.6f, %.6f", coordinate.latitude, coordinate.longitude))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 10) {
+                    Button("Edit Point", systemImage: "pencil") {
+                        isShowingEditor = true
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth: .infinity)
+
+                    Button("Walk Here", systemImage: "figure.walk") {
+                        openWalkingRoute()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                    .disabled(coordinate == nil)
+                }
+            }
+            .padding(14)
+            .background(FieldWorkspacePalette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background(FieldWorkspacePalette.background.ignoresSafeArea())
+        .navigationTitle(location.label)
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $isShowingEditor) {
+            FireVaultLocationEditorSheet(
+                accountName: account.name,
+                accountCoordinate: account.coordinate,
+                location: location,
+                locationService: locationService
+            ) { draft in
+                let didSave = store.updateLocation(
+                    accountID: account.id,
+                    locationID: location.id,
+                    label: draft.label,
+                    subtitle: draft.subtitle,
+                    type: draft.type,
+                    plusCode: draft.plusCode,
+                    latitude: draft.latitude,
+                    longitude: draft.longitude,
+                    pinColor: draft.pinColor.rawValue
+                )
+                guard didSave else { return false }
+                location.label = draft.label
+                location.subtitle = draft.subtitle
+                location.type = draft.type
+                location.plusCode = draft.plusCode
+                location.latitude = draft.latitude
+                location.longitude = draft.longitude
+                location.pinColor = draft.pinColor.rawValue
+                coordinate = location.coordinate
+                if let coordinate {
+                    zoom(to: coordinate)
+                }
+                positionStatus = "Location details saved"
+                return true
+            }
+        }
+    }
+
+    private func savePinPosition() {
+        guard let coordinate else { return }
+        let didSave = store.updateLocation(
+            accountID: account.id,
+            locationID: location.id,
+            label: location.label,
+            subtitle: location.subtitle,
+            type: location.type,
+            plusCode: location.plusCode,
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            pinColor: location.resolvedPinColor.rawValue
+        )
+        guard didSave else {
+            positionStatus = "Pin position could not be saved"
+            return
+        }
+        location.latitude = coordinate.latitude
+        location.longitude = coordinate.longitude
+        positionStatus = "Pin position saved"
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    private func zoom(to coordinate: CLLocationCoordinate2D) {
+        mapPosition = .region(.init(
+            center: coordinate,
+            span: .init(latitudeDelta: 0.00032, longitudeDelta: 0.00032)
+        ))
+    }
+
+    private func openWalkingRoute() {
+        guard let coordinate else { return }
+        let item = MKMapItem(
+            location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude),
+            address: nil
+        )
+        item.name = location.label
+        item.openInMaps(launchOptions: [
+            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking,
+            MKLaunchOptionsMapTypeKey: MKMapType.hybrid.rawValue
+        ])
     }
 }
 
@@ -1251,8 +1525,8 @@ private struct WorkspaceMap: View {
         return .init(
             center: center,
             span: .init(
-                latitudeDelta: max(0.0022, (latitudes.max()! - latitudes.min()!) * 1.35),
-                longitudeDelta: max(0.0022, (longitudes.max()! - longitudes.min()!) * 1.35)
+                latitudeDelta: max(0.00055, (latitudes.max()! - latitudes.min()!) * 1.28),
+                longitudeDelta: max(0.00055, (longitudes.max()! - longitudes.min()!) * 1.28)
             )
         )
     }
@@ -1265,20 +1539,20 @@ private struct WorkspaceMap: View {
             }
             ForEach(validLocations) { location in
                 if let coordinate = location.coordinate {
-                    Annotation(location.label, coordinate: coordinate) {
+                    Annotation(location.label, coordinate: coordinate, anchor: .bottom) {
                         if isParkingLocation(location) {
-                            HStack(spacing: 5) {
-                                Circle()
-                                    .fill(FieldWorkspacePalette.red)
-                                    .overlay(Circle().stroke(.white, lineWidth: 2))
-                                    .frame(width: 17, height: 17)
+                            VStack(spacing: 0) {
                                 Text("PARK HERE")
                                     .font(.caption2.bold())
                                     .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .background(.black.opacity(0.84), in: Capsule())
+                                Image(systemName: "arrowtriangle.down.fill")
+                                    .font(.system(size: 15, weight: .black))
+                                    .foregroundStyle(FieldWorkspacePalette.red)
+                                    .shadow(color: .white.opacity(0.9), radius: 0, x: 0, y: 1)
                             }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(.black.opacity(0.82), in: Capsule())
                             .shadow(radius: 4, y: 2)
                             .accessibilityLabel("Park here, \(location.label)")
                         } else {
