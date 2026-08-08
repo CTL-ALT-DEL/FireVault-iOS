@@ -247,9 +247,6 @@ private struct FireVaultBrandHeader: View {
         return "\(today.formatted(.dateTime.month(.wide))) \(components.day ?? 0) \(components.year ?? 0)"
     }
 
-    private var dayNumber: String { Date().formatted(.dateTime.day()) }
-    private var monthYear: String { Date().formatted(.dateTime.month(.abbreviated).year()).uppercased() }
-
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
             FireVaultProWordmark(fontSize: 15, proFontSize: 6.8, tracking: 1.35)
@@ -257,48 +254,52 @@ private struct FireVaultBrandHeader: View {
 
             Spacer()
 
-            HStack(spacing: 7) {
-                VStack(alignment: .trailing, spacing: 0) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(NativeShellPalette.red)
+                    .frame(width: 3, height: 25)
+                    .shadow(color: NativeShellPalette.red.opacity(0.48), radius: 4)
+
+                VStack(alignment: .leading, spacing: 0) {
                     Text(weekday.uppercased())
-                        .font(.system(size: 13, weight: .black, design: .rounded))
-                        .tracking(0.7)
-                        .foregroundStyle(.white)
-                        .shadow(color: .black, radius: 3.5, x: 0, y: 2)
+                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .tracking(1)
+                        .foregroundStyle(NativeShellPalette.red)
+                        .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
                         .lineLimit(1)
 
-                    Text(monthYear)
+                    Text(displayDate.uppercased())
                         .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .tracking(0.55)
-                        .foregroundStyle(.white.opacity(0.86))
+                        .tracking(0.45)
+                        .foregroundStyle(.white)
                         .shadow(
-                            color: colorScheme == .light ? .black : .black.opacity(0.82),
-                            radius: colorScheme == .light ? 3.25 : 2,
+                            color: colorScheme == .light ? .black : .black.opacity(0.78),
+                            radius: colorScheme == .light ? 3 : 2,
                             x: 0,
-                            y: colorScheme == .light ? 2 : 1
+                            y: 1
                         )
                         .lineLimit(1)
                 }
 
-                Text(dayNumber)
-                    .font(.system(size: 19, weight: .black, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
-                    .background {
-                        LinearGradient(
-                            colors: [NativeShellPalette.red, NativeShellPalette.red.opacity(0.68)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(.white.opacity(0.28), lineWidth: 1)
-                    }
-                    .shadow(color: .black.opacity(colorScheme == .light ? 0.72 : 0.48), radius: 4, y: 2)
+                Image(systemName: "calendar.badge.clock")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.88))
             }
-            .frame(height: 37, alignment: .center)
+            .padding(.horizontal, 9)
+            .frame(height: 36, alignment: .center)
+            .background {
+                LinearGradient(
+                    colors: [.black, Color(white: 0.13)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(.white.opacity(0.14), lineWidth: 0.8)
+            }
+            .shadow(color: .black.opacity(colorScheme == .light ? 0.7 : 0.38), radius: 5, y: 2)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Today, \(weekday), \(displayDate)")
         }

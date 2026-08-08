@@ -1498,22 +1498,9 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let available = view.bounds.inset(by: view.safeAreaInsets).insetBy(dx: 0, dy: 76)
-        let landscape = available.width > available.height
-        let canvasSize: CGSize
-        if landscape {
-            let height = available.height
-            canvasSize = CGSize(width: min(available.width, height * 4 / 3), height: height)
-        } else {
-            let width = available.width
-            canvasSize = CGSize(width: width, height: min(available.height, width * 4 / 3))
-        }
-        photoCanvas.frame = CGRect(
-            x: available.midX - canvasSize.width / 2,
-            y: available.midY - canvasSize.height / 2,
-            width: canvasSize.width,
-            height: canvasSize.height
-        ).integral
+        // Keep the live camera full-screen in every orientation. Only the
+        // SwiftUI overlay receives the new bounds and reflows its positions.
+        photoCanvas.frame = view.bounds
         previewLayer.frame = photoCanvas.bounds
         overlayHost?.view.frame = photoCanvas.bounds
         updateVideoRotation()
