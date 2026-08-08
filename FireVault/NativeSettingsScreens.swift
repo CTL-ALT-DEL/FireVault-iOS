@@ -198,7 +198,7 @@ struct NativeTechnicianSettingsView: View {
             } header: {
                 Text("Achievements")
             } footer: {
-                Text("Select every badge earned by this technician. Anniversary ribbons can be added as milestones are reached.")
+                Text("Visible for design testing. Production badges and anniversary ribbons will be assigned by the FireVault developer through Supabase.")
             }
 
             Section {

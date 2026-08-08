@@ -336,6 +336,7 @@ private struct NativeNearbyView: View {
     @State private var tripLogControlsCollapseTask: Task<Void, Never>?
     @State private var tripLogDetailIndex = 0
     @State private var selectedTripLogDetail: FireVaultTripLogDetail?
+    @State private var showsTripLogDetailPicker = false
     @State private var showsAutoRotateEditor = false
     @AppStorage("tripLog.autoRotateDetails") private var storedAutoRotateTripLogDetails = FireVaultTripLogDetail.allCases.map(\.rawValue).joined(separator: ",")
 
@@ -479,6 +480,9 @@ private struct NativeNearbyView: View {
         .sheet(isPresented: $showsAutoRotateEditor) {
             autoRotateEditor
         }
+        .sheet(isPresented: $showsTripLogDetailPicker) {
+            tripLogDetailPicker
+        }
     }
 
     private var statusHeader: some View {
@@ -559,34 +563,8 @@ private struct NativeNearbyView: View {
     }
 
     private var tripLogDetailMenu: some View {
-        Menu {
-            Button {
-                withAnimation(.easeInOut(duration: 0.35)) {
-                    selectedTripLogDetail = nil
-                }
-            } label: {
-                Label("Auto Rotate", systemImage: selectedTripLogDetail == nil ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath")
-            }
-
-            Divider()
-
-            Button {
-                showsAutoRotateEditor = true
-            } label: {
-                Label("Choose Auto Rotate Items", systemImage: "checklist")
-            }
-
-            Divider()
-
-            ForEach(FireVaultTripLogDetail.allCases) { detail in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.35)) {
-                        selectedTripLogDetail = detail
-                    }
-                } label: {
-                    Label(detail.rawValue.capitalized, systemImage: selectedTripLogDetail == detail ? "checkmark" : detail.symbol)
-                }
-            }
+        Button {
+            showsTripLogDetailPicker = true
         } label: {
             ZStack {
                 HStack(spacing: 7) {
@@ -630,6 +608,107 @@ private struct NativeNearbyView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Trip Log detail, \(displayedTripLogDetail.rawValue), \(tripLogDetailPrimaryText), \(tripLogDetailSecondaryText)")
         .accessibilityHint("Choose which Trip Log detail to display")
+    }
+
+    private var tripLogDetailPicker: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            selectedTripLogDetail = nil
+                        }
+                        showsTripLogDetailPicker = false
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.title3.bold())
+                                .foregroundStyle(NativeShellPalette.blue)
+                                .frame(width: 42, height: 42)
+                                .background(NativeShellPalette.blue.opacity(0.12), in: Circle())
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Auto Rotate")
+                                    .font(.headline)
+                                Text("Cycle through your selected live details")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: selectedTripLogDetail == nil ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selectedTripLogDetail == nil ? NativeShellPalette.blue : .secondary)
+                        }
+                        .padding(12)
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                        ForEach(FireVaultTripLogDetail.allCases) { detail in
+                            tripLogDetailChoice(detail)
+                        }
+                    }
+
+                    Button {
+                        showsTripLogDetailPicker = false
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(250))
+                            showsAutoRotateEditor = true
+                        }
+                    } label: {
+                        Label("Choose Auto Rotate Items", systemImage: "checklist")
+                            .font(.subheadline.bold())
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                }
+                .padding(16)
+            }
+            .background(NativeShellPalette.background)
+            .navigationTitle("Trip Log Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showsTripLogDetailPicker = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func tripLogDetailChoice(_ detail: FireVaultTripLogDetail) -> some View {
+        let selected = selectedTripLogDetail == detail
+        return Button {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                selectedTripLogDetail = detail
+            }
+            showsTripLogDetailPicker = false
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: detail.symbol)
+                        .font(.title3.bold())
+                        .foregroundStyle(selected ? Color.white : NativeShellPalette.blue)
+                    Spacer()
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selected ? Color.white : Color.secondary.opacity(0.5))
+                }
+                Text(detail.rawValue.capitalized)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(selected ? Color.white : Color.primary)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
+            .background(
+                selected ? NativeShellPalette.blue : NativeShellPalette.navigationBackground,
+                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .stroke(NativeShellPalette.blue.opacity(selected ? 0 : 0.22), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private var displayedTripLogDetail: FireVaultTripLogDetail {
@@ -2353,7 +2432,15 @@ private struct NativeSettingsView: View {
 
     private var profileSection: some View {
         Section {
-            DisclosureGroup(isExpanded: $isTechnicianGroupExpanded) {
+            DisclosureGroup(isExpanded: Binding(
+                get: { isTechnicianGroupExpanded },
+                set: { isExpanded in
+                    withAnimation(.snappy(duration: 0.22)) {
+                        isTechnicianGroupExpanded = isExpanded
+                        if isExpanded { expandedSettingGroupID = nil }
+                    }
+                }
+            )) {
                 NavigationLink {
                     NativeTechnicianSettingsView(settings: settings)
                 } label: {
@@ -2415,7 +2502,9 @@ private struct NativeSettingsView: View {
                             .lineLimit(1)
                     }
 
-                    Spacer(minLength: 4)
+                    Spacer(minLength: 8)
+                    technicianAchievementStrip
+                        .frame(maxWidth: 132, alignment: .center)
                 }
                 .padding(.vertical, 5)
                 .contentShape(Rectangle())
@@ -2434,6 +2523,7 @@ private struct NativeSettingsView: View {
                     set: { isExpanded in
                         withAnimation(.snappy(duration: 0.22)) {
                             expandedSettingGroupID = isExpanded ? group.id : nil
+                            if isExpanded { isTechnicianGroupExpanded = false }
                         }
                     }
                 )
@@ -2451,6 +2541,46 @@ private struct NativeSettingsView: View {
             }
         }
         .listSectionSpacing(.compact)
+    }
+
+    @ViewBuilder
+    private var technicianAchievementStrip: some View {
+        let selectedBadges = FireVaultTechnicianBadge.allCases.filter {
+            Set(settings.preferences.technician.achievementBadges ?? []).contains($0.rawValue)
+        }
+        if !selectedBadges.isEmpty {
+            HStack(spacing: -3) {
+                ForEach(Array(selectedBadges.prefix(3))) { badge in
+                    Image(systemName: badge.symbol)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 27, height: 27)
+                        .background(technicianBadgeTint(badge), in: Circle())
+                        .overlay { Circle().stroke(.white.opacity(0.85), lineWidth: 1.5) }
+                        .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+                        .accessibilityLabel(badge.title)
+                }
+                if selectedBadges.count > 3 {
+                    Text("+\(selectedBadges.count - 3)")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 6)
+                }
+            }
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    private func technicianBadgeTint(_ badge: FireVaultTechnicianBadge) -> Color {
+        switch badge {
+        case .developer: NativeShellPalette.red
+        case .betaTester: NativeShellPalette.blue
+        case .contributor: .purple
+        case .anniversaryOne: .teal
+        case .anniversaryThree: .indigo
+        case .anniversaryFive: NativeShellPalette.amber
+        case .anniversaryTen: .orange
+        }
     }
 
     private func settingsSection(_ group: FireVaultNativeSettingsGroup) -> some View {
