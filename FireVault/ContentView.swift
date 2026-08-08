@@ -251,7 +251,6 @@ private struct FireVaultBrandHeader: View {
         HStack(alignment: .top, spacing: 9) {
             FireVaultProWordmark(fontSize: 15, proFontSize: 6.8, tracking: 1.35)
             .shadow(color: .black.opacity(0.78), radius: 2, x: 0, y: 1)
-            .padding(.top, 2)
 
             Spacer()
 
@@ -280,8 +279,8 @@ private struct FireVaultBrandHeader: View {
             .accessibilityLabel("Today, \(weekday), \(displayDate)")
         }
         .padding(.horizontal, 16)
-        .padding(.top, 7)
-        .frame(height: 48, alignment: .top)
+        .padding(.top, 2)
+        .frame(height: 43, alignment: .top)
         .background(NativeShellPalette.background)
         .overlay(alignment: .bottom) {
             Rectangle()

@@ -642,7 +642,7 @@ struct FireVaultOverlayPreview: View {
         }
         .onAppear { stageEdits() }
         .accessibilityIdentifier("overlay-interactive-preview")
-        .accessibilityHint("Drag the glass overlay or FireVault Pro wordmark to place it on the photo")
+        .accessibilityHint("Drag the glass overlay or FireVault Pro logo to place it on the photo")
     }
 
     private func finishDrag(translation: CGSize, designSize: CGSize) {
@@ -783,7 +783,7 @@ struct FireVaultOverlayPlacementEditor: View {
         var title: String {
             switch self {
             case .overlay: "Overlay Size"
-            case .logo: "Wordmark Size"
+            case .logo: "Logo Size"
             }
         }
     }
@@ -968,7 +968,7 @@ struct FireVaultOverlayPlacementEditor: View {
     }
 
     private var instructionPill: some View {
-        Text("Drag the wordmark or overlay • Rotate to portrait to save")
+        Text("Drag the logo or overlay • Rotate to portrait to save")
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 14)
@@ -985,7 +985,7 @@ struct FireVaultOverlayPlacementEditor: View {
                 .font(.title2.bold())
                 .foregroundStyle(.white)
             if !hasEnteredLandscape {
-                Text("Use the full-width camera preview to position the overlay and FireVault Pro wordmark.")
+                Text("Use the full-width camera preview to position the overlay and FireVault Pro logo.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white.opacity(0.72))
                     .frame(maxWidth: 340)
@@ -1246,9 +1246,10 @@ struct NativeCameraCaptureView: UIViewControllerRepresentable {
             let host = UIHostingController(rootView: AnyView(preview))
             host.view.backgroundColor = .clear
             host.view.isUserInteractionEnabled = false
-            host.view.frame = controller.view.bounds
-            host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            controller.cameraOverlayView = host.view
+            let overlayContainer = FireVaultCameraOverlayContainerView(contentView: host.view)
+            overlayContainer.frame = controller.view.bounds
+            overlayContainer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            controller.cameraOverlayView = overlayContainer
             context.coordinator.overlayHost = host
         }
 
@@ -1264,6 +1265,42 @@ struct NativeCameraCaptureView: UIViewControllerRepresentable {
             onCapture(image)
         }
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { onCancel() }
+    }
+}
+
+private final class FireVaultCameraOverlayContainerView: UIView {
+    private let contentView: UIView
+
+    init(contentView: UIView) {
+        self.contentView = contentView
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+        addSubview(contentView)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.width > 0, bounds.height > 0 else { return }
+
+        let photoSize: CGSize
+        if bounds.width > bounds.height {
+            let height = bounds.height
+            photoSize = CGSize(width: min(bounds.width, height * 4 / 3), height: height)
+        } else {
+            let width = bounds.width
+            photoSize = CGSize(width: width, height: min(bounds.height, width * 4 / 3))
+        }
+
+        contentView.frame = CGRect(
+            x: (bounds.width - photoSize.width) / 2,
+            y: (bounds.height - photoSize.height) / 2,
+            width: photoSize.width,
+            height: photoSize.height
+        )
     }
 }
 
