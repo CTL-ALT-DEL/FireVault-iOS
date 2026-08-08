@@ -336,6 +336,7 @@ private struct NativeNearbyView: View {
     @State private var tripLogControlsCollapseTask: Task<Void, Never>?
     @State private var tripLogDetailIndex = 0
     @State private var selectedTripLogDetail: FireVaultTripLogDetail?
+    @State private var autoRotateTripLogDetails = Set(FireVaultTripLogDetail.allCases)
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -488,16 +489,16 @@ private struct NativeNearbyView: View {
                 scheduleTripLogControlsClose()
             }
             } label: {
-                HStack(spacing: 9) {
+                HStack(spacing: 7) {
                     ZStack {
                         Circle()
                             .fill(tripLogStatusTint.opacity(0.14))
                         Image(systemName: breadcrumbs.isRecording ? "location.fill" : "location")
-                            .font(.system(size: 14, weight: .bold))
+                            .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(tripLogStatusTint)
                             .symbolEffect(.pulse, options: .repeating, isActive: breadcrumbs.isRecording)
                     }
-                    .frame(width: 34, height: 34)
+                    .frame(width: 28, height: 28)
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text("TRIP LOG")
@@ -513,8 +514,8 @@ private struct NativeNearbyView: View {
                         .font(.caption2.bold())
                         .foregroundStyle(.secondary)
                 }
-                .padding(.leading, 11)
-                .padding(.trailing, 9)
+                .padding(.leading, 9)
+                .padding(.trailing, 7)
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
             }
@@ -523,12 +524,12 @@ private struct NativeNearbyView: View {
             .accessibilityHint("Shows start, pause, resume, and stop controls")
 
             Divider()
-                .frame(height: 45)
+                .frame(height: 34)
 
             tripLogDetailMenu
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minHeight: 62)
+        .frame(height: 50)
         .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -549,6 +550,21 @@ private struct NativeNearbyView: View {
 
             Divider()
 
+            Menu("Auto Rotate Items") {
+                ForEach(FireVaultTripLogDetail.allCases) { detail in
+                    Button {
+                        toggleAutoRotateDetail(detail)
+                    } label: {
+                        Label(
+                            detail.rawValue.capitalized,
+                            systemImage: autoRotateTripLogDetails.contains(detail) ? "checkmark" : detail.symbol
+                        )
+                    }
+                }
+            }
+
+            Divider()
+
             ForEach(FireVaultTripLogDetail.allCases) { detail in
                 Button {
                     withAnimation(.easeInOut(duration: 0.35)) {
@@ -559,27 +575,28 @@ private struct NativeNearbyView: View {
                 }
             }
         } label: {
-            HStack(spacing: 9) {
+            HStack(spacing: 7) {
                 Image(systemName: displayedTripLogDetail.symbol)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(NativeShellPalette.blue)
-                    .frame(width: 27)
+                    .frame(width: 23)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(displayedTripLogDetail.rawValue)
                         .font(.caption2.bold())
                         .tracking(0.8)
                         .foregroundStyle(.secondary)
-                    Text(tripLogDetailPrimaryText)
-                        .font(.subheadline.bold().monospacedDigit())
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .contentTransition(.opacity)
-                    Text(tripLogDetailSecondaryText)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .contentTransition(.opacity)
+                    HStack(spacing: 5) {
+                        Text(tripLogDetailPrimaryText)
+                            .font(.caption.bold().monospacedDigit())
+                            .foregroundStyle(.primary)
+                        Text(tripLogDetailSecondaryText)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .contentTransition(.opacity)
                 }
 
                 Spacer(minLength: 0)
@@ -588,8 +605,8 @@ private struct NativeNearbyView: View {
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -598,7 +615,24 @@ private struct NativeNearbyView: View {
     }
 
     private var displayedTripLogDetail: FireVaultTripLogDetail {
-        selectedTripLogDetail ?? FireVaultTripLogDetail.allCases[tripLogDetailIndex % FireVaultTripLogDetail.allCases.count]
+        guard selectedTripLogDetail == nil else { return selectedTripLogDetail! }
+        let choices = activeAutoRotateTripLogDetails
+        return choices[tripLogDetailIndex % choices.count]
+    }
+
+    private var activeAutoRotateTripLogDetails: [FireVaultTripLogDetail] {
+        let choices = FireVaultTripLogDetail.allCases.filter(autoRotateTripLogDetails.contains)
+        return choices.isEmpty ? FireVaultTripLogDetail.allCases : choices
+    }
+
+    private func toggleAutoRotateDetail(_ detail: FireVaultTripLogDetail) {
+        if autoRotateTripLogDetails.contains(detail) {
+            guard autoRotateTripLogDetails.count > 1 else { return }
+            autoRotateTripLogDetails.remove(detail)
+        } else {
+            autoRotateTripLogDetails.insert(detail)
+        }
+        tripLogDetailIndex = 0
     }
 
     private var tripLogDetailPrimaryText: String {
@@ -721,7 +755,7 @@ private struct NativeNearbyView: View {
                 return
             }
             withAnimation(.easeInOut(duration: 0.55)) {
-                tripLogDetailIndex = (tripLogDetailIndex + 1) % FireVaultTripLogDetail.allCases.count
+                tripLogDetailIndex = (tripLogDetailIndex + 1) % activeAutoRotateTripLogDetails.count
             }
         }
     }
