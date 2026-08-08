@@ -243,6 +243,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
     static let liveNearbyDistanceFilter: CLLocationDistance = 50
 
     @Published private(set) var coordinate: CLLocationCoordinate2D?
+    @Published private(set) var latestLocation: CLLocation?
     @Published private(set) var statusText = "Tap the location button to find nearby accounts"
     @Published private(set) var authorizationStatus: CLAuthorizationStatus
     @Published private(set) var isLocating = false
@@ -369,6 +370,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
             return
         }
 
+        latestLocation = location
         coordinate = location.coordinate
         isLocating = false
         statusText = isLiveNearbyTracking

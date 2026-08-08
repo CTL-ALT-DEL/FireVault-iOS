@@ -311,6 +311,8 @@ private struct NativeNearbyView: View {
     @State private var radiusPickerExpanded = false
     @State private var radiusCollapseTask: Task<Void, Never>?
     @State private var showsTripLogControls = false
+    @State private var tripLogControlsCollapseTask: Task<Void, Never>?
+    @State private var tripLogDetailIndex = 0
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -409,8 +411,12 @@ private struct NativeNearbyView: View {
                 )
             }
         }
+        .task {
+            await cycleTripLogDetails()
+        }
         .onDisappear {
             radiusCollapseTask?.cancel()
+            tripLogControlsCollapseTask?.cancel()
             guard !payload.demoMode else { return }
             locationService.stopLiveNearbyUpdates()
         }
@@ -449,8 +455,13 @@ private struct NativeNearbyView: View {
 
     private var statusHeader: some View {
         Button {
-            withAnimation(.snappy(duration: 0.24)) {
-                showsTripLogControls.toggle()
+            if showsTripLogControls {
+                closeTripLogControls()
+            } else {
+                withAnimation(.snappy(duration: 0.24)) {
+                    showsTripLogControls = true
+                }
+                scheduleTripLogControlsClose()
             }
         } label: {
             HStack(spacing: 10) {
@@ -482,6 +493,8 @@ private struct NativeNearbyView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
+                        .contentTransition(.opacity)
+                        .id(tripLogDetailIndex)
                     Text("Tap for Trip Log controls")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -509,8 +522,75 @@ private struct NativeNearbyView: View {
     }
 
     private var tripLogDetailText: String {
-        guard let day = breadcrumbs.today else { return "No trip recorded today" }
-        return "\(day.stops.count) stops • \(day.points.count) route points"
+        switch tripLogDetailIndex {
+        case 0:
+            return headingDetail
+        case 1:
+            return speedDetail
+        default:
+            return altitudeDetail
+        }
+    }
+
+    private var headingDetail: String {
+        guard let course = locationService.latestLocation?.course, course >= 0 else {
+            return "HEADING  —"
+        }
+        return "HEADING  \(Int(course.rounded()))° \(cardinalDirection(for: course))"
+    }
+
+    private var speedDetail: String {
+        guard let speed = locationService.latestLocation?.speed, speed >= 0 else {
+            return "SPEED  —"
+        }
+        return String(format: "SPEED  %.0f MPH", speed * 2.236_936)
+    }
+
+    private var altitudeDetail: String {
+        guard let location = locationService.latestLocation, location.verticalAccuracy >= 0 else {
+            return "ALTITUDE  —"
+        }
+        return "ALTITUDE  \(Int((location.altitude * 3.280_84).rounded()).formatted()) FT"
+    }
+
+    private func cardinalDirection(for course: CLLocationDirection) -> String {
+        let directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+        let normalized = course.truncatingRemainder(dividingBy: 360)
+        let index = Int((normalized + 22.5) / 45.0) % directions.count
+        return directions[index]
+    }
+
+    private func cycleTripLogDetails() async {
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(for: .seconds(8))
+            } catch {
+                return
+            }
+            withAnimation(.easeInOut(duration: 0.55)) {
+                tripLogDetailIndex = (tripLogDetailIndex + 1) % 3
+            }
+        }
+    }
+
+    private func scheduleTripLogControlsClose() {
+        tripLogControlsCollapseTask?.cancel()
+        tripLogControlsCollapseTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .seconds(5))
+            } catch {
+                return
+            }
+            closeTripLogControls()
+        }
+    }
+
+    private func closeTripLogControls() {
+        tripLogControlsCollapseTask?.cancel()
+        tripLogControlsCollapseTask = nil
+        withAnimation(.snappy(duration: 0.24)) {
+            showsTripLogControls = false
+        }
     }
 
     private var tripLogQuickControls: some View {
