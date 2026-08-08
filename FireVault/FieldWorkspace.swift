@@ -174,18 +174,25 @@ struct FireVaultWorkspaceRecent: Codable, Identifiable, Equatable {
     var date: String
 }
 
+private extension FireVaultWorkspaceLocation {
+    var arrivalMapSymbol: String {
+        let value = "\(label) \(type)".lowercased()
+        if value.contains("parking") || value.contains("park here") { return "parkingsign.circle.fill" }
+        if value.contains("entrance") || value.contains("door") { return "door.left.hand.open" }
+        if value.contains("panel") { return "rectangle.3.group.bubble.left.fill" }
+        if value.contains("riser") || value.contains("pump") { return "drop.fill" }
+        return "mappin.circle.fill"
+    }
+}
+
 struct FieldWorkspaceView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
 
-    @State private var isShowingAccountBrief = false
     @State private var isShowingAccountEditor = false
     @State private var isShowingNoteEditor = false
-    @State private var isLoadingAccountBrief = false
-    @State private var accountBrief: String?
-    @State private var accountBriefError: String?
 
     private let columns = [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)]
     private var previewCoordinate: CLLocationCoordinate2D? {
@@ -199,9 +206,6 @@ struct FieldWorkspaceView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         identity
-                        if settings.isFeatureVisible("account.brief") {
-                            accountBriefAction
-                        }
                         if settings.isFeatureVisible("account.map") {
                             mapPreview
                         }
@@ -242,15 +246,6 @@ struct FieldWorkspaceView: View {
             }
         }
         .tint(FieldWorkspacePalette.blue)
-        .sheet(isPresented: $isShowingAccountBrief) {
-            FireVaultAccountBriefSheet(
-                accountName: account.name,
-                isLoading: isLoadingAccountBrief,
-                brief: accountBrief,
-                errorMessage: accountBriefError,
-                retry: generateAccountBrief
-            )
-        }
         .sheet(isPresented: $isShowingAccountEditor) {
             FireVaultEditAccountSheet(account: account) { draft in
                 store.updateAccount(
@@ -359,57 +354,9 @@ struct FieldWorkspaceView: View {
         }
     }
 
-    private var accountBriefAction: some View {
-        Button(action: generateAccountBrief) {
-            HStack(spacing: 10) {
-                Image(systemName: "sparkles")
-                    .font(.headline.bold())
-                    .foregroundStyle(FieldWorkspacePalette.blue)
-                Text("Generate Account Brief")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.primary)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 13)
-            .padding(.vertical, 11)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                FieldWorkspacePalette.surface,
-                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(FieldWorkspacePalette.blue.opacity(0.35), lineWidth: 1)
-            }
-            .shadow(color: .black.opacity(0.20), radius: 7, y: 4)
-        }
-        .buttonStyle(.plain)
-        .disabled(isLoadingAccountBrief)
-        .accessibilityIdentifier("generate-account-brief")
-    }
-
-    private func generateAccountBrief() {
-        guard !isLoadingAccountBrief else { return }
-        accountBrief = nil
-        accountBriefError = nil
-        isLoadingAccountBrief = true
-        isShowingAccountBrief = true
-
-        Task {
-            do {
-                accountBrief = try await FireVaultAIService.shared.generateAccountBrief(for: account)
-            } catch {
-                accountBriefError = error.localizedDescription
-            }
-            isLoadingAccountBrief = false
-        }
-    }
-
     private var mapPreview: some View {
         NavigationLink {
-            MapArrivalView(account: account, store: store, locationService: locationService)
+            MapArrivalView(account: account, store: store, settings: settings, locationService: locationService)
         } label: {
             WorkspaceCard {
                 ZStack(alignment: .bottomLeading) {
@@ -502,7 +449,7 @@ struct FieldWorkspaceView: View {
 
                 if settings.isFeatureVisible("account.locations") {
                     NavigationLink {
-                        MapArrivalView(account: account, store: store, locationService: locationService)
+                        MapArrivalView(account: account, store: store, settings: settings, locationService: locationService)
                     } label: {
                         WorkspaceDestinationTile(
                             title: "Locations", count: account.locations.count,
@@ -738,11 +685,16 @@ struct FireVaultEditAccountSheet: View {
 private struct MapArrivalView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
+    @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
     @State private var editingLocation: FireVaultWorkspaceLocation?
     @State private var isShowingEditor = false
     @State private var isImportingCSV = false
     @State private var importNotice: FireVaultLocationImportNotice?
+    @State private var isShowingAccountBrief = false
+    @State private var isLoadingAccountBrief = false
+    @State private var accountBrief: String?
+    @State private var accountBriefError: String?
 
     private var sortedLocations: [FireVaultWorkspaceLocation] {
         account.locations.sorted { lhs, rhs in
@@ -756,6 +708,10 @@ private struct MapArrivalView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 9) {
+                if settings.isFeatureVisible("account.brief") {
+                    accountBriefAction
+                }
+
                 HStack {
                     Label("ARRIVAL MAP", systemImage: "mappin.and.ellipse")
                         .font(.caption.bold())
@@ -803,7 +759,7 @@ private struct MapArrivalView: View {
                             )
                         } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: locationSymbol(location.type))
+                                Image(systemName: location.arrivalMapSymbol)
                                     .font(.headline)
                                     .foregroundStyle(location.resolvedPinColor.color)
                                     .frame(width: 34, height: 34)
@@ -850,6 +806,15 @@ private struct MapArrivalView: View {
         .background(FieldWorkspacePalette.background)
         .navigationTitle("Arrival Map")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $isShowingAccountBrief) {
+            FireVaultAccountBriefSheet(
+                accountName: account.name,
+                isLoading: isLoadingAccountBrief,
+                brief: accountBrief,
+                errorMessage: accountBriefError,
+                retry: generateAccountBrief
+            )
+        }
         .sheet(isPresented: $isShowingEditor) {
             FireVaultLocationEditorSheet(
                 accountName: account.name,
@@ -912,7 +877,7 @@ private struct MapArrivalView: View {
                 Divider()
                 Section("Edit Saved Locations") {
                     ForEach(sortedLocations) { location in
-                        Button(location.label, systemImage: locationSymbol(location.type)) {
+                        Button(location.label, systemImage: location.arrivalMapSymbol) {
                             editingLocation = location
                             isShowingEditor = true
                         }
@@ -965,13 +930,49 @@ private struct MapArrivalView: View {
         }
     }
 
-    private func locationSymbol(_ type: String) -> String {
-        let value = type.lowercased()
-        if value.contains("entrance") || value.contains("door") { return "door.left.hand.open" }
-        if value.contains("parking") { return "parkingsign.circle" }
-        if value.contains("panel") { return "rectangle.3.group.bubble.left" }
-        if value.contains("riser") || value.contains("pump") { return "drop.fill" }
-        return "mappin"
+    private var accountBriefAction: some View {
+        Button(action: generateAccountBrief) {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.headline.bold())
+                    .foregroundStyle(FieldWorkspacePalette.blue)
+                Text("Generate Account Brief")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(FieldWorkspacePalette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(FieldWorkspacePalette.blue.opacity(0.35), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.20), radius: 7, y: 4)
+        }
+        .buttonStyle(.plain)
+        .disabled(isLoadingAccountBrief)
+        .accessibilityIdentifier("generate-account-brief")
+    }
+
+    private func generateAccountBrief() {
+        guard !isLoadingAccountBrief else { return }
+        accountBrief = nil
+        accountBriefError = nil
+        isLoadingAccountBrief = true
+        isShowingAccountBrief = true
+
+        Task {
+            do {
+                accountBrief = try await FireVaultAIService.shared.generateAccountBrief(for: account)
+            } catch {
+                accountBriefError = error.localizedDescription
+            }
+            isLoadingAccountBrief = false
+        }
     }
 }
 
@@ -1009,29 +1010,28 @@ private struct ArrivalPointDetailView: View {
             MapReader { proxy in
                 Map(position: $mapPosition, interactionModes: []) {
                     if let coordinate {
-                        Annotation(location.label, coordinate: coordinate) {
-                            VStack(spacing: 2) {
-                                Image(systemName: "mappin.circle.fill")
-                                    .font(.system(size: 34, weight: .bold))
-                                    .foregroundStyle(location.resolvedPinColor.color)
-                                    .background(.white, in: Circle())
-                                    .shadow(radius: 5, y: 3)
-                                Text(location.label)
-                                    .font(.caption.bold())
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(.black.opacity(0.82), in: Capsule())
-                            }
+                        Annotation("", coordinate: coordinate) {
+                            Image(systemName: location.arrivalMapSymbol)
+                                .font(.system(size: 34, weight: .bold))
+                                .foregroundStyle(location.resolvedPinColor.color)
+                                .background(.white, in: Circle())
+                                .shadow(radius: 5, y: 3)
+                                .allowsHitTesting(false)
+                                .accessibilityLabel(location.label)
                         }
                     }
                 }
-                .mapStyle(.hybrid(elevation: .realistic))
-                .gesture(
-                    DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                .mapStyle(.imagery(elevation: .realistic))
+                .contentShape(Rectangle())
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 1, coordinateSpace: .local)
                         .onChanged { value in
                             guard let updated = proxy.convert(value.location, from: .local) else { return }
-                            coordinate = updated
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                coordinate = updated
+                            }
                             positionStatus = "Release to save pin position"
                         }
                         .onEnded { _ in
@@ -1270,6 +1270,22 @@ struct FireVaultLocationDraft: Equatable {
     var pinColor: FireVaultMapPinColor
 }
 
+private enum FireVaultArrivalMapLayer: String, CaseIterable, Identifiable {
+    case standard = "Standard"
+    case satellite = "Satellite"
+    case hybrid = "Hybrid"
+
+    var id: String { rawValue }
+
+    var symbol: String {
+        switch self {
+        case .standard: "map"
+        case .satellite: "globe.americas.fill"
+        case .hybrid: "square.3.layers.3d"
+        }
+    }
+}
+
 struct FireVaultLocationEditorSheet: View {
     let accountName: String
     let accountCoordinate: CLLocationCoordinate2D?
@@ -1287,6 +1303,7 @@ struct FireVaultLocationEditorSheet: View {
     @State private var pinColor: FireVaultMapPinColor
     @State private var isShowingFullScreenPinEditor = false
     @State private var mapPosition: MapCameraPosition
+    @State private var mapLayer: FireVaultArrivalMapLayer = .satellite
     @FocusState private var isTextInputFocused: Bool
 
     init(
@@ -1481,14 +1498,49 @@ struct FireVaultLocationEditorSheet: View {
     }
 
     private var locationPinMap: some View {
+        ZStack(alignment: .topTrailing) {
+            locationPinMapForSelectedLayer
+
+            Menu {
+                Picker("Map Layer", selection: $mapLayer) {
+                    ForEach(FireVaultArrivalMapLayer.allCases) { layer in
+                        Label(layer.rawValue, systemImage: layer.symbol).tag(layer)
+                    }
+                }
+            } label: {
+                Image(systemName: "square.3.layers.3d.top.filled")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 40, height: 40)
+                    .background(.regularMaterial, in: Circle())
+                    .shadow(color: .black.opacity(0.25), radius: 5, y: 3)
+            }
+            .padding(10)
+            .accessibilityLabel("Map Layer")
+        }
+    }
+
+    @ViewBuilder
+    private var locationPinMapForSelectedLayer: some View {
+        switch mapLayer {
+        case .standard:
+            locationPinMapContent.mapStyle(.standard(elevation: .realistic))
+        case .satellite:
+            locationPinMapContent.mapStyle(.imagery(elevation: .realistic))
+        case .hybrid:
+            locationPinMapContent.mapStyle(.hybrid(elevation: .realistic))
+        }
+    }
+
+    private var locationPinMapContent: some View {
         Map(position: $mapPosition, interactionModes: []) {
             if let locationCoordinate {
                 Annotation("", coordinate: locationCoordinate) {
                     VStack(spacing: 3) {
-                        Circle()
-                            .fill(pinColor.color)
-                            .overlay(Circle().stroke(.white, lineWidth: 3))
-                            .frame(width: 24, height: 24)
+                        Image(systemName: location?.arrivalMapSymbol ?? "mappin.circle.fill")
+                            .font(.system(size: 25, weight: .bold))
+                            .foregroundStyle(pinColor.color)
+                            .background(.white, in: Circle())
                             .shadow(radius: 4, y: 2)
                         Text(label.isEmpty ? "Location" : label)
                             .font(.caption2.bold())
@@ -1500,7 +1552,6 @@ struct FireVaultLocationEditorSheet: View {
                 }
             }
         }
-        .mapStyle(.standard(elevation: .realistic))
     }
 }
 
@@ -1541,25 +1592,18 @@ private struct WorkspaceMap: View {
                 if let coordinate = location.coordinate {
                     Annotation(location.label, coordinate: coordinate, anchor: .bottom) {
                         if isParkingLocation(location) {
-                            VStack(spacing: 0) {
-                                Text("PARK HERE")
-                                    .font(.caption2.bold())
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 5)
-                                    .background(.black.opacity(0.84), in: Capsule())
-                                Image(systemName: "arrowtriangle.down.fill")
-                                    .font(.system(size: 15, weight: .black))
-                                    .foregroundStyle(FieldWorkspacePalette.red)
-                                    .shadow(color: .white.opacity(0.9), radius: 0, x: 0, y: 1)
-                            }
-                            .shadow(radius: 4, y: 2)
-                            .accessibilityLabel("Park here, \(location.label)")
-                        } else {
-                            Circle()
-                                .fill(location.resolvedPinColor.color)
+                            Image(systemName: "parkingsign.circle.fill")
+                                .font(.system(size: 32, weight: .black))
+                                .foregroundStyle(FieldWorkspacePalette.red)
+                                .background(.white, in: Circle())
                                 .overlay(Circle().stroke(.white, lineWidth: 2))
-                                .frame(width: 18, height: 18)
+                            .shadow(radius: 4, y: 2)
+                            .accessibilityLabel("Parking, \(location.label)")
+                        } else {
+                            Image(systemName: location.arrivalMapSymbol)
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundStyle(location.resolvedPinColor.color)
+                                .background(.white, in: Circle())
                                 .shadow(radius: 3, y: 1)
                                 .accessibilityLabel(location.label)
                         }
@@ -1567,7 +1611,7 @@ private struct WorkspaceMap: View {
                 }
             }
         }
-        .mapStyle(.standard(elevation: .realistic))
+        .mapStyle(.imagery(elevation: .realistic))
     }
 
     private func isParkingLocation(_ location: FireVaultWorkspaceLocation) -> Bool {
