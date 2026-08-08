@@ -201,11 +201,6 @@ struct NativeAppShellView: View {
                         Image(systemName: tab.symbol)
                             .font(.system(size: 20, weight: isSelected ? .bold : .semibold))
                             .symbolVariant(isSelected ? .fill : .none)
-                            .symbolEffect(
-                                .pulse,
-                                options: .repeating,
-                                isActive: isTripRecording
-                            )
                             .foregroundStyle(
                                 isTripRecording
                                     ? NativeShellPalette.green
@@ -214,6 +209,17 @@ struct NativeAppShellView: View {
                                         : NativeShellPalette.navigationInactive)
                             )
                             .frame(width: 34, height: 26)
+                            .overlay(alignment: .topTrailing) {
+                                if isTripRecording {
+                                    Image(systemName: "circle.fill")
+                                        .font(.system(size: 7, weight: .bold))
+                                        .foregroundStyle(NativeShellPalette.red)
+                                        .overlay { Circle().stroke(.white, lineWidth: 1.25) }
+                                        .symbolEffect(.pulse, options: .repeating)
+                                        .offset(x: 1, y: 1)
+                                        .accessibilityHidden(true)
+                                }
+                            }
                             .shadow(
                                 color: .black.opacity(isSelected || isTripRecording ? 0.52 : 0.18),
                                 radius: isSelected || isTripRecording ? 2.5 : 1.5,
@@ -570,35 +576,40 @@ private struct NativeNearbyView: View {
                 }
             }
         } label: {
-            HStack(spacing: 7) {
-                Spacer(minLength: 0)
+            ZStack {
+                HStack(spacing: 7) {
+                    Image(systemName: displayedTripLogDetail.symbol)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(NativeShellPalette.blue)
+                        .frame(width: 23)
 
-                Image(systemName: displayedTripLogDetail.symbol)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(NativeShellPalette.blue)
-                    .frame(width: 23)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(displayedTripLogDetail.rawValue)
-                        .font(.caption2.bold())
-                        .tracking(0.8)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 5) {
-                        Text(tripLogDetailPrimaryText)
-                            .font(.caption.bold().monospacedDigit())
-                            .foregroundStyle(.primary)
-                        Text(tripLogDetailSecondaryText)
-                            .font(.caption2.weight(.semibold))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(displayedTripLogDetail.rawValue)
+                            .font(.caption2.bold())
+                            .tracking(0.8)
                             .foregroundStyle(.secondary)
+                        HStack(spacing: 5) {
+                            Text(tripLogDetailPrimaryText)
+                                .font(.caption.bold().monospacedDigit())
+                                .foregroundStyle(.primary)
+                            Text(tripLogDetailSecondaryText)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .contentTransition(.opacity)
                     }
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-                    .contentTransition(.opacity)
                 }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 14)
 
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)

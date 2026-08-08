@@ -253,18 +253,21 @@ private struct FireVaultBrandHeader: View {
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 0) {
+            VStack(alignment: .trailing, spacing: 1) {
                 Text(weekday)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .font(.system(size: 17, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.82), radius: 2, x: 0, y: 1)
+                    .shadow(color: .black, radius: 3.5, x: 0, y: 2)
+                    .shadow(color: .black.opacity(0.82), radius: 1, x: 0, y: 1)
                     .lineLimit(1)
 
                 Text(displayDate)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .shadow(color: .black.opacity(0.88), radius: 2, x: 0, y: 1)
                     .lineLimit(1)
             }
+            .frame(height: 37, alignment: .center)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Today, \(weekday), \(displayDate)")
         }
