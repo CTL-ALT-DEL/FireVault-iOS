@@ -17,6 +17,7 @@ struct FireVaultBreadcrumbPoint: Codable, Identifiable, Equatable {
     var latitude: Double
     var longitude: Double
     var horizontalAccuracy: Double
+    var altitude: Double? = nil
 
     var coordinate: CLLocationCoordinate2D {
         .init(latitude: latitude, longitude: longitude)
@@ -25,9 +26,9 @@ struct FireVaultBreadcrumbPoint: Codable, Identifiable, Equatable {
     var location: CLLocation {
         .init(
             coordinate: coordinate,
-            altitude: 0,
+            altitude: altitude ?? 0,
             horizontalAccuracy: horizontalAccuracy,
-            verticalAccuracy: -1,
+            verticalAccuracy: altitude == nil ? -1 : 10,
             timestamp: timestamp
         )
     }
@@ -587,7 +588,8 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
                 timestamp: location.timestamp,
                 latitude: location.coordinate.latitude,
                 longitude: location.coordinate.longitude,
-                horizontalAccuracy: location.horizontalAccuracy
+                horizontalAccuracy: location.horizontalAccuracy,
+                altitude: location.verticalAccuracy >= 0 ? location.altitude : nil
             )
         )
         updateStopDetection(with: location, dayIndex: index)

@@ -533,6 +533,9 @@ private struct NativeNearbyView: View {
     }
 
     private var headingDetail: String {
+        if payload.demoMode {
+            return "HEADING  247° WSW"
+        }
         guard let course = locationService.latestLocation?.course, course >= 0 else {
             return "HEADING  —"
         }
@@ -540,6 +543,9 @@ private struct NativeNearbyView: View {
     }
 
     private var speedDetail: String {
+        if payload.demoMode {
+            return "SPEED  36 MPH"
+        }
         guard let speed = locationService.latestLocation?.speed, speed >= 0 else {
             return "SPEED  —"
         }
@@ -547,6 +553,9 @@ private struct NativeNearbyView: View {
     }
 
     private var altitudeDetail: String {
+        if payload.demoMode {
+            return "ALTITUDE  5,280 FT"
+        }
         guard let location = locationService.latestLocation, location.verticalAccuracy >= 0 else {
             return "ALTITUDE  —"
         }

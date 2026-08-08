@@ -370,7 +370,8 @@ enum FireVaultDemoShowroom {
                 timestamp: startTime.addingTimeInterval(Double(durationMinutes * 60) * fraction),
                 latitude: start.latitude + ((end.latitude - start.latitude) * fraction) + curve,
                 longitude: start.longitude + ((end.longitude - start.longitude) * fraction) - curve * 0.6,
-                horizontalAccuracy: 8
+                horizontalAccuracy: 8,
+                altitude: 832 + sin(fraction * .pi * 2) * 34 + Double(namespace % 7) * 5
             )
         }
     }
@@ -390,7 +391,8 @@ enum FireVaultDemoShowroom {
                 timestamp: arrival.addingTimeInterval(duration * fraction),
                 latitude: coordinate.latitude + jitter,
                 longitude: coordinate.longitude - jitter,
-                horizontalAccuracy: 6
+                horizontalAccuracy: 6,
+                altitude: 838 + Double(namespace % 9) * 4 + Double(index)
             )
         }
     }

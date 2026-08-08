@@ -13,6 +13,7 @@ import UIKit
 struct FireVaultTripLogRoutePoint: Equatable {
     let latitude: Double
     let longitude: Double
+    let altitudeFeet: Double?
 
     var coordinate: CLLocationCoordinate2D {
         .init(latitude: latitude, longitude: longitude)
@@ -146,7 +147,11 @@ struct FireVaultBreadcrumbReport: Equatable {
         totalDistanceMeters = day.totalDistanceMeters
         elapsedTime = max(0, (day.endedAt ?? generatedAt).timeIntervalSince(day.startedAt))
         routePoints = day.points.map {
-            .init(latitude: $0.latitude, longitude: $0.longitude)
+            .init(
+                latitude: $0.latitude,
+                longitude: $0.longitude,
+                altitudeFeet: $0.altitude.map { $0 * 3.280_84 }
+            )
         }
         visits = day.stops
             .sorted { $0.arrival < $1.arrival }
@@ -237,6 +242,20 @@ struct FireVaultBreadcrumbReport: Equatable {
 
     var mapRegion: MKCoordinateRegion {
         Self.region(for: routePoints.map(\.coordinate) + mapStops.map(\.coordinate))
+    }
+
+    var elevationProfileFeet: [Double] {
+        let recorded = routePoints.compactMap(\.altitudeFeet)
+        if recorded.count >= 2 { return recorded }
+
+        let isDemo = sourceDay.stops.contains {
+            ($0.accountID ?? "").hasPrefix("demo-") || ($0.technicianNote ?? "").hasPrefix("DEMO:")
+        }
+        guard isDemo, routePoints.count >= 2 else { return [] }
+        return routePoints.indices.map { index in
+            let progress = Double(index) / Double(max(1, routePoints.count - 1))
+            return 2_730 + sin(progress * .pi * 2) * 115 + sin(progress * .pi * 7) * 38
+        }
     }
 
     var filenameStem: String {
@@ -442,6 +461,10 @@ struct FireVaultTripLogWeeklyReport: Equatable {
         dailyReports.map(\.routePoints).filter { !$0.isEmpty }
     }
 
+    var elevationSetsFeet: [[Double]] {
+        dailyReports.map(\.elevationProfileFeet).filter { $0.count >= 2 }
+    }
+
     var mapStops: [FireVaultTripLogMapStop] {
         var sequence = 0
         return dailyReports.flatMap { daily in
@@ -645,6 +668,7 @@ struct FireVaultBreadcrumbReportView: View {
                     stops: report.mapStops,
                     region: report.mapRegion
                 )
+                elevationProfile(elevationSets: [report.elevationProfileFeet])
                 dailyStopDetails
             } else {
                 weeklyHeader
@@ -655,6 +679,7 @@ struct FireVaultBreadcrumbReportView: View {
                     stops: detail == .detailed ? weeklyReport.mapStops : [],
                     region: weeklyReport.mapRegion
                 )
+                elevationProfile(elevationSets: weeklyReport.elevationSetsFeet)
                 weeklyDaySummary
                 if detail == .detailed {
                     weeklyStopDetails
@@ -711,7 +736,7 @@ struct FireVaultBreadcrumbReportView: View {
             HStack(spacing: 8) {
                 FireVaultProWordmark(
                     fireColor: FireVaultTripLogReportPalette.red,
-                    vaultColor: FireVaultTripLogReportPalette.navy,
+                    vaultColor: .white,
                     proColor: .white,
                     proBackground: FireVaultTripLogReportPalette.red,
                     fontSize: 18,
@@ -871,6 +896,81 @@ struct FireVaultBreadcrumbReportView: View {
                         .stroke(FireVaultTripLogReportPalette.line, lineWidth: 1)
                 }
                 .allowsHitTesting(false)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func elevationProfile(elevationSets: [[Double]]) -> some View {
+        let validSets = elevationSets.filter { $0.count >= 2 }
+        let elevations = validSets.flatMap { $0 }
+
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text("ELEVATION PROFILE")
+                    .font(.caption.bold())
+                    .tracking(0.9)
+                    .foregroundStyle(FireVaultTripLogReportPalette.navy)
+                Spacer()
+                if let minimum = elevations.min(), let maximum = elevations.max() {
+                    Text("\(Int(minimum.rounded()).formatted())–\(Int(maximum.rounded()).formatted()) FT")
+                        .font(.caption2.bold().monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if elevations.count >= 2 {
+                Canvas { context, size in
+                    let minimum = elevations.min() ?? 0
+                    let maximum = elevations.max() ?? minimum + 1
+                    let range = max(1, maximum - minimum)
+                    let topInset: CGFloat = 10
+                    let bottomInset: CGFloat = 17
+                    let drawableHeight = max(1, size.height - topInset - bottomInset)
+
+                    for gridIndex in 0...3 {
+                        let y = topInset + drawableHeight * CGFloat(gridIndex) / 3
+                        var grid = Path()
+                        grid.move(to: .init(x: 0, y: y))
+                        grid.addLine(to: .init(x: size.width, y: y))
+                        context.stroke(grid, with: .color(FireVaultTripLogReportPalette.line), lineWidth: 0.7)
+                    }
+
+                    let segmentWidth = size.width / CGFloat(max(1, validSets.count))
+                    for (setIndex, set) in validSets.enumerated() {
+                        var line = Path()
+                        for (pointIndex, elevation) in set.enumerated() {
+                            let fraction = CGFloat(pointIndex) / CGFloat(max(1, set.count - 1))
+                            let x = CGFloat(setIndex) * segmentWidth + fraction * segmentWidth
+                            let y = topInset + CGFloat((maximum - elevation) / range) * drawableHeight
+                            if pointIndex == 0 { line.move(to: .init(x: x, y: y)) }
+                            else { line.addLine(to: .init(x: x, y: y)) }
+                        }
+                        context.stroke(
+                            line,
+                            with: .linearGradient(
+                                .init(colors: [FireVaultTripLogReportPalette.blue, FireVaultTripLogReportPalette.red]),
+                                startPoint: .zero,
+                                endPoint: .init(x: size.width, y: 0)
+                            ),
+                            style: .init(lineWidth: 3, lineCap: .round, lineJoin: .round)
+                        )
+                    }
+                }
+                .frame(height: 105)
+                .padding(.horizontal, 10)
+                .padding(.top, 5)
+                .background(FireVaultTripLogReportPalette.paleBlue, in: RoundedRectangle(cornerRadius: 13))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 13)
+                        .stroke(FireVaultTripLogReportPalette.line, lineWidth: 1)
+                }
+            } else {
+                Label("Elevation was not recorded for this saved Trip Log", systemImage: "mountain.2")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 72)
+                    .background(FireVaultTripLogReportPalette.paleBlue, in: RoundedRectangle(cornerRadius: 13))
             }
         }
     }
@@ -1371,7 +1471,9 @@ enum FireVaultTripLogPDFRenderer {
             )
             y += 12
             y = drawMap(mapImage, y: y)
-            y += 14
+            y += 12
+            y = drawElevationProfile([report.elevationProfileFeet], y: y)
+            y += 12
             y = drawSectionTitle("STOP DETAILS", y: y)
             y = drawStopTableHeader(y: y)
 
@@ -1446,7 +1548,9 @@ enum FireVaultTripLogPDFRenderer {
             )
             y += 15
             y = drawMap(mapImage, y: y)
-            y += 18
+            y += 12
+            y = drawElevationProfile(report.elevationSetsFeet, y: y)
+            y += 14
             y = drawSectionTitle("WEEKLY SUMMARY", y: y)
             y = drawWeeklyHeader(y: y)
 
@@ -1596,6 +1700,78 @@ enum FireVaultTripLogPDFRenderer {
         let outline = UIBezierPath(roundedRect: rect, cornerRadius: 10)
         outline.lineWidth = 0.8
         outline.stroke()
+        return rect.maxY
+    }
+
+    private static func drawElevationProfile(_ elevationSets: [[Double]], y: CGFloat) -> CGFloat {
+        _ = drawSectionTitle("ELEVATION PROFILE", y: y)
+        let graphY = y + 19
+        let rect = CGRect(x: 42, y: graphY, width: 528, height: 88)
+        paleBlue.setFill()
+        UIBezierPath(roundedRect: rect, cornerRadius: 10).fill()
+        lightLine.setStroke()
+        let outline = UIBezierPath(roundedRect: rect, cornerRadius: 10)
+        outline.lineWidth = 0.8
+        outline.stroke()
+
+        let validSets = elevationSets.filter { $0.count >= 2 }
+        let elevations = validSets.flatMap { $0 }
+        guard let minimum = elevations.min(), let maximum = elevations.max(), elevations.count >= 2 else {
+            drawCenteredText(
+                "Elevation was not recorded for this saved Trip Log",
+                font: .systemFont(ofSize: 9, weight: .medium),
+                color: .darkGray,
+                rect: rect
+            )
+            return rect.maxY
+        }
+
+        let plot = rect.insetBy(dx: 14, dy: 15)
+        let range = max(1, maximum - minimum)
+        UIColor(white: 0.78, alpha: 0.7).setStroke()
+        for gridIndex in 0...3 {
+            let gridY = plot.minY + plot.height * CGFloat(gridIndex) / 3
+            let grid = UIBezierPath()
+            grid.move(to: .init(x: plot.minX, y: gridY))
+            grid.addLine(to: .init(x: plot.maxX, y: gridY))
+            grid.lineWidth = 0.45
+            grid.stroke()
+        }
+
+        let segmentWidth = plot.width / CGFloat(max(1, validSets.count))
+        for (setIndex, set) in validSets.enumerated() {
+            let path = UIBezierPath()
+            for (pointIndex, elevation) in set.enumerated() {
+                let fraction = CGFloat(pointIndex) / CGFloat(max(1, set.count - 1))
+                let x = plot.minX + CGFloat(setIndex) * segmentWidth + fraction * segmentWidth
+                let graphY = plot.minY + CGFloat((maximum - elevation) / range) * plot.height
+                if pointIndex == 0 { path.move(to: .init(x: x, y: graphY)) }
+                else { path.addLine(to: .init(x: x, y: graphY)) }
+            }
+            blue.setStroke()
+            path.lineWidth = 2.3
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            path.stroke()
+        }
+
+        drawText(
+            "HIGH \(Int(maximum.rounded()).formatted()) FT",
+            font: .systemFont(ofSize: 6.8, weight: .bold),
+            color: navy,
+            x: rect.minX + 10,
+            y: rect.minY + 4,
+            width: 125
+        )
+        drawText(
+            "LOW \(Int(minimum.rounded()).formatted()) FT",
+            font: .systemFont(ofSize: 6.8, weight: .bold),
+            color: navy,
+            x: rect.maxX - 135,
+            y: rect.minY + 4,
+            width: 125,
+            alignment: .right
+        )
         return rect.maxY
     }
 

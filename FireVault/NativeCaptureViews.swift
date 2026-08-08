@@ -271,8 +271,8 @@ enum FireVaultOverlayTemplateFormatter {
 
 struct FireVaultProWordmark: View {
     var fireColor: Color = NativeShellPalette.red
-    var vaultColor: Color = .primary
-    var proColor: Color = .primary
+    var vaultColor: Color = .white
+    var proColor: Color = .white
     var proBackground: Color = NativeShellPalette.red
     var fontSize: CGFloat = 15
     var proFontSize: CGFloat = 7
@@ -301,6 +301,17 @@ struct FireVaultProWordmark: View {
                     .foregroundStyle(proColor)
             }
         }
+        .padding(.horizontal, max(7, fontSize * 0.42))
+        .padding(.vertical, max(5, fontSize * 0.3))
+        .background(
+            Color.black,
+            in: RoundedRectangle(cornerRadius: max(7, fontSize * 0.42), style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: max(7, fontSize * 0.42), style: .continuous)
+                .stroke(.white.opacity(0.13), lineWidth: 0.75)
+        }
+        .shadow(color: .black.opacity(0.28), radius: max(3, fontSize * 0.2), y: 2)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("FireVault Pro")
     }
