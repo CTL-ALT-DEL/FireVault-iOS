@@ -61,6 +61,40 @@ final class FireVaultNotificationService {
         center.removePendingNotificationRequests(withIdentifiers: [Identifier.recording, Identifier.paused])
     }
 
+    func sendDeveloperTest(title: String, body: String, delay: TimeInterval, sound: Bool) async throws -> String {
+        let identifier = "firevault.developer.test.\(UUID().uuidString)"
+        let content = UNMutableNotificationContent()
+        content.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        content.body = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if sound { content.sound = .default }
+        content.userInfo = ["source": "FireVault Notification Test"]
+        try await center.add(.init(
+            identifier: identifier,
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: max(1, delay), repeats: false)
+        ))
+        return identifier
+    }
+
+    func pendingRequests() async -> [UNNotificationRequest] {
+        await center.pendingNotificationRequests()
+    }
+
+    func deliveredNotifications() async -> [UNNotification] {
+        await center.deliveredNotifications()
+    }
+
+    func cancelDeveloperTests() {
+        Task {
+            let identifiers = await pendingRequests().map(\.identifier).filter { $0.hasPrefix("firevault.developer.test.") }
+            center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        }
+    }
+
+    func clearDeliveredNotifications() {
+        center.removeAllDeliveredNotifications()
+    }
+
     private func schedule(identifier: String, title: String, body: String, after interval: TimeInterval) {
         let content = UNMutableNotificationContent()
         content.title = title
@@ -139,6 +173,31 @@ struct NativeNotificationSettingsView: View {
             } footer: {
                 Text("Security and failure alerts may still appear during quiet hours when action is needed.")
             }
+
+#if DEBUG
+            Section {
+                NavigationLink {
+                    FireVaultNotificationDeveloperView()
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Notification Test & Edit")
+                                .font(.headline)
+                            Text("Compose, schedule, inspect, and clear development alerts")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "hammer.fill")
+                            .foregroundStyle(.orange)
+                    }
+                }
+            } header: {
+                Text("Developer")
+            } footer: {
+                Text("This tool is included only in Debug builds and is not shown in release versions of FireVault.")
+            }
+#endif
         }
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
@@ -182,3 +241,146 @@ struct NativeNotificationSettingsView: View {
         settings.save(preferences)
     }
 }
+
+#if DEBUG
+private enum FireVaultNotificationTestTemplate: String, CaseIterable, Identifiable {
+    case recording = "Trip Log Recording"
+    case paused = "Trip Log Paused"
+    case inspection = "Upcoming Inspection"
+    case failure = "Report/Sync Failure"
+    case security = "Security Alert"
+    case custom = "Custom"
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .recording: "Trip Log is still recording"
+        case .paused: "Trip Log is paused"
+        case .inspection: "Inspection coming up"
+        case .failure: "FireVault needs attention"
+        case .security: "New FireVault sign-in"
+        case .custom: "FireVault Test Notification"
+        }
+    }
+    var body: String {
+        switch self {
+        case .recording: "Review your active workday and end Trip Log when you are finished."
+        case .paused: "Resume Trip Log before continuing your route."
+        case .inspection: "An upcoming inspection is ready for review."
+        case .failure: "A report, sync, or backup operation could not be completed."
+        case .security: "Review recent account activity in FireVault Pro."
+        case .custom: "Edit this message to preview a custom FireVault alert."
+        }
+    }
+}
+
+private struct FireVaultNotificationDeveloperView: View {
+    @State private var template = FireVaultNotificationTestTemplate.recording
+    @State private var title = FireVaultNotificationTestTemplate.recording.title
+    @State private var messageBody = FireVaultNotificationTestTemplate.recording.body
+    @State private var delaySeconds = 5
+    @State private var soundEnabled = true
+    @State private var pendingCount = 0
+    @State private var deliveredCount = 0
+    @State private var statusMessage = "Ready"
+    @State private var authorizationStatus: UNAuthorizationStatus = .notDetermined
+
+    var body: some View {
+        Form {
+            Section("Test Message") {
+                Picker("Template", selection: $template) {
+                    ForEach(FireVaultNotificationTestTemplate.allCases) { Text($0.rawValue).tag($0) }
+                }
+                TextField("Notification title", text: $title)
+                TextField("Notification message", text: $messageBody, axis: .vertical)
+                    .lineLimit(2...5)
+                Picker("Delivery delay", selection: $delaySeconds) {
+                    Text("1 second").tag(1)
+                    Text("5 seconds").tag(5)
+                    Text("10 seconds").tag(10)
+                    Text("30 seconds").tag(30)
+                    Text("1 minute").tag(60)
+                }
+                Toggle("Play sound", isOn: $soundEnabled)
+            }
+
+            Section {
+                Button("Schedule Test Notification", systemImage: "bell.and.waves.left.and.right.fill") {
+                    Task { await sendTest() }
+                }
+                .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if authorizationStatus == .notDetermined {
+                    Button("Enable Notification Permission", systemImage: "bell.badge.fill") {
+                        Task { await requestPermission() }
+                    }
+                }
+                LabeledContent("Status", value: statusMessage)
+            }
+
+            Section("Notification Queue") {
+                LabeledContent("Pending", value: "\(pendingCount)")
+                LabeledContent("Delivered", value: "\(deliveredCount)")
+                Button("Refresh Counts", systemImage: "arrow.clockwise") { Task { await refreshCounts() } }
+                Button("Cancel Pending Test Alerts", systemImage: "bell.slash", role: .destructive) {
+                    FireVaultNotificationService.shared.cancelDeveloperTests()
+                    Task { try? await Task.sleep(for: .milliseconds(200)); await refreshCounts() }
+                }
+                Button("Clear Delivered Alerts", systemImage: "trash", role: .destructive) {
+                    FireVaultNotificationService.shared.clearDeliveredNotifications()
+                    Task { await refreshCounts() }
+                }
+            }
+
+            Section {
+                Text("For the most realistic test, schedule an alert and immediately place FireVault in the background or lock the iPhone. iOS normally does not display a notification banner while its app is open in the foreground.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Notification Lab")
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaPadding(.bottom, 82)
+        .onChange(of: template) { _, selection in
+            guard selection != .custom else { return }
+            title = selection.title
+            messageBody = selection.body
+        }
+        .task {
+            authorizationStatus = await FireVaultNotificationService.shared.authorizationStatus()
+            await refreshCounts()
+        }
+    }
+
+    private func requestPermission() async {
+        let allowed = (try? await FireVaultNotificationService.shared.requestAuthorization()) ?? false
+        authorizationStatus = await FireVaultNotificationService.shared.authorizationStatus()
+        statusMessage = allowed ? "Permission allowed" : "Permission not allowed"
+    }
+
+    private func sendTest() async {
+        authorizationStatus = await FireVaultNotificationService.shared.authorizationStatus()
+        guard authorizationStatus == .authorized || authorizationStatus == .provisional else {
+            statusMessage = "Enable notification permission first"
+            return
+        }
+        do {
+            _ = try await FireVaultNotificationService.shared.sendDeveloperTest(
+                title: title,
+                body: messageBody,
+                delay: TimeInterval(delaySeconds),
+                sound: soundEnabled
+            )
+            statusMessage = "Scheduled in \(delaySeconds) seconds"
+            await refreshCounts()
+        } catch {
+            statusMessage = "Test failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func refreshCounts() async {
+        pendingCount = await FireVaultNotificationService.shared.pendingRequests().count
+        deliveredCount = await FireVaultNotificationService.shared.deliveredNotifications().count
+    }
+}
+#endif
