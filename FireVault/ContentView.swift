@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @StateObject private var store = FireVaultStore()
@@ -114,13 +115,14 @@ struct ContentView: View {
 
     private func applicationContent(availableSize: CGSize) -> some View {
         let isLandscapeWindow = availableSize.width > availableSize.height
-        let usesRegularIPad = horizontalSizeClass == .regular && availableSize.width >= 600
+        let isIPadDevice = UIDevice.current.userInterfaceIdiom == .pad
+        let usesRegularIPad = (horizontalSizeClass == .regular || isIPadDevice)
+            && availableSize.width >= 600
         let usesWideWorkspace = usesRegularIPad
             && isLandscapeWindow
             && availableSize.width >= 900
-        let usesPortraitIPadNearby = usesRegularIPad
+        let usesPortraitIPadWorkspace = usesRegularIPad
             && !isLandscapeWindow
-            && store.selectedTab == .nearby
             && store.selectedAccount == nil
         let payload = store.appPayload(
             userCoordinate: locationService.coordinate,
@@ -133,16 +135,7 @@ struct ContentView: View {
             ZStack {
                 NativeShellPalette.background.ignoresSafeArea()
 
-                if let account = store.selectedAccount, usesRegularIPad {
-                    FireVaultAdaptiveAccountDetailsView(
-                        account: account,
-                        store: store,
-                        locationService: locationService,
-                        returnTab: store.selectedTab,
-                        returnTitle: store.selectedTab == .nearby ? "Nearby" : "Account List"
-                    )
-                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
-                } else if usesWideWorkspace {
+                if usesWideWorkspace {
                     FireVaultIPadWorkspaceV3(
                         payload: payload,
                         store: store,
@@ -151,6 +144,15 @@ struct ContentView: View {
                         breadcrumbs: activeBreadcrumbs
                     )
                     .transition(.opacity)
+                } else if let account = store.selectedAccount, usesRegularIPad {
+                    FireVaultAdaptiveAccountDetailsView(
+                        account: account,
+                        store: store,
+                        locationService: locationService,
+                        returnTab: store.selectedTab,
+                        returnTitle: store.selectedTab == .nearby ? "Nearby" : "Account List"
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 } else if let account = store.selectedAccount {
                     FieldWorkspaceView(
                         account: account,
@@ -159,8 +161,8 @@ struct ContentView: View {
                         locationService: locationService
                     )
                         .transition(.opacity.combined(with: .scale(scale: 0.985)))
-                } else if usesPortraitIPadNearby {
-                    FireVaultIPadPortraitNearbyViewV2(
+                } else if usesPortraitIPadWorkspace {
+                    FireVaultIPadPortraitWorkspace(
                         payload: payload,
                         store: store,
                         settings: settings,

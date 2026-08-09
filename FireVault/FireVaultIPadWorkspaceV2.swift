@@ -39,10 +39,12 @@ struct FireVaultIPadWorkspaceV2: View {
     @ObservedObject var locationService: FireVaultLocationService
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
 
+    private let sidebarWidth: CGFloat = 216
+
     var body: some View {
         HStack(spacing: 0) {
             sidebar
-                .frame(width: 232)
+                .frame(width: sidebarWidth)
 
             Rectangle()
                 .fill(.white.opacity(0.08))
@@ -57,7 +59,7 @@ struct FireVaultIPadWorkspaceV2: View {
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 7) {
                 Text(payload.demoMode ? "DEMO WORKSPACE" : "FIELD WORKSPACE")
                     .font(.caption2.bold())
@@ -69,8 +71,8 @@ struct FireVaultIPadWorkspaceV2: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 22)
+            .padding(.horizontal, 16)
+            .padding(.top, 18)
 
             VStack(alignment: .leading, spacing: 9) {
                 Text("WORKSPACE")
@@ -83,7 +85,7 @@ struct FireVaultIPadWorkspaceV2: View {
                     sidebarButton(tab)
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
 
             Spacer(minLength: 12)
 
@@ -99,7 +101,7 @@ struct FireVaultIPadWorkspaceV2: View {
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary.opacity(0.72))
             }
-            .padding(18)
+            .padding(16)
         }
         .background {
             LinearGradient(
@@ -125,7 +127,7 @@ struct FireVaultIPadWorkspaceV2: View {
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(selected ? NativeShellPalette.blue.opacity(0.24) : .white.opacity(0.04))
+                        .fill(selected ? NativeShellPalette.blue.opacity(0.16) : .white.opacity(0.04))
                     Image(systemName: tab.symbol)
                         .font(.system(size: 17, weight: .semibold))
                         .symbolVariant(selected ? .fill : .none)
@@ -137,7 +139,7 @@ struct FireVaultIPadWorkspaceV2: View {
                         .foregroundStyle(
                             tab == .trip && breadcrumbs.isRecording
                                 ? NativeShellPalette.green
-                                : (selected ? .white : NativeShellPalette.navigationInactive)
+                                : (selected ? NativeShellPalette.blue : NativeShellPalette.navigationInactive)
                         )
                 }
                 .frame(width: 38, height: 38)
@@ -152,11 +154,11 @@ struct FireVaultIPadWorkspaceV2: View {
                         .font(.caption.bold())
                 }
             }
-            .foregroundStyle(selected ? .white : NativeShellPalette.navigationInactive)
+            .foregroundStyle(selected ? .primary : NativeShellPalette.navigationInactive)
             .padding(.horizontal, 10)
             .frame(minHeight: 54)
             .background(
-                selected ? NativeShellPalette.blue.opacity(0.14) : .clear,
+                selected ? NativeShellPalette.surface : .clear,
                 in: RoundedRectangle(cornerRadius: 16, style: .continuous)
             )
             .overlay {
@@ -171,6 +173,11 @@ struct FireVaultIPadWorkspaceV2: View {
                         }
                 }
             }
+            .shadow(
+                color: .black.opacity(selected ? 0.20 : 0),
+                radius: selected ? 8 : 0,
+                y: selected ? 4 : 0
+            )
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -185,9 +192,10 @@ struct FireVaultIPadWorkspaceV2: View {
         switch store.selectedTab {
         case .nearby:
             if let account = store.selectedAccount {
-                FireVaultIPadAccountLocationsDetailsViewV2(
+                FireVaultAdaptiveAccountDetailsView(
                     account: account,
                     store: store,
+                    locationService: locationService,
                     returnTab: .nearby,
                     returnTitle: "Nearby"
                 )
@@ -202,7 +210,17 @@ struct FireVaultIPadWorkspaceV2: View {
             }
 
         case .accounts:
-            FireVaultIPadAccountsWorkspaceV2(payload: payload, store: store)
+            if let account = store.selectedAccount {
+                FireVaultAdaptiveAccountDetailsView(
+                    account: account,
+                    store: store,
+                    locationService: locationService,
+                    returnTab: .accounts,
+                    returnTitle: "Account List"
+                )
+            } else {
+                FireVaultIPadAccountsWorkspaceV2(payload: payload, store: store)
+            }
 
         case .trip:
             FireVaultIPadBreadcrumbsView(
@@ -214,7 +232,7 @@ struct FireVaultIPadWorkspaceV2: View {
             )
 
         case .photo, .settings:
-            FireVaultIPadLegacyDetailHostV2(
+            FireVaultIPadUtilityWorkspaceV2(
                 payload: payload,
                 store: store,
                 settings: settings,
@@ -237,6 +255,9 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
     @State private var accountScrollIsActive = false
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var mapLayer: FireVaultIPadNearbyMapLayer = .standard
+    @State private var showsTripLogControls = false
+    @State private var confirmsTripLogEnd = false
+    @State private var tripLogControlsTask: Task<Void, Never>?
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -294,33 +315,168 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
             }
             select(row, haptic: true, updateScrollPosition: false)
         }
+        .onDisappear { tripLogControlsTask?.cancel() }
+        .confirmationDialog(
+            "End Today’s Trip Log?",
+            isPresented: $confirmsTripLogEnd,
+            titleVisibility: .visible
+        ) {
+            Button("End Trip Log", role: .destructive) {
+                breadcrumbs.endWorkday()
+                closeTripLogControls()
+            }
+            Button("Keep Recording", role: .cancel) {}
+        } message: {
+            Text("The recorded route and stops will remain in Trip Log history.")
+        }
     }
 
     private var header: some View {
-        HStack(spacing: 14) {
-            Text("NEARBY FIELD MAP")
-                .font(.caption2.bold())
-                .tracking(1.3)
-                .foregroundStyle(payload.demoMode ? NativeShellPalette.amber : NativeShellPalette.green)
-
-            Spacer()
-
-            Menu {
-                Picker("Nearby Radius", selection: radiusBinding) {
-                    ForEach(FireVaultGPSPreferences.radiusOptions, id: \.self) { radius in
-                        Text(FireVaultGPSPreferences.radiusLabel(radius))
-                            .tag(radius)
+        VStack(spacing: 9) {
+            HStack(spacing: 14) {
+                Text("NEARBY FIELD MAP")
+                    .font(.caption2.bold())
+                    .tracking(1.3)
+                    .foregroundStyle(payload.demoMode ? NativeShellPalette.amber : NativeShellPalette.green)
+                Spacer()
+                Menu {
+                    Picker("Nearby Radius", selection: radiusBinding) {
+                        ForEach(FireVaultGPSPreferences.radiusOptions, id: \.self) { radius in
+                            Text(FireVaultGPSPreferences.radiusLabel(radius)).tag(radius)
+                        }
                     }
+                } label: {
+                    Label(settings.gps.radiusStatus, systemImage: "scope")
+                        .font(.subheadline.bold())
+                        .padding(.horizontal, 13)
+                        .frame(minHeight: 44)
+                        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 13))
                 }
-            } label: {
-                Label(settings.gps.radiusStatus, systemImage: "scope")
-                    .font(.subheadline.bold())
-                    .padding(.horizontal, 13)
-                    .frame(minHeight: 44)
-                    .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 13))
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+            tripLogStatusBar
+            if showsTripLogControls {
+                tripLogQuickControls
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
+    }
+
+    private var tripLogStatusBar: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.22)) { showsTripLogControls.toggle() }
+            if showsTripLogControls { scheduleTripLogControlsClose() }
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(tripLogStatusTint.opacity(0.14))
+                    Image(systemName: breadcrumbs.isRecording ? "location.fill" : "location")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(tripLogStatusTint)
+                }
+                .frame(width: 34, height: 34)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("TRIP LOG").font(.caption2.bold()).tracking(1).foregroundStyle(.secondary)
+                    Text(tripLogStatusTitle).font(.subheadline.bold()).foregroundStyle(tripLogStatusTint)
+                }
+                Divider().frame(height: 30)
+                tripMetric("MILES", value: tripMiles, symbol: "road.lanes")
+                tripMetric("STOPS", value: "\(tripDay?.stops.count ?? 0)", symbol: "mappin.and.ellipse")
+                tripMetric("ELAPSED", value: tripElapsed, symbol: "clock")
+                Spacer(minLength: 8)
+                Image(systemName: showsTripLogControls ? "chevron.up" : "chevron.down")
+                    .font(.caption.bold()).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 56)
+            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .stroke(.black.opacity(0.34), lineWidth: 2)
+                    .blur(radius: 0.8)
+                    .mask(RoundedRectangle(cornerRadius: 17, style: .continuous))
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var tripLogQuickControls: some View {
+        HStack(spacing: 10) {
+            if breadcrumbs.activeDay == nil {
+                Button("Start Trip Log", systemImage: "play.fill") {
+                    breadcrumbs.startWorkday(accounts: store.accounts)
+                    closeTripLogControls()
+                }
+                .buttonStyle(.borderedProminent)
+            } else if breadcrumbs.isRecording {
+                Button("Pause", systemImage: "pause.fill") {
+                    breadcrumbs.pauseWorkday()
+                    closeTripLogControls()
+                }
+                .buttonStyle(.bordered)
+                Button("Stop", systemImage: "stop.fill", role: .destructive) {
+                    confirmsTripLogEnd = true
+                }
+                .buttonStyle(.bordered)
+            } else {
+                Button("Resume", systemImage: "play.fill") {
+                    breadcrumbs.resumeWorkday(accounts: store.accounts)
+                    closeTripLogControls()
+                }
+                .buttonStyle(.borderedProminent)
+                Button("Stop", systemImage: "stop.fill", role: .destructive) {
+                    confirmsTripLogEnd = true
+                }
+                .buttonStyle(.bordered)
+            }
+            Spacer()
+            Text("Controls close automatically after five seconds")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+    }
+
+    private var tripDay: FireVaultBreadcrumbDay? { breadcrumbs.activeDay ?? breadcrumbs.today }
+    private var tripLogStatusTitle: String {
+        if breadcrumbs.isRecording { return "RECORDING" }
+        if breadcrumbs.activeDay?.isPaused == true { return "PAUSED" }
+        if breadcrumbs.activeDay == nil { return "READY" }
+        return "COMPLETE"
+    }
+    private var tripLogStatusTint: Color {
+        if breadcrumbs.isRecording { return NativeShellPalette.green }
+        if breadcrumbs.activeDay?.isPaused == true { return NativeShellPalette.amber }
+        return NativeShellPalette.blue
+    }
+    private var tripMiles: String {
+        String(format: "%.1f", (tripDay?.totalDistanceMeters ?? 0) / 1_609.344)
+    }
+    private var tripElapsed: String {
+        let seconds = max(0, Int((tripDay?.elapsedTime ?? 0).rounded()))
+        return String(format: "%02d:%02d", seconds / 3600, (seconds % 3600) / 60)
+    }
+    private func tripMetric(_ title: String, value: String, symbol: String) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: symbol).font(.caption.bold()).foregroundStyle(NativeShellPalette.blue)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(value).font(.subheadline.bold().monospacedDigit())
+                Text(title).font(.system(size: 8, weight: .bold)).tracking(0.7).foregroundStyle(.secondary)
+            }
+        }
+        .frame(minWidth: 92, alignment: .leading)
+    }
+    private func scheduleTripLogControlsClose() {
+        tripLogControlsTask?.cancel()
+        tripLogControlsTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.2)) { showsTripLogControls = false }
+        }
+    }
+    private func closeTripLogControls() {
+        tripLogControlsTask?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) { showsTripLogControls = false }
     }
 
     private var radiusBinding: Binding<Double> {
