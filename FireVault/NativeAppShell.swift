@@ -176,7 +176,6 @@ struct NativeAppShellView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !keyboardVisible {
                 nativeNavigation
-                    .offset(y: 22)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -205,7 +204,7 @@ struct NativeAppShellView: View {
                     }
                     withAnimation(.snappy(duration: 0.25)) { store.selectedTab = tab }
                 } label: {
-                    VStack(spacing: 1) {
+                    VStack(spacing: 2) {
                         Image(systemName: tab.symbol)
                             .font(.system(size: 20, weight: isSelected ? .bold : .semibold))
                             .symbolVariant(isSelected ? .fill : .none)
@@ -234,7 +233,7 @@ struct NativeAppShellView: View {
                             )
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 48)
+                    .frame(height: NativeShellMetrics.navigationItemHeight)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -245,14 +244,19 @@ struct NativeAppShellView: View {
             }
         }
         .padding(.horizontal, 6)
-        .padding(.vertical, 4)
+        .padding(.vertical, 5)
         .background(
             NativeShellPalette.navigationBackground,
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            in: RoundedRectangle(cornerRadius: NativeShellMetrics.navigationRadius, style: .continuous)
         )
-        .shadow(color: .black.opacity(0.24), radius: 9, x: 0, y: 4)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .overlay {
+            RoundedRectangle(cornerRadius: NativeShellMetrics.navigationRadius, style: .continuous)
+                .stroke(.white.opacity(0.13), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.28), radius: 10, x: 0, y: 5)
+        .padding(.horizontal, 10)
+        .padding(.top, 5)
+        .padding(.bottom, 2)
         .background(NativeShellPalette.background.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) {
             Capsule()
@@ -1054,12 +1058,7 @@ private struct NativeNearbyView: View {
             } else {
                 styledMap
                 .frame(height: 270)
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .shadow(
-                    color: colorScheme == .light ? .black.opacity(0.22) : .clear,
-                    radius: 12,
-                    y: 6
-                )
+                .nativeMapFrame()
                 .overlay(alignment: .topLeading) {
                     if let selected {
                         VStack(alignment: .leading, spacing: 3) {
@@ -1403,25 +1402,11 @@ private struct NativeNearbyView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                NativeShellPalette.surface,
-                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .nativeSurfaceCard(
+                cornerRadius: NativeShellMetrics.cardRadius,
+                emphasized: selectedID == row.id
             )
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(
-                        selectedID == row.id
-                            ? NativeShellPalette.blue.opacity(0.82)
-                            : .white.opacity(0.07),
-                        lineWidth: selectedID == row.id ? 1.5 : 1
-                    )
-            }
-            .shadow(
-                color: .black.opacity(selectedID == row.id ? 0.38 : 0.14),
-                radius: selectedID == row.id ? 7 : 4,
-                y: selectedID == row.id ? 7 : 3
-            )
-            .scaleEffect(selectedID == row.id ? 1.008 : 1)
+            .scaleEffect(selectedID == row.id ? 1.006 : 1)
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -1662,15 +1647,7 @@ private struct NativeAccountsView: View {
                                 } label: {
                                     NativeAccountRow(account: account)
                                         .padding(.horizontal, 12)
-                                        .background(
-                                            NativeShellPalette.surface,
-                                            in: RoundedRectangle(cornerRadius: 17, style: .continuous)
-                                        )
-                                        .overlay {
-                                            RoundedRectangle(cornerRadius: 17, style: .continuous)
-                                                .stroke(.white.opacity(0.07), lineWidth: 1)
-                                        }
-                                        .shadow(color: .black.opacity(0.20), radius: 7, y: 4)
+                                        .nativeSurfaceCard(cornerRadius: NativeShellMetrics.cardRadius)
                                 }
                                 .buttonStyle(.plain)
                                 .id(account.id)
@@ -1685,6 +1662,10 @@ private struct NativeAccountsView: View {
                         .padding(.bottom, 18)
                     }
                     .scrollIndicators(.hidden)
+                    .refreshable {
+                        store.reloadAccounts()
+                        try? await Task.sleep(for: .milliseconds(350))
+                    }
                     .scrollPosition(id: $topAccountID, anchor: .top)
                     .scrollTargetBehavior(.viewAligned(limitBehavior: .never, anchor: .top))
                     .onScrollPhaseChange { _, phase in
@@ -1888,11 +1869,7 @@ private struct NativePhotoView: View {
             .scaledToFit()
         .aspectRatio(aspectRatio, contentMode: .fit)
         .frame(maxHeight: 420)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(.white.opacity(0.12), lineWidth: 1)
-        }
+        .nativeSurfaceCard(cornerRadius: NativeShellMetrics.mapRadius)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
             [
@@ -1953,11 +1930,7 @@ private struct NativePhotoView: View {
         }
         .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 18))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(.white.opacity(0.08), lineWidth: 1)
-        }
+        .nativeSurfaceCard()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("native-capture-destination")
     }
@@ -2108,12 +2081,7 @@ private struct NativePhotoView: View {
             .padding(28)
         }
         .frame(maxWidth: .infinity)
-        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(NativeShellPalette.blue.opacity(0.16), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.16), radius: 10, y: 5)
+        .nativeSurfaceCard(cornerRadius: NativeShellMetrics.mapRadius)
         .accessibilityElement(children: .combine)
     }
 
@@ -2437,7 +2405,11 @@ private struct NativeSettingsView: View {
             .toolbarBackground(NativeShellPalette.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .accessibilityIdentifier("native-settings-list")
+            .animation(.snappy(duration: 0.24), value: expandedSettingGroupID)
+            .animation(.snappy(duration: 0.24), value: isTechnicianGroupExpanded)
         }
+        .listRowBackground(NativeShellPalette.surface)
+        .listRowSeparatorTint(NativeShellPalette.hairline)
     }
 
     private var profileSection: some View {
@@ -2549,6 +2521,8 @@ private struct NativeSettingsView: View {
             }
         }
         .listSectionSpacing(.compact)
+        .listRowBackground(NativeShellPalette.surface)
+        .listRowSeparatorTint(NativeShellPalette.hairline)
     }
 
     private func settingsSection(_ group: FireVaultNativeSettingsGroup) -> some View {
@@ -2597,6 +2571,7 @@ private struct NativeSettingsView: View {
         case "reports": settings.preferences.reports.format.capitalized
         case "overlay": "Configured"
         case "plusCodes": settings.preferences.plusCodes.enabled ? "On" : "Off"
+        case "notifications": (settings.preferences.notifications?.isEnabled ?? true) ? "On" : "Off"
         case "webdav": settings.preferences.webDAV.enabled ? "Configured" : "Off"
         case "privacy": settings.preferences.privacy.enabled ? "On" : "Off"
         case "customerImport": "CSV"
@@ -3613,16 +3588,57 @@ struct NativeShellCard<Content: View>: View {
 
     var body: some View {
         content.padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.08), lineWidth: 1) }
-            .shadow(color: .black.opacity(0.20), radius: 8, y: 4)
+            .nativeSurfaceCard()
     }
 }
 
-private extension View {
+extension View {
+    func nativeSurfaceCard(
+        cornerRadius: CGFloat = NativeShellMetrics.cardRadius,
+        emphasized: Bool = false
+    ) -> some View {
+        background(
+            NativeShellPalette.surface,
+            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(
+                    emphasized ? NativeShellPalette.blue.opacity(0.7) : NativeShellPalette.hairline,
+                    lineWidth: emphasized ? 1.5 : 1
+                )
+        }
+        .shadow(
+            color: .black.opacity(emphasized ? 0.31 : 0.18),
+            radius: emphasized ? 9 : 7,
+            x: 0,
+            y: emphasized ? 5 : 3
+        )
+    }
+
+    func nativeMapFrame(cornerRadius: CGFloat = NativeShellMetrics.mapRadius) -> some View {
+        clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(NativeShellPalette.mapEdge, lineWidth: 2)
+                    .shadow(color: .black.opacity(0.52), radius: 3, x: 0, y: 2)
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            }
+            .shadow(color: .black.opacity(0.24), radius: 10, x: 0, y: 5)
+    }
+
     func nativeMetadataPill(tint: Color) -> some View {
         self.font(.caption2.bold()).foregroundStyle(tint).padding(.horizontal, 7).padding(.vertical, 3).background(tint.opacity(0.12), in: Capsule())
     }
+}
+
+enum NativeShellMetrics {
+    static let cardRadius: CGFloat = 18
+    static let mapRadius: CGFloat = 22
+    static let navigationRadius: CGFloat = 20
+    static let navigationItemHeight: CGFloat = 50
+    static let pageHorizontalPadding: CGFloat = 16
+    static let sectionSpacing: CGFloat = 10
 }
 
 enum NativeShellPalette {
@@ -3665,6 +3681,14 @@ enum NativeShellPalette {
     static let navigationDivider = adaptive(
         light: UIColor(red: 0.45, green: 0.39, blue: 0.31, alpha: 0.22),
         dark: UIColor(white: 1, alpha: 0.14)
+    )
+    static let hairline = adaptive(
+        light: UIColor(white: 0.16, alpha: 0.12),
+        dark: UIColor(white: 1, alpha: 0.10)
+    )
+    static let mapEdge = adaptive(
+        light: UIColor(white: 0.10, alpha: 0.62),
+        dark: UIColor(white: 0, alpha: 0.78)
     )
 
     private static func adaptive(light: UIColor, dark: UIColor) -> Color {

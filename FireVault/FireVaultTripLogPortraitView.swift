@@ -191,12 +191,7 @@ struct FireVaultTripLogPortraitView: View {
                 }
             }
             .frame(width: width, height: height)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .shadow(
-                color: colorScheme == .light ? .black.opacity(0.22) : .clear,
-                radius: 12,
-                y: 6
-            )
+            .nativeMapFrame()
             .overlay(alignment: .topLeading) {
                 compactMapDate(day)
                     .padding(12)
@@ -434,7 +429,7 @@ struct FireVaultTripLogPortraitView: View {
             portraitMetric(title: "TIME", value: day.elapsedTime.tripLogDuration, symbol: "clock")
         }
         .padding(.vertical, 4)
-        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .nativeSurfaceCard(cornerRadius: 14)
     }
 
     private func portraitMetric(title: String, value: String, symbol: String) -> some View {

@@ -499,15 +499,20 @@ struct FieldWorkspaceView: View {
             WorkspaceNavButton(title: "Settings", symbol: "slider.horizontal.3") { store.closeAccount(to: .settings) }
         }
         .padding(.horizontal, 6)
-        .padding(.top, 2)
-        .padding(.bottom, 0)
-        .background(FieldWorkspacePalette.navigationBackground.ignoresSafeArea(edges: .bottom))
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(FieldWorkspacePalette.navigationDivider)
-                .frame(height: 1)
-                .accessibilityHidden(true)
+        .padding(.vertical, 5)
+        .background(
+            FieldWorkspacePalette.navigationBackground,
+            in: RoundedRectangle(cornerRadius: NativeShellMetrics.navigationRadius, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: NativeShellMetrics.navigationRadius, style: .continuous)
+                .stroke(.white.opacity(0.13), lineWidth: 1)
         }
+        .shadow(color: .black.opacity(0.28), radius: 10, x: 0, y: 5)
+        .padding(.horizontal, 10)
+        .padding(.top, 5)
+        .padding(.bottom, 2)
+        .background(FieldWorkspacePalette.background.ignoresSafeArea(edges: .bottom))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Main navigation")
         .accessibilityIdentifier("workspace-main-navigation")
@@ -2723,7 +2728,7 @@ private struct WorkspaceNavButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 1) {
+            VStack(spacing: 2) {
                 Image(systemName: symbol)
                     .font(.system(size: 20, weight: .semibold))
                     .frame(width: 34, height: 26)
@@ -2732,8 +2737,7 @@ private struct WorkspaceNavButton: View {
             }
             .foregroundStyle(FieldWorkspacePalette.navigationInactive)
             .frame(maxWidth: .infinity)
-            .frame(minHeight: 48)
-            .offset(y: 3)
+            .frame(height: NativeShellMetrics.navigationItemHeight)
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
