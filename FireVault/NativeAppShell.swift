@@ -2699,6 +2699,40 @@ private struct NativeGPSSettingsView: View {
                 Toggle("Address assistance", isOn: $draft.addressAssistanceEnabled)
             }
 
+            Section {
+                Picker(
+                    "Minimum unrecognized stop",
+                    selection: Binding(
+                        get: { draft.resolvedTripLogMinimumUnknownStopMinutes },
+                        set: { draft.tripLogMinimumUnknownStopMinutes = $0 }
+                    )
+                ) {
+                    Text("5 minutes").tag(5)
+                    Text("7 minutes").tag(7)
+                    Text("10 minutes").tag(10)
+                }
+
+                Toggle(
+                    "Reject poor GPS readings",
+                    isOn: Binding(
+                        get: { draft.rejectsPoorAccuracyStops },
+                        set: { draft.tripLogRejectPoorAccuracyStops = $0 }
+                    )
+                )
+
+                Toggle(
+                    "Merge nearby duplicate stops",
+                    isOn: Binding(
+                        get: { draft.mergesNearbyStops },
+                        set: { draft.tripLogMergeNearbyStops = $0 }
+                    )
+                )
+            } header: {
+                Text("Trip Log Stop Detection")
+            } footer: {
+                Text("Five minutes is recommended. GPS filtering prevents signal loss from creating false stops. Duplicate merging combines repeated detections at the same place within 15 minutes.")
+            }
+
             Section("Diagnostics") {
                 NavigationLink {
                     FireVaultGPSDiagnosticsView(

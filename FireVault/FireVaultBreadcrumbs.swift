@@ -333,6 +333,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     private var candidateLocations: [CLLocation] = []
     private var activeStopID: UUID?
     private var sessionIsPrepared = false
+    private var gpsPreferences: FireVaultGPSPreferences
 
     var activeDay: FireVaultBreadcrumbDay? {
         days.first(where: \.isActive)
@@ -356,6 +357,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         days = Self.load(from: archiveURL ?? Self.defaultArchiveURL)
         authorizationStatus = manager.authorizationStatus
         accuracyAuthorization = manager.accuracyAuthorization
+        gpsPreferences = FireVaultNativeSettingsStore().gps
         super.init()
 
         manager.delegate = self
@@ -371,6 +373,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     func startWorkday(accounts: [FireVaultWorkspaceAccount]) {
         self.accounts = accounts
+        gpsPreferences = FireVaultNativeSettingsStore().gps
         sessionIsPrepared = true
         if activeDay == nil {
             days.insert(.init(startedAt: Date()), at: 0)
@@ -398,6 +401,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             return
         }
         self.accounts = accounts
+        gpsPreferences = FireVaultNativeSettingsStore().gps
         sessionIsPrepared = true
         updateActiveDay { $0.isPaused = false }
         beginLocationUpdates()
@@ -405,6 +409,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     func restoreActiveWorkday(accounts: [FireVaultWorkspaceAccount]) {
         self.accounts = accounts
+        gpsPreferences = FireVaultNativeSettingsStore().gps
         authorizationStatus = manager.authorizationStatus
         accuracyAuthorization = manager.accuracyAuthorization
         guard let activeDay else { return }
@@ -705,7 +710,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     private func isReliableStopSample(_ location: CLLocation) -> Bool {
         let account = FireVaultBreadcrumbRules.closestAccount(to: location.coordinate, accounts: accounts)
-        let accuracyLimit = account == nil
+        let accuracyLimit = account == nil && gpsPreferences.rejectsPoorAccuracyStops
             ? FireVaultBreadcrumbRules.maximumUnrecognizedAccuracy
             : FireVaultBreadcrumbRules.maximumHorizontalAccuracy
         let speedIsStationary = location.speed < 0
@@ -721,7 +726,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
               let last = candidateLocations.last else { return false }
         let account = FireVaultBreadcrumbRules.closestAccount(to: candidateCoordinate, accounts: accounts)
         let requiredDuration = account == nil
-            ? FireVaultBreadcrumbRules.minimumUnrecognizedStopDuration
+            ? TimeInterval(gpsPreferences.resolvedTripLogMinimumUnknownStopMinutes * 60)
             : FireVaultBreadcrumbRules.minimumAccountStopDuration
         return last.timestamp.timeIntervalSince(first.timestamp) >= requiredDuration
     }
@@ -733,6 +738,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         account: FireVaultWorkspaceAccount?
     ) {
         if account == nil,
+           gpsPreferences.mergesNearbyStops,
            let previousIndex = days[dayIndex].stops.lastIndex(where: { previous in
                guard previous.accountID == nil, !previous.isPersonalStop else { return false }
                let previousEnd = previous.departure ?? previous.arrival

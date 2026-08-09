@@ -226,8 +226,16 @@ struct FireVaultGPSPreferences: Codable, Equatable {
     var addressAssistanceEnabled = true
     var hapticsEnabled: Bool? = true
     var defaultMapLayer: String?
+    var tripLogMinimumUnknownStopMinutes: Int?
+    var tripLogRejectPoorAccuracyStops: Bool?
+    var tripLogMergeNearbyStops: Bool?
     var hapticsAreEnabled: Bool { hapticsEnabled ?? true }
     var resolvedDefaultMapLayer: String { defaultMapLayer ?? "standard" }
+    var resolvedTripLogMinimumUnknownStopMinutes: Int {
+        tripLogMinimumUnknownStopMinutes ?? 5
+    }
+    var rejectsPoorAccuracyStops: Bool { tripLogRejectPoorAccuracyStops ?? true }
+    var mergesNearbyStops: Bool { tripLogMergeNearbyStops ?? true }
     var normalized: Self {
         var copy = self
         let clamped = min(Self.allowedRadius.upperBound, max(Self.allowedRadius.lowerBound, nearbyRadiusMiles))
@@ -235,6 +243,9 @@ struct FireVaultGPSPreferences: Codable, Equatable {
         if copy.hapticsEnabled == nil { copy.hapticsEnabled = true }
         if !["standard", "satellite", "hybrid"].contains(copy.resolvedDefaultMapLayer) {
             copy.defaultMapLayer = "standard"
+        }
+        if ![5, 7, 10].contains(copy.resolvedTripLogMinimumUnknownStopMinutes) {
+            copy.tripLogMinimumUnknownStopMinutes = 5
         }
         return copy
     }
