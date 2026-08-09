@@ -193,7 +193,14 @@ enum FireVaultBreadcrumbRules {
     static let minimumPointDistance: CLLocationDistance = 12
     static let maximumPointInterval: TimeInterval = 30
     static let stopRadius: CLLocationDistance = 85
-    static let minimumStopDuration: TimeInterval = 180
+    static let minimumAccountStopDuration: TimeInterval = 180
+    static let minimumUnrecognizedStopDuration: TimeInterval = 300
+    static let maximumCandidateGap: TimeInterval = 150
+    static let maximumUnrecognizedAccuracy: CLLocationAccuracy = 50
+    static let maximumStationarySpeed: CLLocationSpeed = 2.5
+    static let minimumConfirmationSamples = 3
+    static let duplicateStopRadius: CLLocationDistance = 125
+    static let duplicateStopInterval: TimeInterval = 15 * 60
     static let accountMatchRadius: CLLocationDistance = 175
 
     static func normalizedVisit(
@@ -649,6 +656,25 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     }
 
     private func updateStopDetection(with location: CLLocation, dayIndex: Int) {
+        if let lastCandidate = candidateLocations.last,
+           location.timestamp.timeIntervalSince(lastCandidate.timestamp) > FireVaultBreadcrumbRules.maximumCandidateGap {
+            closeActiveStopIfNeeded(dayIndex: dayIndex, departure: lastCandidate.timestamp)
+            candidateLocations.removeAll()
+            activeStopID = nil
+        }
+
+        guard isReliableStopSample(location) else {
+            if location.speed >= FireVaultBreadcrumbRules.maximumStationarySpeed {
+                closeActiveStopIfNeeded(
+                    dayIndex: dayIndex,
+                    departure: candidateLocations.last?.timestamp ?? location.timestamp
+                )
+                candidateLocations.removeAll()
+                activeStopID = nil
+            }
+            return
+        }
+
         guard let anchor = candidateLocations.first else {
             candidateLocations = [location]
             return
@@ -656,45 +682,90 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
         if location.distance(from: anchor) <= FireVaultBreadcrumbRules.stopRadius {
             candidateLocations.append(location)
-            let duration = location.timestamp.timeIntervalSince(anchor.timestamp)
-            if duration >= FireVaultBreadcrumbRules.minimumStopDuration, activeStopID == nil {
+            if activeStopID == nil, candidateCanBeConfirmed {
                 let coordinate = candidateCoordinate
                 let account = FireVaultBreadcrumbRules.closestAccount(to: coordinate, accounts: accounts)
-                let stop = FireVaultBreadcrumbStop(
+                beginConfirmedStop(
+                    dayIndex: dayIndex,
                     arrival: anchor.timestamp,
-                    latitude: coordinate.latitude,
-                    longitude: coordinate.longitude,
-                    accountID: account?.id,
-                    accountName: account?.name,
-                    accountAddress: account?.address
+                    coordinate: coordinate,
+                    account: account
                 )
-                activeStopID = stop.id
-                days[dayIndex].stops.append(stop)
             }
             return
         }
 
-        if let activeStopID,
-           let stopIndex = days[dayIndex].stops.firstIndex(where: { $0.id == activeStopID }) {
-            days[dayIndex].stops[stopIndex].departure = candidateLocations.last?.timestamp ?? location.timestamp
-        } else if location.timestamp.timeIntervalSince(anchor.timestamp)
-                    >= FireVaultBreadcrumbRules.minimumStopDuration {
-            let coordinate = candidateCoordinate
-            let account = FireVaultBreadcrumbRules.closestAccount(to: coordinate, accounts: accounts)
-            days[dayIndex].stops.append(
-                .init(
-                    arrival: anchor.timestamp,
-                    departure: location.timestamp,
-                    latitude: coordinate.latitude,
-                    longitude: coordinate.longitude,
-                    accountID: account?.id,
-                    accountName: account?.name,
-                    accountAddress: account?.address
-                )
-            )
-        }
+        closeActiveStopIfNeeded(
+            dayIndex: dayIndex,
+            departure: candidateLocations.last?.timestamp ?? anchor.timestamp
+        )
         candidateLocations = [location]
         activeStopID = nil
+    }
+
+    private func isReliableStopSample(_ location: CLLocation) -> Bool {
+        let account = FireVaultBreadcrumbRules.closestAccount(to: location.coordinate, accounts: accounts)
+        let accuracyLimit = account == nil
+            ? FireVaultBreadcrumbRules.maximumUnrecognizedAccuracy
+            : FireVaultBreadcrumbRules.maximumHorizontalAccuracy
+        let speedIsStationary = location.speed < 0
+            || location.speed <= FireVaultBreadcrumbRules.maximumStationarySpeed
+        return location.horizontalAccuracy >= 0
+            && location.horizontalAccuracy <= accuracyLimit
+            && speedIsStationary
+    }
+
+    private var candidateCanBeConfirmed: Bool {
+        guard candidateLocations.count >= FireVaultBreadcrumbRules.minimumConfirmationSamples,
+              let first = candidateLocations.first,
+              let last = candidateLocations.last else { return false }
+        let account = FireVaultBreadcrumbRules.closestAccount(to: candidateCoordinate, accounts: accounts)
+        let requiredDuration = account == nil
+            ? FireVaultBreadcrumbRules.minimumUnrecognizedStopDuration
+            : FireVaultBreadcrumbRules.minimumAccountStopDuration
+        return last.timestamp.timeIntervalSince(first.timestamp) >= requiredDuration
+    }
+
+    private func beginConfirmedStop(
+        dayIndex: Int,
+        arrival: Date,
+        coordinate: CLLocationCoordinate2D,
+        account: FireVaultWorkspaceAccount?
+    ) {
+        if account == nil,
+           let previousIndex = days[dayIndex].stops.lastIndex(where: { previous in
+               guard previous.accountID == nil, !previous.isPersonalStop else { return false }
+               let previousEnd = previous.departure ?? previous.arrival
+               let gap = arrival.timeIntervalSince(previousEnd)
+               guard gap >= 0, gap <= FireVaultBreadcrumbRules.duplicateStopInterval else { return false }
+               return CLLocation(latitude: previous.latitude, longitude: previous.longitude).distance(
+                   from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+               ) <= FireVaultBreadcrumbRules.duplicateStopRadius
+           }) {
+            days[dayIndex].stops[previousIndex].departure = nil
+            activeStopID = days[dayIndex].stops[previousIndex].id
+            return
+        }
+
+        let stop = FireVaultBreadcrumbStop(
+            arrival: arrival,
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            accountID: account?.id,
+            accountName: account?.name,
+            accountAddress: account?.address
+        )
+        activeStopID = stop.id
+        days[dayIndex].stops.append(stop)
+    }
+
+    private func closeActiveStopIfNeeded(dayIndex: Int, departure: Date) {
+        guard let activeStopID,
+              let stopIndex = days[dayIndex].stops.firstIndex(where: { $0.id == activeStopID }) else { return }
+        days[dayIndex].stops[stopIndex].departure = max(
+            days[dayIndex].stops[stopIndex].arrival,
+            departure
+        )
     }
 
     private var candidateCoordinate: CLLocationCoordinate2D {
@@ -709,26 +780,28 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     private func finalizeStopIfNeeded(in dayIndex: Int, at end: Date) {
         if let activeStopID,
            let stopIndex = days[dayIndex].stops.firstIndex(where: { $0.id == activeStopID }) {
-            days[dayIndex].stops[stopIndex].departure = end
+            days[dayIndex].stops[stopIndex].departure = max(
+                days[dayIndex].stops[stopIndex].arrival,
+                candidateLocations.last?.timestamp ?? end
+            )
             return
         }
 
-        guard let first = candidateLocations.first,
-              end.timeIntervalSince(first.timestamp) >= FireVaultBreadcrumbRules.minimumStopDuration else {
+        guard candidateCanBeConfirmed,
+              let first = candidateLocations.first else {
             return
         }
         let coordinate = candidateCoordinate
         let account = FireVaultBreadcrumbRules.closestAccount(to: coordinate, accounts: accounts)
-        days[dayIndex].stops.append(
-            .init(
-                arrival: first.timestamp,
-                departure: end,
-                latitude: coordinate.latitude,
-                longitude: coordinate.longitude,
-                accountID: account?.id,
-                accountName: account?.name,
-                accountAddress: account?.address
-            )
+        beginConfirmedStop(
+            dayIndex: dayIndex,
+            arrival: first.timestamp,
+            coordinate: coordinate,
+            account: account
+        )
+        closeActiveStopIfNeeded(
+            dayIndex: dayIndex,
+            departure: candidateLocations.last?.timestamp ?? end
         )
     }
 
