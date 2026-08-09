@@ -72,7 +72,9 @@ final class FireVaultStore: ObservableObject {
     private enum Key {
         static let demoMode = "firevault.native.demo-mode.v1"
         static let demoAccounts = "firevault.native.demo-accounts.v1"
+        static let demoAccountsBackup = "firevault.native.demo-accounts.backup.v1"
         static let productionAccounts = "firevault.native.production-accounts.v1"
+        static let productionAccountsBackup = "firevault.native.production-accounts.backup.v1"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -1007,7 +1009,13 @@ final class FireVaultStore: ObservableObject {
 
     private func persistAccounts() {
         guard let data = try? JSONEncoder().encode(accounts) else { return }
-        defaults.set(data, forKey: demoMode ? Key.demoAccounts : Key.productionAccounts)
+        let key = demoMode ? Key.demoAccounts : Key.productionAccounts
+        let backupKey = demoMode ? Key.demoAccountsBackup : Key.productionAccountsBackup
+        if let existing = defaults.data(forKey: key),
+           (try? JSONDecoder().decode([FireVaultWorkspaceAccount].self, from: existing)) != nil {
+            defaults.set(existing, forKey: backupKey)
+        }
+        defaults.set(data, forKey: key)
     }
 
     @discardableResult
@@ -1048,8 +1056,14 @@ final class FireVaultStore: ObservableObject {
     }
 
     private static func savedAccounts(defaults: UserDefaults, key: String) -> [FireVaultWorkspaceAccount]? {
-        guard let data = defaults.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode([FireVaultWorkspaceAccount].self, from: data)
+        let backupKey = key == Key.demoAccounts ? Key.demoAccountsBackup : Key.productionAccountsBackup
+        let decoded = defaults.data(forKey: key)
+            .flatMap { try? JSONDecoder().decode([FireVaultWorkspaceAccount].self, from: $0) }
+            ?? defaults.data(forKey: backupKey)
+                .flatMap { try? JSONDecoder().decode([FireVaultWorkspaceAccount].self, from: $0) }
+        guard let decoded else { return nil }
+        var seenIDs = Set<String>()
+        return decoded.filter { seenIDs.insert($0.id).inserted }
     }
 
     private static func decodeCSV(_ data: Data) -> String? {

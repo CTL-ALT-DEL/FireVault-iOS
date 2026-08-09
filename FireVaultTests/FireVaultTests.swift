@@ -12,6 +12,57 @@ import MapKit
 
 @MainActor
 final class FireVaultTests: XCTestCase {
+    func testTripLogIntegrityRemovesDuplicateRecordsAndRepairsTimes() {
+        let dayID = UUID()
+        let pointID = UUID()
+        let stopID = UUID()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let point = FireVaultBreadcrumbPoint(
+            id: pointID,
+            timestamp: start.addingTimeInterval(60),
+            latitude: 43.615,
+            longitude: -116.202,
+            horizontalAccuracy: 12
+        )
+        let stop = FireVaultBreadcrumbStop(
+            id: stopID,
+            arrival: start.addingTimeInterval(120),
+            departure: start.addingTimeInterval(90),
+            latitude: 43.615,
+            longitude: -116.202
+        )
+        let damaged = FireVaultBreadcrumbDay(
+            id: dayID,
+            startedAt: start,
+            endedAt: start.addingTimeInterval(-20),
+            points: [point, point],
+            stops: [stop, stop]
+        )
+
+        let normalized = FireVaultTripLogIntegrity.normalized([damaged, damaged])
+
+        XCTAssertEqual(normalized.count, 1)
+        XCTAssertEqual(normalized[0].points.count, 1)
+        XCTAssertEqual(normalized[0].stops.count, 1)
+        XCTAssertEqual(normalized[0].endedAt, start)
+        XCTAssertEqual(normalized[0].stops[0].departure, normalized[0].stops[0].arrival)
+    }
+
+    func testAccountStoreRecoversLastKnownGoodBackup() throws {
+        let suite = "FireVaultTests.AccountRecovery.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let original = store.addAccount()
+        _ = store.addAccount()
+
+        defaults.set(Data("damaged".utf8), forKey: "firevault.native.production-accounts.v1")
+        let recovered = FireVaultStore(defaults: defaults)
+
+        XCTAssertEqual(recovered.accounts.map(\.id), [original.id])
+    }
+
     func testAccountBriefResponseDecodesAssistantText() throws {
         let data = try XCTUnwrap(#"{"success":true,"accountName":"ABC Medical","assistantText":"No recurring issues found."}"#.data(using: .utf8))
 
@@ -1671,7 +1722,7 @@ final class FireVaultTests: XCTestCase {
 
     func testEverySettingsCatalogRowHasANativeDestinationIdentifier() {
         let expected = Set([
-            "overlay", "gps", "plusCodes", "reports", "email", "cloudFiles",
+            "overlay", "gps", "plusCodes", "notifications", "reports", "email", "cloudFiles",
             "microsoftStorage", "sync", "customerImport", "categories", "backup",
             "webdav", "privacy", "security", "manual", "demo", "about"
         ])

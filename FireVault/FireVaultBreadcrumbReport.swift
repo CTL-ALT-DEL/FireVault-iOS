@@ -1847,10 +1847,10 @@ enum FireVaultTripLogPDFRenderer {
     }
 
     private static func stopRowHeight(visit: FireVaultBreadcrumbReport.Visit, note: String) -> CGFloat {
-        var height: CGFloat = 34
-        if !visit.addressText.isEmpty { height += 8 }
-        if !note.isEmpty { height += min(22, CGFloat(note.count / 70 + 1) * 8) }
-        if visit.coordinateText != nil { height += 8 }
+        var height: CGFloat = 30
+        if !visit.addressText.isEmpty { height += 6 }
+        if !note.isEmpty { height += min(18, CGFloat(note.count / 70 + 1) * 7) }
+        if visit.coordinateText != nil { height += 6 }
         return height
     }
 

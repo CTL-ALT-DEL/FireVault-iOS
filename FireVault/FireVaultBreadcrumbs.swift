@@ -175,6 +175,70 @@ struct FireVaultBreadcrumbDay: Codable, Identifiable, Equatable {
     }
 }
 
+enum FireVaultTripLogIntegrity {
+    nonisolated static func normalized(_ source: [FireVaultBreadcrumbDay]) -> [FireVaultBreadcrumbDay] {
+        var seenDayIDs = Set<UUID>()
+        var days = source
+            .filter { seenDayIDs.insert($0.id).inserted }
+            .map(normalizeDay)
+            .sorted { $0.startedAt > $1.startedAt }
+
+        var keptActiveDay = false
+        for index in days.indices {
+            guard days[index].endedAt == nil else { continue }
+            if !keptActiveDay {
+                keptActiveDay = true
+            } else {
+                let lastTimestamp = days[index].points.last?.timestamp
+                    ?? days[index].stops.compactMap(\.departure).max()
+                    ?? days[index].startedAt
+                days[index].endedAt = max(days[index].startedAt, lastTimestamp)
+                days[index].isPaused = false
+                days[index].stops = days[index].stops.map { stop in
+                    var closed = stop
+                    if closed.departure == nil { closed.departure = max(closed.arrival, lastTimestamp) }
+                    return closed
+                }
+            }
+        }
+        return days
+    }
+
+    nonisolated private static func normalizeDay(_ source: FireVaultBreadcrumbDay) -> FireVaultBreadcrumbDay {
+        var day = source
+        if let endedAt = day.endedAt, endedAt < day.startedAt { day.endedAt = day.startedAt }
+
+        var seenPointIDs = Set<UUID>()
+        day.points = day.points
+            .filter { point in
+                seenPointIDs.insert(point.id).inserted
+                    && CLLocationCoordinate2DIsValid(
+                        .init(latitude: point.latitude, longitude: point.longitude)
+                    )
+                    && point.horizontalAccuracy >= 0
+            }
+            .sorted { $0.timestamp < $1.timestamp }
+
+        var seenStopIDs = Set<UUID>()
+        day.stops = day.stops
+            .filter { stop in
+                seenStopIDs.insert(stop.id).inserted
+                    && CLLocationCoordinate2DIsValid(
+                        .init(latitude: stop.latitude, longitude: stop.longitude)
+                    )
+            }
+            .map { stop in
+                var normalized = stop
+                if let departure = normalized.departure, departure < normalized.arrival {
+                    normalized.departure = normalized.arrival
+                }
+                return normalized
+            }
+            .sorted { $0.arrival < $1.arrival }
+        return day
+    }
+}
+
 enum FireVaultTripLogTelemetry {
     static func recentWaypointCount(
         in day: FireVaultBreadcrumbDay,
@@ -355,7 +419,8 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         let manager = CLLocationManager()
         self.manager = manager
         self.archiveURL = archiveURL ?? Self.defaultArchiveURL
-        days = Self.load(from: archiveURL ?? Self.defaultArchiveURL)
+        let loaded = Self.load(from: archiveURL ?? Self.defaultArchiveURL)
+        days = loaded.days
         authorizationStatus = manager.authorizationStatus
         accuracyAuthorization = manager.accuracyAuthorization
         let settings = FireVaultNativeSettingsStore()
@@ -369,7 +434,9 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         manager.distanceFilter = FireVaultBreadcrumbRules.minimumPointDistance
         manager.pausesLocationUpdatesAutomatically = true
 
-        if activeDay != nil {
+        if loaded.recoveredFromBackup {
+            statusText = "Trip Log restored from its last known-good backup"
+        } else if activeDay != nil {
             statusText = "Workday saved — tap Resume to continue"
         }
     }
@@ -837,21 +904,36 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
                 withIntermediateDirectories: true
             )
             let data = try JSONEncoder.fireVaultBreadcrumbs.encode(days)
+            if FileManager.default.fileExists(atPath: archiveURL.path),
+               let existing = try? Data(contentsOf: archiveURL),
+               (try? JSONDecoder.fireVaultBreadcrumbs.decode([FireVaultBreadcrumbDay].self, from: existing)) != nil {
+                let backupURL = Self.backupURL(for: archiveURL)
+                try? FileManager.default.removeItem(at: backupURL)
+                try? FileManager.default.copyItem(at: archiveURL, to: backupURL)
+            }
             try data.write(to: archiveURL, options: .atomic)
         } catch {
             statusText = "Route is active, but its history could not be saved"
         }
     }
 
-    private static func load(from url: URL) -> [FireVaultBreadcrumbDay] {
-        guard let data = try? Data(contentsOf: url),
-              let saved = try? JSONDecoder.fireVaultBreadcrumbs.decode(
-                [FireVaultBreadcrumbDay].self,
-                from: data
-              ) else {
-            return []
+    private static func load(from url: URL) -> (days: [FireVaultBreadcrumbDay], recoveredFromBackup: Bool) {
+        if let saved = decodeArchive(at: url) {
+            return (FireVaultTripLogIntegrity.normalized(saved), false)
         }
-        return saved.sorted { $0.startedAt > $1.startedAt }
+        if let saved = decodeArchive(at: backupURL(for: url)) {
+            return (FireVaultTripLogIntegrity.normalized(saved), true)
+        }
+        return ([], false)
+    }
+
+    private static func decodeArchive(at url: URL) -> [FireVaultBreadcrumbDay]? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder.fireVaultBreadcrumbs.decode([FireVaultBreadcrumbDay].self, from: data)
+    }
+
+    private static func backupURL(for url: URL) -> URL {
+        url.deletingPathExtension().appendingPathExtension("backup.json")
     }
 
     private static var defaultArchiveURL: URL {
