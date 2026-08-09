@@ -390,6 +390,11 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     @Published private(set) var authorizationStatus: CLAuthorizationStatus
     @Published private(set) var accuracyAuthorization: CLAccuracyAuthorization
     @Published private(set) var statusText = "Ready to start today’s route"
+    @Published private(set) var acceptedLocationCount = 0
+    @Published private(set) var rejectedLocationCount = 0
+    @Published private(set) var lastSuccessfulSaveAt: Date?
+    @Published private(set) var lastRecoveryAt: Date?
+    @Published private(set) var lastPersistenceError: String?
 
     private let manager: CLLocationManager
     private let archiveURL: URL
@@ -435,6 +440,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         manager.pausesLocationUpdatesAutomatically = true
 
         if loaded.recoveredFromBackup {
+            lastRecoveryAt = Date()
             statusText = "Trip Log restored from its last known-good backup"
         } else if activeDay != nil {
             statusText = "Workday saved — tap Resume to continue"
@@ -685,7 +691,11 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     private func record(_ location: CLLocation) {
         guard let index = activeDayIndex, !days[index].isPaused else { return }
         let previous = days[index].points.last?.location
-        guard FireVaultBreadcrumbRules.accepts(location, after: previous) else { return }
+        guard FireVaultBreadcrumbRules.accepts(location, after: previous) else {
+            rejectedLocationCount += 1
+            return
+        }
+        acceptedLocationCount += 1
 
         days[index].points.append(
             .init(
@@ -912,7 +922,10 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
                 try? FileManager.default.copyItem(at: archiveURL, to: backupURL)
             }
             try data.write(to: archiveURL, options: .atomic)
+            lastSuccessfulSaveAt = Date()
+            lastPersistenceError = nil
         } catch {
+            lastPersistenceError = error.localizedDescription
             statusText = "Route is active, but its history could not be saved"
         }
     }

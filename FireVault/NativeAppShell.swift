@@ -168,7 +168,8 @@ struct NativeAppShellView: View {
                         payload: payload,
                         store: store,
                         settings: settings,
-                        locationService: locationService
+                        locationService: locationService,
+                        breadcrumbs: breadcrumbs
                     )
                 }
             }
@@ -2326,6 +2327,7 @@ private struct NativeSettingsView: View {
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @State private var search = ""
     @State private var expandedSettingGroupID: String?
     @State private var isTechnicianGroupExpanded = false
@@ -2607,7 +2609,8 @@ private struct NativeSettingsView: View {
                 versionInfo: versionInfo,
                 payload: payload,
                 store: store,
-                settings: settings
+                settings: settings,
+                breadcrumbs: breadcrumbs
             )
         default: NativeMigrationStatusView(
             title: "Setting Unavailable",
@@ -3198,6 +3201,7 @@ private struct NativeAboutFireVaultView: View {
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @State private var showsDeveloperCenter = false
 
     var body: some View {
@@ -3269,7 +3273,8 @@ private struct NativeAboutFireVaultView: View {
                 versionInfo: versionInfo,
                 payload: payload,
                 store: store,
-                settings: settings
+                settings: settings,
+                breadcrumbs: breadcrumbs
             )
         }
     }
@@ -3333,6 +3338,7 @@ private struct FireVaultDeveloperCenterView: View {
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @StateObject private var runner = FireVaultDiagnosticRunner()
     @State private var copiedDiagnostics = false
     @State private var confirmsAITest = false
@@ -3414,6 +3420,18 @@ private struct FireVaultDeveloperCenterView: View {
             }
 
             Section {
+                NavigationLink {
+                    FireVaultFieldTestDashboard(
+                        versionInfo: versionInfo,
+                        demoMode: payload.demoMode,
+                        store: store,
+                        settings: settings,
+                        breadcrumbs: breadcrumbs
+                    )
+                } label: {
+                    Label("Field Test Dashboard", systemImage: "gauge.with.dots.needle.50percent")
+                }
+
                 NavigationLink {
                     FireVaultSimpleTemplateDeveloperView(settings: settings)
                 } label: {
