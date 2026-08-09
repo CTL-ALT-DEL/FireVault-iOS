@@ -7,10 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A85000000000000000000002 /* FireVaultWidgets.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A85000000000000000000001 /* FireVaultWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DCC52207301519B100925FA3 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = DCC52206301519B100925FA3 /* Supabase */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		A85000000000000000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DC8B01C5300F1E3700372A8B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A8500000000000000000000B;
+			remoteInfo = FireVaultWidgets;
+		};
 		DC8B01DB300F1E3800372A8B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = DC8B01C5300F1E3700372A8B /* Project object */;
@@ -27,13 +35,35 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		A8500000000000000000000A /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A85000000000000000000002 /* FireVaultWidgets.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		A85000000000000000000001 /* FireVaultWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FireVaultWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		DC8B01CD300F1E3700372A8B /* FireVault.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FireVault.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DC8B01DA300F1E3800372A8B /* FireVaultTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FireVaultTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DC8B01E4300F1E3800372A8B /* FireVaultUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FireVaultUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A85000000000000000000004 /* Exceptions for "FireVaultWidgets" folder in "FireVaultWidgets" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A8500000000000000000000B /* FireVaultWidgets */;
+		};
 		DC8B0200300F1E3800372A8B /* Exceptions for "FireVault" folder in "FireVault" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -44,6 +74,19 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		A85000000000000000000005 /* FireVaultWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A85000000000000000000004 /* Exceptions for "FireVaultWidgets" folder in "FireVaultWidgets" target */,
+			);
+			path = FireVaultWidgets;
+			sourceTree = "<group>";
+		};
+		A85000000000000000000006 /* FireVaultWidgetShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = FireVaultWidgetShared;
+			sourceTree = "<group>";
+		};
 		DC8B01CF300F1E3700372A8B /* FireVault */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -65,6 +108,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A85000000000000000000007 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		DC8B01CA300F1E3700372A8B /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -94,6 +144,8 @@
 			isa = PBXGroup;
 			children = (
 				DC8B01CF300F1E3700372A8B /* FireVault */,
+				A85000000000000000000005 /* FireVaultWidgets */,
+				A85000000000000000000006 /* FireVaultWidgetShared */,
 				DC8B01DD300F1E3800372A8B /* FireVaultTests */,
 				DC8B01E7300F1E3800372A8B /* FireVaultUITests */,
 				DC8B01CE300F1E3700372A8B /* Products */,
@@ -104,6 +156,7 @@
 			isa = PBXGroup;
 			children = (
 				DC8B01CD300F1E3700372A8B /* FireVault.app */,
+				A85000000000000000000001 /* FireVaultWidgets.appex */,
 				DC8B01DA300F1E3800372A8B /* FireVaultTests.xctest */,
 				DC8B01E4300F1E3800372A8B /* FireVaultUITests.xctest */,
 			);
@@ -113,6 +166,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A8500000000000000000000B /* FireVaultWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A8500000000000000000000F /* Build configuration list for PBXNativeTarget "FireVaultWidgets" */;
+			buildPhases = (
+				A85000000000000000000008 /* Sources */,
+				A85000000000000000000007 /* Frameworks */,
+				A85000000000000000000009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A85000000000000000000005 /* FireVaultWidgets */,
+				A85000000000000000000006 /* FireVaultWidgetShared */,
+			);
+			name = FireVaultWidgets;
+			packageProductDependencies = (
+			);
+			productName = FireVaultWidgets;
+			productReference = A85000000000000000000001 /* FireVaultWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		DC8B01CC300F1E3700372A8B /* FireVault */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = DC8B01EE300F1E3800372A8B /* Build configuration list for PBXNativeTarget "FireVault" */;
@@ -120,13 +196,16 @@
 				DC8B01C9300F1E3700372A8B /* Sources */,
 				DC8B01CA300F1E3700372A8B /* Frameworks */,
 				DC8B01CB300F1E3700372A8B /* Resources */,
+				A8500000000000000000000A /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A8500000000000000000000C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				DC8B01CF300F1E3700372A8B /* FireVault */,
+				A85000000000000000000006 /* FireVaultWidgetShared */,
 			);
 			name = FireVault;
 			packageProductDependencies = (
@@ -192,9 +271,20 @@
 				LastSwiftUpdateCheck = 2660;
 				LastUpgradeCheck = 2660;
 				TargetAttributes = {
+					A8500000000000000000000B = {
+						CreatedOnToolsVersion = 26.6;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
+								enabled = 1;
+							};
+						};
+					};
 					DC8B01CC300F1E3700372A8B = {
 						CreatedOnToolsVersion = 26.6;
 						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
+								enabled = 1;
+							};
 							com.apple.BackgroundModes = {
 								enabled = 1;
 							};
@@ -228,6 +318,7 @@
 			projectRoot = "";
 			targets = (
 				DC8B01CC300F1E3700372A8B /* FireVault */,
+				A8500000000000000000000B /* FireVaultWidgets */,
 				DC8B01D9300F1E3800372A8B /* FireVaultTests */,
 				DC8B01E3300F1E3800372A8B /* FireVaultUITests */,
 			);
@@ -235,6 +326,13 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A85000000000000000000009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		DC8B01CB300F1E3700372A8B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -259,6 +357,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A85000000000000000000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		DC8B01C9300F1E3700372A8B /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -283,6 +388,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		A8500000000000000000000C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A8500000000000000000000B /* FireVaultWidgets */;
+			targetProxy = A85000000000000000000003 /* PBXContainerItemProxy */;
+		};
 		DC8B01DC300F1E3800372A8B /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = DC8B01CC300F1E3700372A8B /* FireVault */;
@@ -296,6 +406,58 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		A8500000000000000000000D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = FireVaultWidgets/FireVaultWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 109;
+				DEVELOPMENT_TEAM = 44K72272WR;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = FireVaultWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.08.49;
+				PRODUCT_BUNDLE_IDENTIFIER = us.bannerman.firevault.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A8500000000000000000000E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = FireVaultWidgets/FireVaultWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 109;
+				DEVELOPMENT_TEAM = 44K72272WR;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = FireVaultWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.08.49;
+				PRODUCT_BUNDLE_IDENTIFIER = us.bannerman.firevault.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		DC8B01EC300F1E3800372A8B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -618,6 +780,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A8500000000000000000000F /* Build configuration list for PBXNativeTarget "FireVaultWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A8500000000000000000000D /* Debug */,
+				A8500000000000000000000E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		DC8B01C8300F1E3700372A8B /* Build configuration list for PBXProject "FireVault" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

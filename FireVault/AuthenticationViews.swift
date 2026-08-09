@@ -134,7 +134,9 @@ struct FireVaultAuthGate: View {
             authentication.start()
         }
         .onOpenURL { url in
-            SupabaseManager.client.auth.handle(url)
+            if !FireVaultWidgetDeepLinkCenter.shared.receive(url) {
+                SupabaseManager.client.auth.handle(url)
+            }
         }
     }
 }

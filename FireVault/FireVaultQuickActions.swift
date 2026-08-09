@@ -87,6 +87,49 @@ final class FireVaultQuickActionCenter: ObservableObject {
     }
 }
 
+enum FireVaultWidgetDeepLink: Equatable {
+    case tripLog
+    case startTripLog
+    case accounts
+    case photo
+}
+
+@MainActor
+final class FireVaultWidgetDeepLinkCenter: ObservableObject {
+    static let shared = FireVaultWidgetDeepLinkCenter()
+
+    @Published private(set) var pendingLink: FireVaultWidgetDeepLink?
+
+    @discardableResult
+    func receive(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "firevault" else { return false }
+
+        let host = url.host?.lowercased() ?? ""
+        let path = url.pathComponents
+            .filter { $0 != "/" }
+            .map { $0.lowercased() }
+
+        switch (host, path.first) {
+        case ("triplog", "start"):
+            pendingLink = .startTripLog
+        case ("triplog", _):
+            pendingLink = .tripLog
+        case ("accounts", _):
+            pendingLink = .accounts
+        case ("photo", _):
+            pendingLink = .photo
+        default:
+            return false
+        }
+        return true
+    }
+
+    func consume() -> FireVaultWidgetDeepLink? {
+        defer { pendingLink = nil }
+        return pendingLink
+    }
+}
+
 final class FireVaultAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,

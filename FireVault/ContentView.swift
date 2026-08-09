@@ -14,6 +14,7 @@ struct ContentView: View {
     @StateObject private var locationService = FireVaultLocationService()
     @StateObject private var liveBreadcrumbs = FireVaultBreadcrumbStore()
     @StateObject private var quickActions = FireVaultQuickActionCenter.shared
+    @StateObject private var widgetDeepLinks = FireVaultWidgetDeepLinkCenter.shared
     @StateObject private var privacyLock = FireVaultPrivacyLockController()
     @State private var demoBreadcrumbs: FireVaultBreadcrumbStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -59,6 +60,8 @@ struct ContentView: View {
             store.configureCategoryRules(settings.preferences.categoryRules ?? [])
             privacyLock.configure(enabled: settings.preferences.privacy.enabled)
             handlePendingQuickAction()
+            handlePendingWidgetDeepLink()
+            updateWidgetSnapshot()
             guard showsSplash else { return }
             try? await Task.sleep(for: .seconds(reduceMotion ? 1.15 : 3.65))
             guard !Task.isCancelled else { return }
@@ -75,6 +78,7 @@ struct ContentView: View {
                     privacyLock.authenticate()
                 } else {
                     handlePendingQuickAction()
+                    handlePendingWidgetDeepLink()
                 }
             case .background:
                 privacyLock.enteredBackground()
@@ -83,10 +87,16 @@ struct ContentView: View {
             }
         }
         .onChange(of: privacyLock.isUnlocked) { _, unlocked in
-            if unlocked { handlePendingQuickAction() }
+            if unlocked {
+                handlePendingQuickAction()
+                handlePendingWidgetDeepLink()
+            }
         }
         .onChange(of: quickActions.pendingAction) { _, _ in
             handlePendingQuickAction()
+        }
+        .onChange(of: widgetDeepLinks.pendingLink) { _, _ in
+            handlePendingWidgetDeepLink()
         }
         .onChange(of: settings.preferences.privacy.enabled) { _, enabled in
             privacyLock.configure(enabled: enabled)
@@ -97,6 +107,16 @@ struct ContentView: View {
         }
         .onChange(of: store.demoMode) { _, _ in
             prepareActiveVault()
+            updateWidgetSnapshot()
+        }
+        .onChange(of: store.selectedAccountID) { _, _ in
+            updateWidgetSnapshot()
+        }
+        .onChange(of: activeBreadcrumbs.days) { _, _ in
+            updateWidgetSnapshot()
+        }
+        .onChange(of: activeBreadcrumbs.isRecording) { _, _ in
+            updateWidgetSnapshot()
         }
         .onChange(of: store.accounts.count) { _, count in
             guard store.demoMode, count <= 4 else { return }
@@ -218,6 +238,60 @@ struct ContentView: View {
             store.closeAccount(to: .photo)
             store.requestCapture(.scan)
         }
+        updateWidgetSnapshot()
+    }
+
+    private func handlePendingWidgetDeepLink() {
+        guard !isPrivacyLocked, let link = widgetDeepLinks.consume() else { return }
+
+        switch link {
+        case .tripLog:
+            store.closeAccount(to: .trip)
+        case .startTripLog:
+            store.closeAccount(to: .trip)
+            if let day = activeBreadcrumbs.activeDay, day.isPaused {
+                activeBreadcrumbs.resumeWorkday(accounts: store.accounts)
+            } else if activeBreadcrumbs.activeDay == nil {
+                activeBreadcrumbs.startWorkday(accounts: store.accounts)
+            }
+        case .accounts:
+            store.closeAccount(to: .accounts)
+        case .photo:
+            store.closeAccount(to: .photo)
+            store.requestCapture(.photo)
+        }
+        updateWidgetSnapshot()
+    }
+
+    private func updateWidgetSnapshot() {
+        let existing = FireVaultWidgetSharedStore.load()
+        let day = activeBreadcrumbs.activeDay ?? activeBreadcrumbs.today
+        let account = store.selectedAccount
+
+        let state: FireVaultWidgetSnapshot.TripState
+        if activeBreadcrumbs.isRecording {
+            state = .recording
+        } else if activeBreadcrumbs.activeDay?.isPaused == true {
+            state = .paused
+        } else if day?.endedAt != nil {
+            state = .complete
+        } else {
+            state = .ready
+        }
+
+        FireVaultWidgetSharedStore.save(
+            FireVaultWidgetSnapshot(
+                updatedAt: Date(),
+                tripState: state,
+                tripStartedAt: day?.startedAt,
+                elapsedSeconds: day?.elapsedTime ?? 0,
+                distanceMiles: (day?.totalDistanceMeters ?? 0) / 1_609.344,
+                stopCount: day?.stops.count ?? 0,
+                accountName: account?.name ?? existing.accountName,
+                accountID: account?.accountId ?? existing.accountID,
+                accountCategory: account?.category ?? existing.accountCategory
+            )
+        )
     }
 }
 
