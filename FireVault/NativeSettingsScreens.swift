@@ -15,7 +15,8 @@ enum NativeSettingsCatalog {
         group("field", "Field Tools", "Photos, maps, GPS, and Plus Codes", "wrench.and.screwdriver", "green", [
             item("overlay", "Photo Overlay", "Configure field-photo labels", "camera.filters"),
             item("gps", "GPS & Maps", "Apple Maps, accuracy, and Nearby radius", "location"),
-            item("plusCodes", "Plus Codes", "Offline location-code preferences", "plus.square.dashed")
+            item("plusCodes", "Plus Codes", "Offline location-code preferences", "plus.square.dashed"),
+            item("notifications", "Notifications", "Trip Log, service, and system alerts", "bell.badge")
         ]),
         group("reports", "Reports", "Reports and customer email", "doc.text", "purple", [
             item("reports", "Report Settings", "Trip Log report defaults", "doc.text"),

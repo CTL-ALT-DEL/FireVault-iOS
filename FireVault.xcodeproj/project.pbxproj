@@ -427,8 +427,8 @@
 				DEVELOPMENT_TEAM = 44K72272WR;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_KEY_CFBundleDisplayName = "FireVault Pro";
 				INFOPLIST_FILE = FireVault/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "FireVault Pro";
 				INFOPLIST_KEY_NSCameraUsageDescription = "FireVault Pro uses the camera to photograph and scan fire alarm equipment and site documents.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "FireVault Pro uses Face ID to protect your signed-in field workspace.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "FireVault Pro uses your location to identify nearby accounts and record a workday route when you start Trip Log.";
@@ -470,8 +470,8 @@
 				DEVELOPMENT_TEAM = 44K72272WR;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_KEY_CFBundleDisplayName = "FireVault Pro";
 				INFOPLIST_FILE = FireVault/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "FireVault Pro";
 				INFOPLIST_KEY_NSCameraUsageDescription = "FireVault Pro uses the camera to photograph and scan fire alarm equipment and site documents.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "FireVault Pro uses Face ID to protect your signed-in field workspace.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "FireVault Pro uses your location to identify nearby accounts and record a workday route when you start Trip Log.";

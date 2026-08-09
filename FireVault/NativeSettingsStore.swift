@@ -255,6 +255,31 @@ struct FireVaultGPSPreferences: Codable, Equatable {
 }
 
 struct FireVaultPlusCodePreferences: Codable, Equatable { var enabled = true; var autoGenerate = true; var accountLength = 10; var locationLength = 11; var verifyAfterDays = 180; var searchable = true; var includeInReports = true }
+struct FireVaultNotificationPreferences: Codable, Equatable {
+    var enabled: Bool? = true
+    var tripLogStillRecording: Bool? = true
+    var tripLogPaused: Bool? = true
+    var upcomingInspections: Bool? = true
+    var deliveryFailures: Bool? = true
+    var arrivalAlerts: Bool? = false
+    var unknownStopReview: Bool? = false
+    var sharedAccountUpdates: Bool? = false
+    var securityAlerts: Bool? = true
+    var hideSensitiveDetails: Bool? = true
+    var quietHoursEnabled: Bool? = true
+    var quietHoursStart: Int? = 20
+    var quietHoursEnd: Int? = 7
+    var endOfDayHour: Int? = 18
+
+    var isEnabled: Bool { enabled ?? true }
+    var recordingReminderEnabled: Bool { tripLogStillRecording ?? true }
+    var pausedReminderEnabled: Bool { tripLogPaused ?? true }
+    var hidesSensitiveDetails: Bool { hideSensitiveDetails ?? true }
+    var usesQuietHours: Bool { quietHoursEnabled ?? true }
+    var resolvedQuietStart: Int { min(23, max(0, quietHoursStart ?? 20)) }
+    var resolvedQuietEnd: Int { min(23, max(0, quietHoursEnd ?? 7)) }
+    var resolvedEndOfDayHour: Int { min(23, max(0, endOfDayHour ?? 18)) }
+}
 struct FireVaultReportPreferences: Codable, Equatable {
     var title = "FireVault Pro Service Report"
     var format = "detailed"
@@ -423,6 +448,7 @@ struct FireVaultNativePreferences: Codable, Equatable {
     var technician = FireVaultTechnicianPreferences()
     var overlay = FireVaultOverlayPreferences()
     var gps = FireVaultGPSPreferences()
+    var notifications: FireVaultNotificationPreferences? = FireVaultNotificationPreferences()
     var plusCodes = FireVaultPlusCodePreferences()
     var reports = FireVaultReportPreferences()
     var email = FireVaultEmailPreferences()
@@ -438,6 +464,7 @@ struct FireVaultNativePreferences: Codable, Equatable {
         copy.gps = gps.normalized
         copy.overlay = overlay.normalized
         copy.reports = reports.normalized
+        if copy.notifications == nil { copy.notifications = FireVaultNotificationPreferences() }
         copy.categories = categories.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         copy.categoryRules = (categoryRules ?? []).map {
             var rule = $0

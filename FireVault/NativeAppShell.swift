@@ -2613,6 +2613,7 @@ private struct NativeSettingsView: View {
         case "overlay": NativeOverlaySettingsView(settings: settings)
         case "gps": NativeGPSSettingsView(settings: settings, locationService: locationService)
         case "plusCodes": NativePlusCodeSettingsView(settings: settings, locationService: locationService)
+        case "notifications": NativeNotificationSettingsView(settings: settings)
         case "reports": NativeReportSettingsView(settings: settings)
         case "email": NativeEmailSettingsView(settings: settings)
         case "cloudFiles": NativeStorageSettingsView(settings: settings)

@@ -334,6 +334,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     private var activeStopID: UUID?
     private var sessionIsPrepared = false
     private var gpsPreferences: FireVaultGPSPreferences
+    private var notificationPreferences: FireVaultNotificationPreferences
 
     var activeDay: FireVaultBreadcrumbDay? {
         days.first(where: \.isActive)
@@ -357,7 +358,9 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         days = Self.load(from: archiveURL ?? Self.defaultArchiveURL)
         authorizationStatus = manager.authorizationStatus
         accuracyAuthorization = manager.accuracyAuthorization
-        gpsPreferences = FireVaultNativeSettingsStore().gps
+        let settings = FireVaultNativeSettingsStore()
+        gpsPreferences = settings.gps
+        notificationPreferences = settings.preferences.notifications ?? FireVaultNotificationPreferences()
         super.init()
 
         manager.delegate = self
@@ -373,7 +376,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     func startWorkday(accounts: [FireVaultWorkspaceAccount]) {
         self.accounts = accounts
-        gpsPreferences = FireVaultNativeSettingsStore().gps
+        refreshRuntimePreferences()
         sessionIsPrepared = true
         if activeDay == nil {
             days.insert(.init(startedAt: Date()), at: 0)
@@ -382,6 +385,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             updateActiveDay { $0.isPaused = false }
         }
         beginLocationUpdates()
+        FireVaultNotificationService.shared.tripLogStarted(preferences: notificationPreferences)
     }
 
     func pauseWorkday() {
@@ -393,6 +397,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         sessionIsPrepared = false
         updateActiveDay { $0.isPaused = true }
         statusText = "Trip Log paused"
+        FireVaultNotificationService.shared.tripLogPaused(preferences: notificationPreferences)
     }
 
     func resumeWorkday(accounts: [FireVaultWorkspaceAccount]) {
@@ -401,15 +406,16 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             return
         }
         self.accounts = accounts
-        gpsPreferences = FireVaultNativeSettingsStore().gps
+        refreshRuntimePreferences()
         sessionIsPrepared = true
         updateActiveDay { $0.isPaused = false }
         beginLocationUpdates()
+        FireVaultNotificationService.shared.tripLogStarted(preferences: notificationPreferences)
     }
 
     func restoreActiveWorkday(accounts: [FireVaultWorkspaceAccount]) {
         self.accounts = accounts
-        gpsPreferences = FireVaultNativeSettingsStore().gps
+        refreshRuntimePreferences()
         authorizationStatus = manager.authorizationStatus
         accuracyAuthorization = manager.accuracyAuthorization
         guard let activeDay else { return }
@@ -436,6 +442,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         activeStopID = nil
         sessionIsPrepared = false
         statusText = "Workday complete"
+        FireVaultNotificationService.shared.tripLogEnded()
         persist()
         let completedDay = days[index]
         let preferences = FireVaultNativeSettingsStore().preferences
@@ -561,6 +568,12 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     private var activeDayIndex: Int? {
         days.firstIndex(where: \.isActive)
+    }
+
+    private func refreshRuntimePreferences() {
+        let settings = FireVaultNativeSettingsStore()
+        gpsPreferences = settings.gps
+        notificationPreferences = settings.preferences.notifications ?? FireVaultNotificationPreferences()
     }
 
     private func beginLocationUpdates() {
