@@ -7,6 +7,7 @@
 
 import Combine
 import UIKit
+import CarPlay
 
 enum FireVaultQuickAction: String, CaseIterable, Equatable {
     case startLog = "start-log"
@@ -121,6 +122,9 @@ final class FireVaultAppDelegate: NSObject, UIApplicationDelegate {
         )
         if connectingSceneSession.role == .windowApplication {
             configuration.delegateClass = FireVaultSceneDelegate.self
+        } else if connectingSceneSession.role == .carTemplateApplication {
+            configuration.sceneClass = CPTemplateApplicationScene.self
+            configuration.delegateClass = FireVaultCarPlaySceneDelegate.self
         }
         return configuration
     }

@@ -50,7 +50,19 @@
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<true/>
 		<key>UISceneConfigurations</key>
-		<dict/>
+		<dict>
+			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneClassName</key>
+					<string>CPTemplateApplicationScene</string>
+					<key>UISceneConfigurationName</key>
+					<string>FireVault CarPlay</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).FireVaultCarPlaySceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
 	</dict>
 	<key>UIApplicationShortcutItems</key>
 	<array>

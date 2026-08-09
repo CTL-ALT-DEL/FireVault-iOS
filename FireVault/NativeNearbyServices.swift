@@ -414,6 +414,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
 
         latestLocation = location
         coordinate = location.coordinate
+        FireVaultSiriLocationCache.store(location)
         isLocating = false
         statusText = isDiagnosticsTracking
             ? "Diagnostics live • updated \(Date().formatted(date: .omitted, time: .standard))"
