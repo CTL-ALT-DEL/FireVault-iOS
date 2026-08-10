@@ -296,20 +296,44 @@ struct ContentView: View {
 }
 
 private struct FireVaultPrivacyShieldView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         ZStack {
             NativeShellPalette.background.ignoresSafeArea()
-            VStack(spacing: 12) {
-                Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 46))
-                    .foregroundStyle(NativeShellPalette.blue)
-                Text("FireVault Pro")
-                    .font(.title2.bold())
-                Text("Workspace hidden")
+            VStack(spacing: 16) {
+                ZStack(alignment: .bottomTrailing) {
+                    FireVaultProIconBadge(size: 92, cornerRadius: 21)
+                        .shadow(color: .black.opacity(0.38), radius: 12, y: 7)
+
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 34)
+                        .background(NativeShellPalette.red, in: Circle())
+                        .overlay {
+                            Circle()
+                                .stroke(NativeShellPalette.background, lineWidth: 4)
+                        }
+                        .offset(x: 7, y: 7)
+                }
+
+                FireVaultProWordmark(
+                    vaultColor: colorScheme == .light ? .black : .white,
+                    proColor: colorScheme == .light ? .black : .white,
+                    fontSize: 27,
+                    proFontSize: 9,
+                    tracking: 1.1,
+                    hasBackground: false
+                )
+
+                Text("Workspace protected")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("FireVault Pro workspace protected")
         .accessibilityIdentifier("firevault-app-switcher-shield")
     }
 }
