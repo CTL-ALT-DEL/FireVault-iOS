@@ -2986,7 +2986,7 @@ private struct NativeGPSSettingsView: View {
             } header: {
                 Text("Trip Log Stop Detection")
             } footer: {
-                Text("Five minutes is recommended. GPS filtering prevents signal loss from creating false stops. Duplicate merging combines repeated detections at the same place within 15 minutes.")
+                Text("Five minutes is recommended. FireVault ignores isolated GPS jumps, waits for consistent departure evidence, preserves a stop through temporary signal loss, and merges repeated detections at the same place within 15 minutes.")
             }
 
             Section("Diagnostics") {

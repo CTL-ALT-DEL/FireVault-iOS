@@ -32,6 +32,21 @@ struct FireVaultTripLogLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(spacing: 8) {
+                        if context.state.isOnSite,
+                           let activeStopStartedAt = context.state.activeStopStartedAt {
+                            HStack {
+                                Label(
+                                    context.state.activeStopIsKnown ? "On Site" : "Stop Detected",
+                                    systemImage: "mappin.circle.fill"
+                                )
+                                .font(.caption.bold())
+                                .foregroundStyle(.cyan)
+                                Spacer()
+                                Text(activeStopStartedAt, style: .timer)
+                                    .font(.caption.bold().monospacedDigit())
+                                    .foregroundStyle(.white)
+                            }
+                        }
                         if context.state.showsMetrics {
                             HStack(spacing: 10) {
                                 metric(
@@ -57,17 +72,17 @@ struct FireVaultTripLogLiveActivity: Widget {
                     }
                 }
             } compactLeading: {
-                Image(systemName: statusSymbol(context.state.status))
-                    .foregroundStyle(statusColor(context.state.status))
+                Image(systemName: displayStatusSymbol(context.state))
+                    .foregroundStyle(displayStatusColor(context.state))
             } compactTrailing: {
                 elapsed(context.state, compact: true)
                     .frame(maxWidth: 58)
             } minimal: {
-                Image(systemName: statusSymbol(context.state.status))
-                    .foregroundStyle(statusColor(context.state.status))
+                Image(systemName: displayStatusSymbol(context.state))
+                    .foregroundStyle(displayStatusColor(context.state))
             }
             .widgetURL(URL(string: "firevault://triplog"))
-            .keylineTint(statusColor(context.state.status))
+            .keylineTint(displayStatusColor(context.state))
         }
     }
 
@@ -75,11 +90,11 @@ struct FireVaultTripLogLiveActivity: Widget {
         _ state: FireVaultTripLogActivityAttributes.ContentState
     ) -> some View {
         HStack(spacing: 7) {
-            Image(systemName: statusSymbol(state.status))
-            Text(state.status.title.uppercased())
+            Image(systemName: state.isOnSite ? "mappin.circle.fill" : statusSymbol(state.status))
+            Text(liveStatusTitle(state))
                 .font(.caption.bold())
         }
-        .foregroundStyle(statusColor(state.status))
+        .foregroundStyle(state.isOnSite ? .cyan : statusColor(state.status))
     }
 
     @ViewBuilder
@@ -139,6 +154,27 @@ struct FireVaultTripLogLiveActivity: Widget {
         case .complete: .green
         }
     }
+
+    private func liveStatusTitle(
+        _ state: FireVaultTripLogActivityAttributes.ContentState
+    ) -> String {
+        if state.isOnSite {
+            return state.activeStopIsKnown ? "ON SITE" : "STOP DETECTED"
+        }
+        return state.status.title.uppercased()
+    }
+
+    private func displayStatusSymbol(
+        _ state: FireVaultTripLogActivityAttributes.ContentState
+    ) -> String {
+        state.isOnSite ? "mappin.circle.fill" : statusSymbol(state.status)
+    }
+
+    private func displayStatusColor(
+        _ state: FireVaultTripLogActivityAttributes.ContentState
+    ) -> Color {
+        state.isOnSite ? .cyan : statusColor(state.status)
+    }
 }
 
 private struct FireVaultTripLogLockScreenView: View {
@@ -162,11 +198,26 @@ private struct FireVaultTripLogLockScreenView: View {
                 }
                 Spacer()
                 if context.state.showsMetrics {
+                    if context.state.isOnSite,
+                       let activeStopStartedAt = context.state.activeStopStartedAt {
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text(activeStopStartedAt, style: .timer)
+                                .font(.title3.bold().monospacedDigit())
+                                .foregroundStyle(.white)
+                            Text(context.state.activeStopIsKnown ? "ON SITE" : "STOPPED")
+                                .font(.system(size: 8, weight: .bold, design: .rounded))
+                                .tracking(0.8)
+                                .foregroundStyle(.cyan)
+                        }
+                        .frame(minWidth: 70, alignment: .trailing)
+                    }
                     lockMetric(
                         value: String(format: "%.1f", context.state.distanceMiles),
                         label: "MILES"
                     )
-                    lockMetric(value: "\(context.state.stopCount)", label: "STOPS")
+                    if !context.state.isOnSite {
+                        lockMetric(value: "\(context.state.stopCount)", label: "STOPS")
+                    }
                 } else {
                     Label("Metrics hidden", systemImage: "eye.slash.fill")
                         .font(.caption2.bold())
@@ -196,7 +247,7 @@ private struct FireVaultTripLogLockScreenView: View {
     }
 
     private var statusCapsule: some View {
-        Label(context.state.status.title.uppercased(), systemImage: statusSymbol)
+        Label(statusTitle, systemImage: statusSymbol)
             .font(.caption2.bold())
             .foregroundStyle(statusColor)
             .padding(.horizontal, 9)
@@ -234,7 +285,8 @@ private struct FireVaultTripLogLockScreenView: View {
     }
 
     private var statusSymbol: String {
-        switch context.state.status {
+        if context.state.isOnSite { return "mappin.circle.fill" }
+        return switch context.state.status {
         case .recording: "record.circle.fill"
         case .paused: "pause.circle.fill"
         case .complete: "checkmark.circle.fill"
@@ -242,11 +294,19 @@ private struct FireVaultTripLogLockScreenView: View {
     }
 
     private var statusColor: Color {
-        switch context.state.status {
+        if context.state.isOnSite { return .cyan }
+        return switch context.state.status {
         case .recording: .red
         case .paused: .orange
         case .complete: .green
         }
+    }
+
+    private var statusTitle: String {
+        if context.state.isOnSite {
+            return context.state.activeStopIsKnown ? "ON SITE" : "STOP DETECTED"
+        }
+        return context.state.status.title.uppercased()
     }
 }
 

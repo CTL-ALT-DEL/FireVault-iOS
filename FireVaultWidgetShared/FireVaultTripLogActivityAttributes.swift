@@ -30,6 +30,8 @@ struct FireVaultTripLogActivityAttributes: ActivityAttributes {
         var distanceMiles: Double
         var stopCount: Int
         var showsMetrics: Bool
+        var activeStopStartedAt: Date?
+        var activeStopIsKnown: Bool
 
         init(
             status: Status,
@@ -37,7 +39,9 @@ struct FireVaultTripLogActivityAttributes: ActivityAttributes {
             elapsedSeconds: TimeInterval,
             distanceMiles: Double,
             stopCount: Int,
-            showsMetrics: Bool
+            showsMetrics: Bool,
+            activeStopStartedAt: Date? = nil,
+            activeStopIsKnown: Bool = false
         ) {
             self.status = status
             self.updatedAt = updatedAt
@@ -45,10 +49,13 @@ struct FireVaultTripLogActivityAttributes: ActivityAttributes {
             self.distanceMiles = distanceMiles
             self.stopCount = stopCount
             self.showsMetrics = showsMetrics
+            self.activeStopStartedAt = activeStopStartedAt
+            self.activeStopIsKnown = activeStopIsKnown
         }
 
         private enum CodingKeys: String, CodingKey {
             case status, updatedAt, elapsedSeconds, distanceMiles, stopCount, showsMetrics
+            case activeStopStartedAt, activeStopIsKnown
         }
 
         init(from decoder: Decoder) throws {
@@ -59,6 +66,8 @@ struct FireVaultTripLogActivityAttributes: ActivityAttributes {
             distanceMiles = try values.decode(Double.self, forKey: .distanceMiles)
             stopCount = try values.decode(Int.self, forKey: .stopCount)
             showsMetrics = try values.decodeIfPresent(Bool.self, forKey: .showsMetrics) ?? true
+            activeStopStartedAt = try values.decodeIfPresent(Date.self, forKey: .activeStopStartedAt)
+            activeStopIsKnown = try values.decodeIfPresent(Bool.self, forKey: .activeStopIsKnown) ?? false
         }
 
         var timerReferenceDate: Date {
@@ -73,6 +82,15 @@ struct FireVaultTripLogActivityAttributes: ActivityAttributes {
                 (seconds % 3_600) / 60,
                 seconds % 60
             )
+        }
+
+        var isOnSite: Bool {
+            status == .recording && activeStopStartedAt != nil
+        }
+
+        func onSiteElapsedTime(at date: Date = Date()) -> TimeInterval {
+            guard let activeStopStartedAt else { return 0 }
+            return max(0, date.timeIntervalSince(activeStopStartedAt))
         }
     }
 

@@ -492,7 +492,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
             CPInformationItem(title: "ELEVATION", detail: store.demoMode ? "5,284 ft" : currentElevationText(location, day: day)),
             CPInformationItem(title: "TRIP", detail: store.demoMode ? "42.6 mi" : distanceText(day)),
             CPInformationItem(title: "TIME", detail: store.demoMode ? "00:48:17" : elapsedText(day?.elapsedTime ?? 0)),
-            CPInformationItem(title: "STOPS", detail: store.demoMode ? "2 stops" : stopCountText(day))
+            CPInformationItem(title: "STOPS", detail: store.demoMode ? "2 stops" : stopSummaryText(day))
         ]
     }
 
@@ -643,6 +643,9 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     }
 
     private var tripLogStatus: String {
+        if breadcrumbs.activeDay?.stops.contains(where: { $0.departure == nil }) == true {
+            return "On Site"
+        }
         if breadcrumbs.isRecording { return "Recording" }
         if breadcrumbs.activeDay?.isPaused == true { return "Paused" }
         if breadcrumbs.activeDay == nil { return "Ready" }
@@ -717,6 +720,14 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private func stopCountText(_ day: FireVaultBreadcrumbDay?) -> String {
         let count = day?.stops.count ?? 0
         return count == 1 ? "1 stop" : "\(count) stops"
+    }
+
+    private func stopSummaryText(_ day: FireVaultBreadcrumbDay?) -> String {
+        guard let day,
+              let activeStop = day.stops.last(where: { $0.departure == nil }) else {
+            return stopCountText(day)
+        }
+        return "\(stopCountText(day)) • On site \(elapsedText(activeStop.duration))"
     }
 
     private func elapsedText(_ elapsedTime: TimeInterval) -> String {

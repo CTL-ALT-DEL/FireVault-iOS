@@ -72,6 +72,33 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(state.showsMetrics)
         XCTAssertEqual(state.status, .paused)
         XCTAssertEqual(state.stopCount, 2)
+        XCTAssertNil(state.activeStopStartedAt)
+        XCTAssertFalse(state.activeStopIsKnown)
+    }
+
+    func testLiveActivityTracksOnSiteTimeWithoutPrivateSiteIdentity() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_600)
+        let arrival = now.addingTimeInterval(-300)
+        let state = FireVaultTripLogActivityAttributes.ContentState(
+            status: .recording,
+            updatedAt: now,
+            elapsedSeconds: 900,
+            distanceMiles: 12.4,
+            stopCount: 3,
+            showsMetrics: true,
+            activeStopStartedAt: arrival,
+            activeStopIsKnown: true
+        )
+
+        let data = try JSONEncoder().encode(state)
+        let encoded = try XCTUnwrap(String(data: data, encoding: .utf8))
+
+        XCTAssertTrue(state.isOnSite)
+        XCTAssertEqual(state.onSiteElapsedTime(at: now), 300, accuracy: 0.001)
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("account"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("address"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("latitude"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("longitude"))
     }
 
     func testLegacyNotificationPreferencesEnableLiveActivitiesSafely() throws {
@@ -763,6 +790,143 @@ final class FireVaultTests: XCTestCase {
         )
 
         XCTAssertEqual(try XCTUnwrap(match).id, "near")
+    }
+
+    func testBreadcrumbRulesMatchSavedArrivalPointWhenSiteCoordinateIsMissing() throws {
+        let account = FireVaultWorkspaceAccount(
+            id: "arrival-only",
+            name: "Mapped Arrival Account",
+            address: "100 Main Street",
+            category: "Commercial",
+            accountId: "A-2",
+            phone: "",
+            favorite: false,
+            latitude: nil,
+            longitude: nil,
+            tags: [],
+            notes: [],
+            documents: [],
+            equipment: [],
+            locations: [
+                .init(
+                    id: "parking",
+                    label: "Technician Parking",
+                    subtitle: "South lot",
+                    type: "Parking",
+                    plusCode: "",
+                    latitude: 43.615,
+                    longitude: -116.202
+                )
+            ],
+            recent: []
+        )
+
+        let match = FireVaultBreadcrumbRules.closestAccount(
+            to: .init(latitude: 43.6151, longitude: -116.2021),
+            accounts: [account]
+        )
+
+        XCTAssertEqual(try XCTUnwrap(match).id, account.id)
+    }
+
+    func testBreadcrumbRepresentativeCoordinateResistsOneGPSOutlier() throws {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let samples = [
+            testLocation(latitude: 43.61500, longitude: -116.20200, timestamp: timestamp),
+            testLocation(latitude: 43.61502, longitude: -116.20202, timestamp: timestamp.addingTimeInterval(30)),
+            testLocation(latitude: 43.62500, longitude: -116.21200, timestamp: timestamp.addingTimeInterval(60))
+        ]
+
+        let coordinate = try XCTUnwrap(
+            FireVaultBreadcrumbRules.representativeCoordinate(for: samples)
+        )
+
+        XCTAssertEqual(coordinate.latitude, 43.61502, accuracy: 0.000_001)
+        XCTAssertEqual(coordinate.longitude, -116.20202, accuracy: 0.000_001)
+    }
+
+    func testBreadcrumbDepartureRequiresConsistentEvidence() {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let origin = CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)
+        let firstJump = testLocation(
+            latitude: 43.6162,
+            longitude: -116.202,
+            timestamp: timestamp
+        )
+        let consistentSecond = testLocation(
+            latitude: 43.61625,
+            longitude: -116.20202,
+            timestamp: timestamp.addingTimeInterval(30)
+        )
+        let scatteredSecond = testLocation(
+            latitude: 43.614,
+            longitude: -116.204,
+            timestamp: timestamp.addingTimeInterval(30)
+        )
+
+        XCTAssertFalse(
+            FireVaultBreadcrumbRules.confirmsDeparture(
+                from: origin,
+                with: [firstJump]
+            )
+        )
+        XCTAssertTrue(
+            FireVaultBreadcrumbRules.confirmsDeparture(
+                from: origin,
+                with: [firstJump, consistentSecond]
+            )
+        )
+        XCTAssertFalse(
+            FireVaultBreadcrumbRules.confirmsDeparture(
+                from: origin,
+                with: [firstJump, scatteredSecond]
+            )
+        )
+    }
+
+    func testBreadcrumbDuplicateMergingPreservesKnownAccountIdentity() {
+        let arrival = Date(timeIntervalSince1970: 1_700_000_000)
+        let previous = FireVaultBreadcrumbStop(
+            arrival: arrival,
+            departure: arrival.addingTimeInterval(10 * 60),
+            latitude: 43.615,
+            longitude: -116.202,
+            accountID: "account-1",
+            accountName: "Central Library"
+        )
+        let nearbyCoordinate = CLLocationCoordinate2D(latitude: 43.6152, longitude: -116.2021)
+
+        XCTAssertTrue(
+            FireVaultBreadcrumbRules.shouldMergeStop(
+                previous: previous,
+                arrivingAt: arrival.addingTimeInterval(18 * 60),
+                coordinate: nearbyCoordinate,
+                accountID: nil
+            )
+        )
+        XCTAssertFalse(
+            FireVaultBreadcrumbRules.shouldMergeStop(
+                previous: previous,
+                arrivingAt: arrival.addingTimeInterval(18 * 60),
+                coordinate: nearbyCoordinate,
+                accountID: "different-account"
+            )
+        )
+    }
+
+    func testUnrecognizedStopReviewStateIsBackwardCompatible() {
+        var stop = FireVaultBreadcrumbStop(
+            arrival: Date(timeIntervalSince1970: 1_700_000_000),
+            latitude: 43.615,
+            longitude: -116.202
+        )
+
+        XCTAssertTrue(stop.needsReview)
+        stop.rename("Warehouse Loading Dock")
+        XCTAssertFalse(stop.needsReview)
+        stop.rename("")
+        stop.markReviewed(at: Date(timeIntervalSince1970: 1_700_000_600))
+        XCTAssertFalse(stop.needsReview)
     }
 
     func testBreadcrumbDayCalculatesRecordedDistance() {
@@ -1854,5 +2018,23 @@ final class FireVaultTests: XCTestCase {
         ])
 
         XCTAssertEqual(Set(NativeSettingsCatalog.groups.flatMap(\.items).map(\.id)), expected)
+    }
+
+    private func testLocation(
+        latitude: Double,
+        longitude: Double,
+        timestamp: Date,
+        accuracy: CLLocationAccuracy = 10,
+        speed: CLLocationSpeed = 0
+    ) -> CLLocation {
+        CLLocation(
+            coordinate: .init(latitude: latitude, longitude: longitude),
+            altitude: 0,
+            horizontalAccuracy: accuracy,
+            verticalAccuracy: -1,
+            course: -1,
+            speed: speed,
+            timestamp: timestamp
+        )
     }
 }

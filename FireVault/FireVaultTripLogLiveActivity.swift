@@ -79,14 +79,19 @@ enum FireVaultTripLogLiveActivityController {
         status: Attributes.Status,
         showsMetrics: Bool
     ) -> ActivityContent<Attributes.ContentState> {
-        ActivityContent(
-            state: .init(
+        let activeStop = status == .recording
+            ? day.stops.last(where: { $0.departure == nil })
+            : nil
+        return ActivityContent(
+            state: Attributes.ContentState(
                 status: status,
                 updatedAt: Date(),
                 elapsedSeconds: day.elapsedTime,
                 distanceMiles: day.totalDistanceMeters / 1_609.344,
                 stopCount: day.stops.count,
-                showsMetrics: showsMetrics
+                showsMetrics: showsMetrics,
+                activeStopStartedAt: activeStop?.arrival,
+                activeStopIsKnown: activeStop?.accountID != nil
             ),
             staleDate: Date().addingTimeInterval(status == .recording ? 10 * 60 : 60 * 60)
         )

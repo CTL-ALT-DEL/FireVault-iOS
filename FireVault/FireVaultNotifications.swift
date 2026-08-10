@@ -11,6 +11,8 @@ final class FireVaultNotificationService {
     private enum Identifier {
         static let recording = "firevault.triplog.recording"
         static let paused = "firevault.triplog.paused"
+        static func arrival(_ stopID: UUID) -> String { "firevault.triplog.arrival.\(stopID.uuidString)" }
+        static func review(_ stopID: UUID) -> String { "firevault.triplog.review.\(stopID.uuidString)" }
     }
 
     private let center = UNUserNotificationCenter.current()
@@ -60,6 +62,47 @@ final class FireVaultNotificationService {
 
     func tripLogEnded() {
         center.removePendingNotificationRequests(withIdentifiers: [Identifier.recording, Identifier.paused])
+    }
+
+    func accountArrivalDetected(
+        stop: FireVaultBreadcrumbStop,
+        preferences: FireVaultNotificationPreferences
+    ) {
+        guard preferences.isEnabled, preferences.arrivalAlerts ?? false else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Account arrival confirmed"
+        content.body = preferences.hidesSensitiveDetails
+            ? "Trip Log confirmed an on-site account stop."
+            : "Trip Log confirmed your arrival at \(stop.accountName ?? "an account")."
+        content.sound = .default
+        center.add(.init(
+            identifier: Identifier.arrival(stop.id),
+            content: content,
+            trigger: nil
+        ))
+    }
+
+    func unknownStopDetected(
+        stop: FireVaultBreadcrumbStop,
+        preferences: FireVaultNotificationPreferences
+    ) {
+        guard preferences.isEnabled, preferences.unknownStopReview ?? false else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Trip Log stop needs review"
+        content.body = "Confirm, identify, or disregard this stop when it is safe to use your iPhone."
+        content.sound = .default
+        content.userInfo = ["tripLogStopID": stop.id.uuidString]
+        center.add(.init(
+            identifier: Identifier.review(stop.id),
+            content: content,
+            trigger: nil
+        ))
+    }
+
+    func stopReviewed(stopID: UUID) {
+        let identifiers = [Identifier.review(stopID), Identifier.arrival(stopID)]
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        center.removeDeliveredNotifications(withIdentifiers: identifiers)
     }
 
     func sendDeveloperTest(title: String, body: String, delay: TimeInterval, sound: Bool) async throws -> String {
