@@ -235,6 +235,7 @@ struct NativeAppShellView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: NativeShellMetrics.navigationItemHeight)
+                    .offset(y: NativeShellMetrics.navigationContentOffset)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -244,28 +245,17 @@ struct NativeAppShellView: View {
                 .accessibilityIdentifier("main-navigation-\(tab.rawValue)")
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
-        .background(
-            NativeShellPalette.navigationBackground,
-            in: RoundedRectangle(cornerRadius: NativeShellMetrics.navigationRadius, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: NativeShellMetrics.navigationRadius, style: .continuous)
-                .stroke(.white.opacity(0.13), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.28), radius: 10, x: 0, y: 5)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 8)
         .padding(.top, 5)
-        .padding(.bottom, 2)
-        .background(NativeShellPalette.background.ignoresSafeArea(edges: .bottom))
-        .overlay(alignment: .top) {
-            Capsule()
+        .padding(.bottom, 3)
+        .background(NativeShellPalette.navigationBackground.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: Alignment.top) {
+            Rectangle()
                 .fill(NativeShellPalette.navigationDivider)
                 .frame(height: 1)
-                .padding(.horizontal, 16)
                 .accessibilityHidden(true)
         }
+        .shadow(color: .black.opacity(0.24), radius: 8, x: 0, y: -3)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Main navigation")
         .accessibilityIdentifier("main-navigation")
@@ -1702,9 +1692,10 @@ private struct NativeAccountsView: View {
     }
 }
 
-private struct NativePhotoView: View {
+struct NativePhotoView: View {
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedItem: PhotosPickerItem?
     @State private var selectedImage: UIImage?
     @State private var scannedPages: [UIImage] = []
@@ -1755,45 +1746,26 @@ private struct NativePhotoView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
-                        destinationAccountCard
+                    destinationAccountCard
 
-                        if let selectedImage {
-                            imagePreview(selectedImage)
+                    if horizontalSizeClass == .regular {
+                        HStack(alignment: .top, spacing: 18) {
+                            previewColumn
+                                .frame(maxWidth: .infinity)
 
-                            if scannedPages.count > 1 {
-                                scannedPageStrip
-                            }
-
-                            HStack(spacing: 8) {
-                                Label(
-                                    mediaKind == .scan
-                                        ? "\(scannedPages.count) page\(scannedPages.count == 1 ? "" : "s")"
-                                        : "Overlay applied",
-                                    systemImage: mediaKind == .scan
-                                        ? "doc.viewfinder.fill"
-                                        : "camera.filters"
-                                )
-                                .foregroundStyle(.secondary)
-
-                                if !saveStatus.isEmpty {
-                                    Spacer(minLength: 4)
-                                    Label("Saved", systemImage: "checkmark.circle.fill")
-                                        .foregroundStyle(NativeShellPalette.green)
-                                        .accessibilityIdentifier("native-media-save-status")
-                                }
-                            }
-                            .font(.caption.bold())
-                            .padding(.horizontal, 4)
-                        } else {
-                            captureReadyCard
-                                .aspectRatio(1, contentMode: .fit)
+                            ipadCapturePanel
+                                .frame(width: 340)
                         }
-
+                    } else {
+                        previewColumn
                         captureControls
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
                 .padding(.bottom, 18)
+                .frame(maxWidth: 1120)
+                .frame(maxWidth: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(NativeShellPalette.background)
@@ -1858,6 +1830,85 @@ private struct NativePhotoView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(alertMessage)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var previewColumn: some View {
+        VStack(spacing: 10) {
+            if let selectedImage {
+                imagePreview(selectedImage)
+
+                if scannedPages.count > 1 {
+                    scannedPageStrip
+                }
+
+                HStack(spacing: 8) {
+                    Label(
+                        mediaKind == .scan
+                            ? "\(scannedPages.count) page\(scannedPages.count == 1 ? "" : "s")"
+                            : "Overlay applied",
+                        systemImage: mediaKind == .scan
+                            ? "doc.viewfinder.fill"
+                            : "camera.filters"
+                    )
+                    .foregroundStyle(.secondary)
+
+                    if !saveStatus.isEmpty {
+                        Spacer(minLength: 4)
+                        Label("Saved", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(NativeShellPalette.green)
+                            .accessibilityIdentifier("native-media-save-status")
+                    }
+                }
+                .font(.caption.bold())
+                .padding(.horizontal, 4)
+            } else {
+                captureReadyCard
+                    .aspectRatio(1, contentMode: .fit)
+                    .frame(maxHeight: 650)
+            }
+        }
+    }
+
+    private var ipadCapturePanel: some View {
+        NativeShellCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("FIELD CAPTURE", systemImage: "camera.aperture")
+                    .font(.caption.bold())
+                    .tracking(1.1)
+                    .foregroundStyle(NativeShellPalette.blue)
+
+                Text("Capture a field photo, scan a document, or import an existing image into the selected account.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Divider()
+
+                VStack(spacing: 10) {
+                    captureButton(
+                        title: "PHOTO",
+                        subtitle: "Camera",
+                        symbol: "camera.fill",
+                        tint: NativeShellPalette.red,
+                        intent: .camera
+                    )
+                    captureButton(
+                        title: "SCAN",
+                        subtitle: "Document",
+                        symbol: "doc.viewfinder",
+                        tint: NativeShellPalette.blue,
+                        intent: .scanner
+                    )
+                    captureButton(
+                        title: "IMPORT",
+                        subtitle: "Photo Library",
+                        symbol: "photo.on.rectangle",
+                        tint: NativeShellPalette.green,
+                        intent: .photoLibrary
+                    )
+                }
             }
         }
     }
@@ -2322,7 +2373,7 @@ private struct NativeAccountRow: View {
     }
 }
 
-private struct NativeSettingsView: View {
+struct NativeSettingsView: View {
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
@@ -2620,6 +2671,232 @@ private struct NativeSettingsView: View {
         }
     }
 
+}
+
+struct FireVaultIPadSettingsWorkspace: View {
+    let payload: FireVaultAppPayload
+    @ObservedObject var store: FireVaultStore
+    @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var locationService: FireVaultLocationService
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+
+    @State private var selection = "tech"
+    @State private var search = ""
+    private let versionInfo = FireVaultVersionInfo()
+
+    private var groups: [FireVaultNativeSettingsGroup] {
+        let visible = NativeSettingsCatalog.groups.filter {
+            settings.isFeatureVisible("settings.\($0.id)")
+        }
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return visible }
+        return visible.compactMap { group in
+            let items = group.items.filter {
+                [$0.title, $0.subtitle, group.title]
+                    .joined(separator: " ")
+                    .localizedCaseInsensitiveContains(query)
+            }
+            guard !items.isEmpty else { return nil }
+            return .init(
+                id: group.id,
+                title: group.title,
+                subtitle: group.subtitle,
+                symbol: group.symbol,
+                tint: group.tint,
+                status: group.status,
+                items: items
+            )
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            settingsNavigator
+                .frame(width: 340)
+
+            Rectangle()
+                .fill(NativeShellPalette.hairline)
+                .frame(width: 1)
+
+            NavigationStack {
+                destination(selection)
+                    .id(selection)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(NativeShellPalette.background)
+        .tint(NativeShellPalette.blue)
+        .accessibilityIdentifier("ipad-settings-workspace")
+    }
+
+    private var settingsNavigator: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("SETTINGS")
+                            .font(.caption2.bold())
+                            .tracking(1.3)
+                            .foregroundStyle(NativeShellPalette.blue)
+                        Text("FireVault Pro")
+                            .font(.title2.bold())
+                    }
+                    Spacer()
+                    Text(versionInfo.version)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 9) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Search settings", text: $search)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if !search.isEmpty {
+                        Button {
+                            search = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            }
+            .padding(16)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if search.isEmpty {
+                        settingsGroup(
+                            title: "Technician",
+                            symbol: "person.crop.circle.fill",
+                            tint: NativeShellPalette.blue,
+                            items: [
+                                ("tech", "Technician Profile", "person.text.rectangle"),
+                                ("settingsView", "Preferred Settings View", "rectangle.3.group"),
+                                ("appearance", "Appearance", "circle.lefthalf.filled")
+                            ]
+                        )
+                    }
+
+                    ForEach(groups) { group in
+                        settingsGroup(
+                            title: group.title,
+                            symbol: group.symbol,
+                            tint: NativeShellPalette.tint(group.tint),
+                            items: group.items.map { ($0.id, $0.title, $0.symbol) }
+                        )
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 24)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .background(NativeShellPalette.navigationBackground.opacity(0.40))
+    }
+
+    private func settingsGroup(
+        title: String,
+        symbol: String,
+        tint: Color,
+        items: [(id: String, title: String, symbol: String)]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(title.uppercased(), systemImage: symbol)
+                .font(.caption2.bold())
+                .tracking(0.9)
+                .foregroundStyle(tint)
+                .padding(.horizontal, 8)
+
+            ForEach(items, id: \.id) { item in
+                let selected = selection == item.id
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) {
+                        selection = item.id
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: item.symbol)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(selected ? tint : .secondary)
+                            .frame(width: 30, height: 30)
+                            .background(tint.opacity(selected ? 0.17 : 0.07), in: RoundedRectangle(cornerRadius: 8))
+                        Text(item.title)
+                            .font(.subheadline.weight(selected ? .bold : .medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        if selected {
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.bold())
+                                .foregroundStyle(tint)
+                        }
+                    }
+                    .padding(.horizontal, 9)
+                    .frame(minHeight: 44)
+                    .background(
+                        selected ? tint.opacity(0.11) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .overlay {
+                        if selected {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(tint.opacity(0.45), lineWidth: 1)
+                        }
+                    }
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func destination(_ id: String) -> some View {
+        switch id {
+        case "tech": NativeTechnicianSettingsView(settings: settings)
+        case "settingsView": NativeSettingsViewPreferencesView(settings: settings)
+        case "appearance": NativeAppearanceSettingsView(settings: settings)
+        case "overlay": NativeOverlaySettingsView(settings: settings)
+        case "gps": NativeGPSSettingsView(settings: settings, locationService: locationService)
+        case "plusCodes": NativePlusCodeSettingsView(settings: settings, locationService: locationService)
+        case "notifications": NativeNotificationSettingsView(settings: settings)
+        case "reports": NativeReportSettingsView(settings: settings)
+        case "email": NativeEmailSettingsView(settings: settings)
+        case "cloudFiles": NativeStorageSettingsView(settings: settings)
+        case "microsoftStorage": NativeMicrosoftStorageSettingsView(settings: settings)
+        case "sync": NativeSyncSettingsView(settings: settings)
+        case "customerImport": NativeCSVImportView(store: store)
+        case "categories": NativeCategoriesSettingsView(settings: settings, store: store)
+        case "backup": NativeBackupRestoreView(store: store)
+        case "webdav": NativeWebDAVSettingsView(settings: settings)
+        case "privacy": NativePrivacySettingsView(settings: settings)
+        case "security": NativeSecuritySettingsView(settings: settings)
+        case "manual": NativeManualView()
+        case "demo": NativeDemoSettingsView(store: store)
+        case "about":
+            NativeAboutFireVaultView(
+                versionInfo: versionInfo,
+                payload: payload,
+                store: store,
+                settings: settings,
+                breadcrumbs: breadcrumbs
+            )
+        default:
+            ContentUnavailableView(
+                "Choose a Setting",
+                systemImage: "slider.horizontal.3",
+                description: Text("Select a settings page from the list.")
+            )
+        }
+    }
 }
 
 private struct NativeGPSSettingsView: View {
@@ -3654,7 +3931,8 @@ enum NativeShellMetrics {
     static let cardRadius: CGFloat = 18
     static let mapRadius: CGFloat = 22
     static let navigationRadius: CGFloat = 20
-    static let navigationItemHeight: CGFloat = 50
+    static let navigationItemHeight: CGFloat = 48
+    static let navigationContentOffset: CGFloat = 3
     static let pageHorizontalPadding: CGFloat = 16
     static let sectionSpacing: CGFloat = 10
 }

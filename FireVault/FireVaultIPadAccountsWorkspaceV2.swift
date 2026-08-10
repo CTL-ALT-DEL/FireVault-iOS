@@ -23,6 +23,9 @@ struct FireVaultIPadAccountsWorkspaceV2: View {
     @State private var searchText = ""
     @State private var sort: FireVaultIPadAccountSortV2 = .alphabetic
 
+    private var favoriteCount: Int { payload.accounts.filter(\.favorite).count }
+    private var mappedCount: Int { payload.accounts.filter { $0.coordinate != nil }.count }
+
     private var accounts: [FireVaultNativeAccount] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let filtered = query.isEmpty
@@ -68,18 +71,22 @@ struct FireVaultIPadAccountsWorkspaceV2: View {
 
     private var accountList: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(alignment: .center, spacing: 18) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("ACCOUNT LIST")
+                    Text("ACCOUNT DIRECTORY")
                         .font(.caption2.bold())
                         .tracking(1.25)
                         .foregroundStyle(NativeShellPalette.blue)
-                    Text("\(accounts.count) accounts")
-                        .font(.title2.bold())
-                        .foregroundStyle(.white)
+                    Text(searchText.isEmpty ? "All Accounts" : "Search Results")
+                        .font(.largeTitle.bold())
+                        .foregroundStyle(.primary)
                 }
 
                 Spacer()
+
+                directoryMetric("TOTAL", value: payload.accounts.count, symbol: "building.2.fill", tint: NativeShellPalette.blue)
+                directoryMetric("FAVORITES", value: favoriteCount, symbol: "star.fill", tint: NativeShellPalette.amber)
+                directoryMetric("MAPPED", value: mappedCount, symbol: "map.fill", tint: NativeShellPalette.green)
 
                 Menu {
                     Picker("Sort Accounts", selection: $sort) {
@@ -101,7 +108,9 @@ struct FireVaultIPadAccountsWorkspaceV2: View {
                 .buttonStyle(.glassProminent)
                 .accessibilityLabel("Add account")
             }
-            .padding(18)
+            .padding(.horizontal, 22)
+            .padding(.top, 20)
+            .padding(.bottom, 16)
 
             HStack(spacing: 9) {
                 Image(systemName: "magnifyingglass")
@@ -121,61 +130,104 @@ struct FireVaultIPadAccountsWorkspaceV2: View {
             }
             .padding(.horizontal, 13)
             .frame(minHeight: 46)
-            .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(.white.opacity(0.08), lineWidth: 1)
             }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 14)
+            .padding(.horizontal, 22)
+            .padding(.bottom, 18)
 
             if accounts.isEmpty {
                 ContentUnavailableView.search(text: searchText)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 9) {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), spacing: 14, alignment: .top),
+                            GridItem(.flexible(), spacing: 14, alignment: .top)
+                        ],
+                        alignment: .center,
+                        spacing: 14
+                    ) {
                         ForEach(accounts) { account in
                             accountRow(account)
                         }
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 24)
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 28)
                 }
                 .scrollIndicators(.hidden)
+                .refreshable {
+                    store.reloadAccounts()
+                }
             }
         }
-        .frame(maxWidth: 760)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(NativeShellPalette.background)
+    }
+
+    private func directoryMetric(_ title: String, value: Int, symbol: String, tint: Color) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(width: 34, height: 34)
+                .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(value)")
+                    .font(.headline.bold().monospacedDigit())
+                Text(title)
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(0.7)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 11)
+        .frame(height: 48)
+        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(tint.opacity(0.20), lineWidth: 1)
+        }
     }
 
     private func accountRow(_ account: FireVaultNativeAccount) -> some View {
         Button {
             store.openAccount(account.id)
         } label: {
-            HStack(spacing: 13) {
+            HStack(spacing: 15) {
                 Image(systemName: account.favorite ? "star.fill" : "building.2")
                     .foregroundStyle(account.favorite ? NativeShellPalette.amber : NativeShellPalette.blue)
-                    .font(.headline)
-                    .frame(width: 40, height: 40)
-                    .background(NativeShellPalette.surface, in: Circle())
+                    .font(.title3.bold())
+                    .frame(width: 48, height: 48)
+                    .background(
+                        (account.favorite ? NativeShellPalette.amber : NativeShellPalette.blue).opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    )
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(account.name)
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
+                        .font(.title3.bold())
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
                     Text(account.address)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                     HStack(spacing: 10) {
                         if !account.accountId.isEmpty {
                             Label(account.accountId, systemImage: "number")
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(NativeShellPalette.blue.opacity(0.08), in: Capsule())
                         }
                         if !account.category.isEmpty {
                             Label(account.category, systemImage: "tag.fill")
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(NativeShellPalette.amber.opacity(0.08), in: Capsule())
                         }
                     }
                     .font(.caption)
@@ -188,14 +240,16 @@ struct FireVaultIPadAccountsWorkspaceV2: View {
                     .font(.subheadline.bold())
                     .foregroundStyle(.secondary)
             }
-            .padding(14)
+            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .frame(minHeight: 132)
+            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 17, style: .continuous)
-                    .stroke(.white.opacity(0.07), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(NativeShellPalette.hairline, lineWidth: 1)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .shadow(color: .black.opacity(0.13), radius: 8, y: 4)
+            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(account.name), \(account.address)")

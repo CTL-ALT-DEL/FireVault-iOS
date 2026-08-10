@@ -314,7 +314,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 VStack(alignment: .leading, spacing: isLandscape ? 5 : 8) {
                     Text(account.name)
                         .font(.system(size: isLandscape ? 21 : 24, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .lineLimit(2)
                         .minimumScaleFactor(0.82)
                         .fixedSize(horizontal: false, vertical: true)
@@ -343,7 +343,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                         HStack(spacing: 10) {
                             Text(formattedPhone.isEmpty ? "No phone" : formattedPhone)
                                 .font(.headline.bold())
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .lineLimit(1)
 
                             Image(systemName: "phone.fill")
@@ -414,7 +414,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 .foregroundStyle(.secondary)
             Text(value)
                 .font(.caption.bold())
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .lineLimit(1)
         }
         .padding(.horizontal, 9)
@@ -542,11 +542,11 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                             .foregroundStyle(section.tint)
                         Text(section.rawValue)
                             .font(.subheadline.bold())
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
                         Text("\(count(for: section))")
                             .font(.subheadline.bold().monospacedDigit())
-                            .foregroundStyle(selectedSection == section ? .white : .secondary)
+                            .foregroundStyle(selectedSection == section ? .primary : .secondary)
                     }
                     .frame(maxWidth: .infinity, minHeight: 54)
                     .padding(.horizontal, 10)
@@ -689,7 +689,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 .foregroundStyle(selectedSection.tint)
                 .frame(width: 26)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.bold()).foregroundStyle(.white).lineLimit(1)
+                Text(title).font(.subheadline.bold()).foregroundStyle(.primary).lineLimit(1)
                 if !subtitle.isEmpty {
                     Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }

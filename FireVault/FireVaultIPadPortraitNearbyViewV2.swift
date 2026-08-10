@@ -31,6 +31,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+    var showsBottomNavigation = true
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var selectedID: String?
@@ -40,6 +41,9 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
     @State private var zoomLevel = 0.72
     @State private var showsZoomSlider = false
     @State private var zoomVisibilityToken = UUID()
+    @State private var showsTripLogControls = false
+    @State private var confirmsTripLogEnd = false
+    @State private var tripLogControlsTask: Task<Void, Never>?
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
         let maximumMeters = settings.gps.nearbyRadiusMiles * 1_609.344
@@ -88,23 +92,54 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
     var body: some View {
         GeometryReader { geometry in
             let availableWidth = max(0, geometry.size.width - 32)
-            let mapSide = min(availableWidth, max(300, geometry.size.height * 0.50))
+            let usesMapRails = geometry.size.width >= 900
+            let railWidth = usesMapRails ? min(170, max(142, geometry.size.width * 0.125)) : 0
+            let mapWidth = usesMapRails
+                ? max(420, availableWidth - (railWidth * 2) - 28)
+                : availableWidth
+            let mapSide = min(mapWidth, max(300, geometry.size.height * 0.50))
 
             VStack(spacing: 8) {
                 statusHeader
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
 
-                squareMap
-                    .frame(width: mapSide, height: mapSide)
+                tripLogStatusBar
+                    .padding(.horizontal, 16)
+
+                if showsTripLogControls {
+                    tripLogQuickControls
+                        .padding(.horizontal, 16)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
+                if usesMapRails {
+                    HStack(alignment: .top, spacing: 14) {
+                        mapContextRail
+                            .frame(width: railWidth, height: mapSide)
+
+                        squareMap(usesExternalControls: true)
+                            .frame(width: mapSide, height: mapSide)
+
+                        mapActionRail
+                            .frame(width: railWidth, height: mapSide)
+                    }
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, 16)
+                } else {
+                    squareMap(usesExternalControls: false)
+                        .frame(width: mapSide, height: mapSide)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 16)
+                }
 
                 accountList
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(.horizontal, 16)
 
-                bottomNavigation
+                if showsBottomNavigation {
+                    bottomNavigation
+                }
             }
         }
         .background(NativeShellPalette.background)
@@ -114,6 +149,20 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
         .onChange(of: scrollingID) { _, newID in
             guard let newID, let row = nearbyRows.first(where: { $0.id == newID }) else { return }
             select(row, haptic: true, updateScrollPosition: false)
+        }
+        .onDisappear { tripLogControlsTask?.cancel() }
+        .confirmationDialog(
+            "End Today’s Trip Log?",
+            isPresented: $confirmsTripLogEnd,
+            titleVisibility: .visible
+        ) {
+            Button("End Trip Log", role: .destructive) {
+                breadcrumbs.endWorkday()
+                closeTripLogControls()
+            }
+            Button("Keep Recording", role: .cancel) {}
+        } message: {
+            Text("The recorded route and stops will remain in Trip Log history.")
         }
         .accessibilityIdentifier("ipad-portrait-nearby-fixed-map")
     }
@@ -147,6 +196,149 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
         }
     }
 
+    private var tripLogStatusBar: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.22)) {
+                showsTripLogControls.toggle()
+            }
+            if showsTripLogControls { scheduleTripLogControlsClose() }
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(tripLogStatusTint.opacity(0.14))
+                    Image(systemName: breadcrumbs.isRecording ? "location.fill" : "location")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(tripLogStatusTint)
+                }
+                .frame(width: 36, height: 36)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("TRIP LOG")
+                        .font(.caption2.bold())
+                        .tracking(1)
+                        .foregroundStyle(.secondary)
+                    Text(tripLogStatusTitle)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(tripLogStatusTint)
+                }
+
+                Divider().frame(height: 32)
+                tripMetric("MILES", value: tripMiles, symbol: "road.lanes")
+                tripMetric("STOPS", value: "\(tripDay?.stops.count ?? 0)", symbol: "mappin.and.ellipse")
+                tripMetric("ELAPSED", value: tripElapsed, symbol: "clock")
+                Spacer(minLength: 8)
+
+                Image(systemName: showsTripLogControls ? "chevron.up" : "chevron.down")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 15)
+            .frame(height: 58)
+            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.black.opacity(0.36), lineWidth: 2)
+                    .blur(radius: 0.8)
+                    .mask(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Trip Log, \(tripLogStatusTitle)")
+        .accessibilityHint("Shows Trip Log recording controls")
+    }
+
+    private var tripLogQuickControls: some View {
+        HStack(spacing: 12) {
+            if breadcrumbs.activeDay == nil {
+                Button("Start Trip Log", systemImage: "play.fill") {
+                    breadcrumbs.startWorkday(accounts: store.accounts)
+                    closeTripLogControls()
+                }
+                .buttonStyle(.borderedProminent)
+            } else if breadcrumbs.isRecording {
+                Button("Pause", systemImage: "pause.fill") {
+                    breadcrumbs.pauseWorkday()
+                    closeTripLogControls()
+                }
+                .buttonStyle(.bordered)
+                Button("Stop", systemImage: "stop.fill", role: .destructive) {
+                    confirmsTripLogEnd = true
+                }
+                .buttonStyle(.bordered)
+            } else {
+                Button("Resume", systemImage: "play.fill") {
+                    breadcrumbs.resumeWorkday(accounts: store.accounts)
+                    closeTripLogControls()
+                }
+                .buttonStyle(.borderedProminent)
+                Button("Stop", systemImage: "stop.fill", role: .destructive) {
+                    confirmsTripLogEnd = true
+                }
+                .buttonStyle(.bordered)
+            }
+
+            Spacer()
+            Text("Closes automatically")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+    }
+
+    private var tripDay: FireVaultBreadcrumbDay? { breadcrumbs.activeDay ?? breadcrumbs.today }
+
+    private var tripLogStatusTitle: String {
+        if breadcrumbs.isRecording { return "RECORDING" }
+        if breadcrumbs.activeDay?.isPaused == true { return "PAUSED" }
+        return breadcrumbs.activeDay == nil ? "READY" : "COMPLETE"
+    }
+
+    private var tripLogStatusTint: Color {
+        if breadcrumbs.isRecording { return NativeShellPalette.green }
+        if breadcrumbs.activeDay?.isPaused == true { return NativeShellPalette.amber }
+        return NativeShellPalette.blue
+    }
+
+    private var tripMiles: String {
+        String(format: "%.1f", (tripDay?.totalDistanceMeters ?? 0) / 1_609.344)
+    }
+
+    private var tripElapsed: String {
+        let seconds = max(0, Int((tripDay?.elapsedTime ?? 0).rounded()))
+        return String(format: "%02d:%02d", seconds / 3_600, (seconds % 3_600) / 60)
+    }
+
+    private func tripMetric(_ title: String, value: String, symbol: String) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: symbol)
+                .font(.caption.bold())
+                .foregroundStyle(NativeShellPalette.blue)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(value).font(.subheadline.bold().monospacedDigit())
+                Text(title)
+                    .font(.system(size: 8, weight: .bold))
+                    .tracking(0.7)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(minWidth: 104, alignment: .leading)
+    }
+
+    private func scheduleTripLogControlsClose() {
+        tripLogControlsTask?.cancel()
+        tripLogControlsTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.2)) { showsTripLogControls = false }
+        }
+    }
+
+    private func closeTripLogControls() {
+        tripLogControlsTask?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) { showsTripLogControls = false }
+    }
+
     private var radiusBinding: Binding<Double> {
         Binding(
             get: { settings.gps.nearbyRadiusMiles },
@@ -158,7 +350,198 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
         )
     }
 
-    private var squareMap: some View {
+    private var mapContextRail: some View {
+        VStack(spacing: 12) {
+            portraitRailMetric(
+                title: "IN RANGE",
+                value: "\(nearbyRows.count)",
+                subtitle: "accounts",
+                symbol: "building.2.fill",
+                tint: NativeShellPalette.blue
+            )
+
+            portraitRailMetric(
+                title: "RADIUS",
+                value: settings.gps.radiusStatus,
+                subtitle: "field area",
+                symbol: "scope",
+                tint: NativeShellPalette.amber
+            )
+
+            if let selectedRow,
+               let selectedIndex = nearbyRows.firstIndex(where: { $0.id == selectedRow.id }) {
+                portraitRailMetric(
+                    title: "SELECTED",
+                    value: "#\(selectedIndex + 1)",
+                    subtitle: selectedRow.distanceLabel,
+                    symbol: "mappin.circle.fill",
+                    tint: NativeShellPalette.red
+                )
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(spacing: 8) {
+                Image(systemName: payload.demoMode ? "sparkles.rectangle.stack" : "location.fill")
+                    .font(.title3.bold())
+                    .foregroundStyle(payload.demoMode ? NativeShellPalette.amber : NativeShellPalette.green)
+                Text(payload.demoMode ? "DEMO DATA" : "LIVE LOCATION")
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+                Text(payload.locationStatus)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity)
+            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        }
+    }
+
+    private func portraitRailMetric(
+        title: String,
+        value: String,
+        subtitle: String,
+        symbol: String,
+        tint: Color
+    ) -> some View {
+        VStack(spacing: 7) {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(width: 38, height: 38)
+                .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            Text(title)
+                .font(.system(size: 9, weight: .bold))
+                .tracking(0.9)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3.bold().monospacedDigit())
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+            Text(subtitle)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.vertical, 13)
+        .frame(maxWidth: .infinity)
+        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 17, style: .continuous)
+                .stroke(.white.opacity(0.07), lineWidth: 1)
+        }
+    }
+
+    private var mapActionRail: some View {
+        VStack(spacing: 12) {
+            VStack(spacing: 9) {
+                Text("MAP TOOLS")
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(0.9)
+                    .foregroundStyle(.secondary)
+
+                Menu {
+                    Picker("Map Layer", selection: $mapLayer) {
+                        ForEach(FireVaultNearbyMapLayer.allCases) { layer in
+                            Label(layer.rawValue, systemImage: layer.symbol).tag(layer)
+                        }
+                    }
+                } label: {
+                    Label(mapLayer.rawValue, systemImage: "square.3.layers.3d")
+                        .font(.caption.bold())
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.bordered)
+
+                VStack(spacing: 8) {
+                    Image(systemName: "plus.magnifyingglass")
+                        .font(.caption.bold())
+                        .foregroundStyle(NativeShellPalette.blue)
+                    Slider(value: $zoomLevel, in: 0...1, step: 0.02)
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 112, height: 34)
+                        .padding(.vertical, 40)
+                        .onChange(of: zoomLevel) { _, _ in applyZoom() }
+                    Text("ZOOM")
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity)
+            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+
+            Spacer(minLength: 4)
+
+            if let selectedRow {
+                VStack(spacing: 9) {
+                    Text("ACCOUNT ACTIONS")
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundStyle(.secondary)
+
+                    portraitRailAction("Details", symbol: "note.text", tint: NativeShellPalette.amber) {
+                        store.openAccount(selectedRow.account.id)
+                    }
+                    portraitRailAction(
+                        "Call",
+                        symbol: "phone.fill",
+                        tint: NativeShellPalette.green,
+                        disabled: !selectedRow.account.phone.contains(where: \.isNumber)
+                    ) {
+                        store.call(selectedRow.account.phone)
+                    }
+                    portraitRailAction(
+                        "Route",
+                        symbol: "arrow.triangle.turn.up.right.diamond.fill",
+                        tint: NativeShellPalette.blue,
+                        disabled: selectedRow.account.coordinate == nil
+                    ) {
+                        if let account = store.accounts.first(where: { $0.id == selectedRow.account.id }) {
+                            store.openRoute(for: account)
+                        }
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity)
+                .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            }
+        }
+    }
+
+    private func portraitRailAction(
+        _ title: String,
+        symbol: String,
+        tint: Color,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol)
+                    .font(.caption.bold())
+                    .frame(width: 25, height: 25)
+                    .background(tint.opacity(0.16), in: Circle())
+                Text(title)
+                    .font(.caption.bold())
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(disabled ? Color.secondary : tint)
+            .padding(.horizontal, 9)
+            .frame(maxWidth: .infinity, minHeight: 42)
+            .background(NativeShellPalette.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
+
+    private func squareMap(usesExternalControls: Bool) -> some View {
         ZStack(alignment: Alignment.topLeading) {
             if nearbyRows.isEmpty && locationService.coordinate == nil {
                 ContentUnavailableView(
@@ -193,7 +576,8 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
             }
         }
         .overlay(alignment: Alignment.topTrailing) {
-            VStack(spacing: 7) {
+            if !usesExternalControls {
+                VStack(spacing: 7) {
                 Menu {
                     Picker("Map Layer", selection: $mapLayer) {
                         ForEach(FireVaultNearbyMapLayer.allCases) { layer in
@@ -219,11 +603,12 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: UnitPoint.top)))
                         .accessibilityLabel("Map zoom")
                 }
+                }
+                .padding(12)
             }
-            .padding(12)
         }
         .overlay(alignment: Alignment.bottomTrailing) {
-            if let selectedRow {
+            if !usesExternalControls, let selectedRow {
                 FireVaultMapActionStrip {
                     FireVaultMapControlButton(role: .note, label: "Open account details") {
                         store.openAccount(selectedRow.account.id)

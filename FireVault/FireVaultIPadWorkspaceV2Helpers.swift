@@ -8,7 +8,7 @@
 import MapKit
 import SwiftUI
 
-struct FireVaultIPadLegacyDetailHostV2: View {
+struct FireVaultIPadPortraitWorkspace: View {
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
@@ -16,23 +16,124 @@ struct FireVaultIPadLegacyDetailHostV2: View {
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
 
     var body: some View {
-        GeometryReader { geometry in
-            NativeAppShellView(
-                payload: payload,
-                store: store,
-                settings: settings,
-                locationService: locationService,
-                breadcrumbs: breadcrumbs
-            )
-            .frame(
-                width: geometry.size.width,
-                height: geometry.size.height + 76,
-                alignment: .top
-            )
+        Group {
+            switch store.selectedTab {
+            case .nearby:
+                FireVaultIPadPortraitNearbyViewV2(
+                    payload: payload,
+                    store: store,
+                    settings: settings,
+                    locationService: locationService,
+                    breadcrumbs: breadcrumbs,
+                    showsBottomNavigation: false
+                )
+            case .accounts:
+                FireVaultIPadAccountsWorkspaceV2(payload: payload, store: store)
+            case .trip:
+                FireVaultTripLogPortraitView(
+                    breadcrumbs: breadcrumbs,
+                    store: store,
+                    technicianName: settings.preferences.technician.name,
+                    companyName: settings.preferences.technician.company,
+                    includeCoordinatesInReports: settings.gps.includeCoordinatesInReports,
+                    showsCloseButton: false
+                )
+            case .photo:
+                NativePhotoView(store: store, settings: settings)
+            case .settings:
+                FireVaultIPadSettingsWorkspace(
+                    payload: payload,
+                    store: store,
+                    settings: settings,
+                    locationService: locationService,
+                    breadcrumbs: breadcrumbs
+                )
+            }
         }
-        .clipped()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(NativeShellPalette.background)
-        .accessibilityIdentifier("ipad-adapted-detail-host")
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            portraitNavigation
+        }
+        .accessibilityIdentifier("ipad-portrait-workspace")
+    }
+
+    private var portraitNavigation: some View {
+        HStack(spacing: 0) {
+            ForEach(FireVaultShellTab.allCases) { tab in
+                let selected = tab == store.selectedTab
+                Button {
+                    if tab == .nearby { store.requestNearbyReset() }
+                    withAnimation(.snappy(duration: 0.25)) {
+                        store.closeAccount(to: tab)
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: tab.symbol)
+                            .font(.system(size: 21, weight: selected ? .bold : .semibold))
+                            .symbolVariant(selected ? .fill : .none)
+                            .foregroundStyle(
+                                tab == .trip && breadcrumbs.isRecording
+                                    ? NativeShellPalette.green
+                                    : (selected ? NativeShellPalette.blue : NativeShellPalette.navigationInactive)
+                            )
+                            .frame(width: 38, height: 29)
+                            .background(
+                                selected ? NativeShellPalette.blue.opacity(0.12) : .clear,
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            )
+                        Text(tab.title)
+                            .font(.caption.weight(selected ? .bold : .semibold))
+                    }
+                    .foregroundStyle(selected ? NativeShellPalette.blue : NativeShellPalette.navigationInactive)
+                    .frame(maxWidth: .infinity, minHeight: 62)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 5)
+        .padding(.bottom, 2)
+        .background(NativeShellPalette.navigationBackground.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) {
+            Rectangle().fill(NativeShellPalette.navigationDivider).frame(height: 1)
+        }
+        .shadow(color: .black.opacity(0.24), radius: 10, y: -3)
+    }
+}
+
+struct FireVaultIPadUtilityWorkspaceV2: View {
+    let payload: FireVaultAppPayload
+    @ObservedObject var store: FireVaultStore
+    @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var locationService: FireVaultLocationService
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+
+    var body: some View {
+        Group {
+            switch store.selectedTab {
+            case .photo:
+                NativePhotoView(store: store, settings: settings)
+            case .settings:
+                FireVaultIPadSettingsWorkspace(
+                    payload: payload,
+                    store: store,
+                    settings: settings,
+                    locationService: locationService,
+                    breadcrumbs: breadcrumbs
+                )
+            default:
+                ContentUnavailableView(
+                    "Workspace Unavailable",
+                    systemImage: "rectangle.split.2x1",
+                    description: Text("Choose a workspace from the sidebar.")
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(NativeShellPalette.background)
+        .accessibilityIdentifier("ipad-utility-workspace")
     }
 }
 

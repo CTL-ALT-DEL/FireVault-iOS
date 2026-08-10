@@ -17,7 +17,6 @@ struct FireVaultIPadBreadcrumbsView: View {
     let includeCoordinatesInReports: Bool
 
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.dismiss) private var dismiss
     @State private var selectedDayID: UUID?
     @State private var selectedStop: FireVaultIPadStopSelection?
     @State private var confirmsEnd = false
@@ -75,20 +74,8 @@ struct FireVaultIPadBreadcrumbsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .background(NativeShellPalette.background)
-            .navigationTitle("")
+            .navigationTitle("Trip Log")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Close", systemImage: "xmark", action: dismiss.callAsFunction)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    if selectedDay != nil {
-                        Button("Report", systemImage: "doc.text") {
-                            showsReport = true
-                        }
-                    }
-                }
-            }
             .confirmationDialog(
                 "End Today’s Workday?",
                 isPresented: $confirmsEnd,
@@ -150,113 +137,137 @@ struct FireVaultIPadBreadcrumbsView: View {
 
                 Spacer()
 
-                if !breadcrumbs.days.isEmpty {
-                    Menu {
-                        ForEach(breadcrumbs.days) { day in
-                            Button {
-                                selectedDayID = day.id
-                            } label: {
-                                Label(
-                                    day.startedAt.formatted(date: .abbreviated, time: .omitted),
-                                    systemImage: day.isActive ? "record.circle" : "calendar"
-                                )
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "calendar")
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("Trip Log history")
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(indicatorTitle)
+                        .font(.caption.bold())
+                        .tracking(0.8)
+                        .foregroundStyle(indicatorTint)
+                    Text(breadcrumbs.statusText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
         }
     }
 
     private var trackingControls: some View {
-        NativeShellCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Label(
-                        breadcrumbs.isRecording ? "Workday Recording" : "Workday Tracking",
-                        systemImage: breadcrumbs.isRecording ? "location.fill" : "location"
-                    )
-                    .font(.headline)
-                    .foregroundStyle(breadcrumbs.isRecording ? NativeShellPalette.green : .white)
+        VStack(spacing: 9) {
+            HStack(spacing: 10) {
+                historyMenu
+                reportButton
+            }
+            .padding(9)
+            .background(
+                NativeShellPalette.blue.opacity(0.10),
+                in: RoundedRectangle(cornerRadius: 17, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .stroke(NativeShellPalette.blue.opacity(0.32), lineWidth: 1)
+            }
 
-                    Spacer()
+            HStack(spacing: 10) {
+                Label(indicatorTitle, systemImage: breadcrumbs.isRecording ? "location.fill" : "location")
+                    .font(.caption.bold())
+                    .foregroundStyle(indicatorTint)
+                Spacer()
+                recordingMenu
+            }
 
-                    if breadcrumbs.isRecording {
-                        Circle()
-                            .fill(NativeShellPalette.green)
-                            .frame(width: 10, height: 10)
-                            .shadow(color: NativeShellPalette.green.opacity(0.7), radius: 5)
-                    }
+            if breadcrumbs.permissionState.requiresSettings {
+                Button("Open Location Settings", systemImage: "gearshape") {
+                    breadcrumbs.openLocationSettings()
                 }
-
-                Text(breadcrumbs.statusText)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                Divider()
-
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(breadcrumbs.permissionState.title)
-                            .font(.subheadline.weight(.semibold))
-                        Text(breadcrumbs.permissionState.detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: breadcrumbs.permissionState.systemImage)
-                        .foregroundStyle(
-                            breadcrumbs.permissionState.isAuthorized
-                                ? NativeShellPalette.green
-                                : NativeShellPalette.amber
-                        )
-                }
-
-                if breadcrumbs.permissionState.requiresSettings {
-                    Button("Open Location Settings", systemImage: "gearshape") {
-                        breadcrumbs.openLocationSettings()
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-
-                if breadcrumbs.activeDay == nil {
-                    if breadcrumbs.authorizationStatus != .denied,
-                       breadcrumbs.authorizationStatus != .restricted {
-                        Button("Start Workday", systemImage: "play.fill") {
-                            breadcrumbs.startWorkday(accounts: store.accounts)
-                            selectedDayID = breadcrumbs.activeDay?.id
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                } else {
-                    HStack {
-                        if breadcrumbs.isRecording {
-                            Button("Pause", systemImage: "pause.fill") {
-                                breadcrumbs.pauseWorkday()
-                            }
-                            .buttonStyle(.bordered)
-                        } else if breadcrumbs.permissionState.isAuthorized
-                                    || breadcrumbs.authorizationStatus == .notDetermined {
-                            Button("Resume", systemImage: "play.fill") {
-                                breadcrumbs.resumeWorkday(accounts: store.accounts)
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-
-                        Spacer()
-
-                        Button("End Day", systemImage: "stop.fill", role: .destructive) {
-                            confirmsEnd = true
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
+                .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    private var indicatorTitle: String {
+        if breadcrumbs.isRecording { return "RECORDING" }
+        if breadcrumbs.activeDay?.isPaused == true { return "PAUSED" }
+        if breadcrumbs.activeDay == nil { return "READY" }
+        return "COMPLETE"
+    }
+
+    private var indicatorTint: Color {
+        if breadcrumbs.isRecording { return NativeShellPalette.green }
+        if breadcrumbs.activeDay?.isPaused == true { return NativeShellPalette.amber }
+        return NativeShellPalette.blue
+    }
+
+    private var historyMenu: some View {
+        Menu {
+            ForEach(breadcrumbs.days) { day in
+                Button {
+                    selectedDayID = day.id
+                } label: {
+                    Label(
+                        day.startedAt.formatted(date: .abbreviated, time: .omitted),
+                        systemImage: day.isActive ? "record.circle" : "calendar"
+                    )
+                }
+            }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: "calendar.badge.clock")
+                    .font(.system(size: 27, weight: .bold))
+                Text("HISTORY").font(.caption.bold())
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 58)
+        }
+        .buttonStyle(.bordered)
+        .disabled(breadcrumbs.days.isEmpty)
+    }
+
+    private var reportButton: some View {
+        Button {
+            showsReport = true
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: "doc.text.fill")
+                    .font(.system(size: 27, weight: .bold))
+                Text("REPORT").font(.caption.bold())
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 58)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(selectedDay == nil)
+    }
+
+    private var recordingMenu: some View {
+        Menu {
+            if breadcrumbs.activeDay == nil {
+                Button("Start Trip Log", systemImage: "play.fill") {
+                    breadcrumbs.startWorkday(accounts: store.accounts)
+                    selectedDayID = breadcrumbs.activeDay?.id
+                }
+            } else if breadcrumbs.isRecording {
+                Button("Pause Recording", systemImage: "pause.fill") {
+                    breadcrumbs.pauseWorkday()
+                }
+                Button("Stop Trip Log", systemImage: "stop.fill", role: .destructive) {
+                    confirmsEnd = true
+                }
+            } else {
+                Button("Resume Recording", systemImage: "play.fill") {
+                    breadcrumbs.resumeWorkday(accounts: store.accounts)
+                }
+                Button("Stop Trip Log", systemImage: "stop.fill", role: .destructive) {
+                    confirmsEnd = true
+                }
+            }
+        } label: {
+            Label("Recording Controls", systemImage: "slider.horizontal.3")
+                .font(.caption.bold())
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(indicatorTint)
     }
 
     @ViewBuilder

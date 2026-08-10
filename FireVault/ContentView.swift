@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @StateObject private var store = FireVaultStore()
@@ -13,6 +14,7 @@ struct ContentView: View {
     @StateObject private var locationService = FireVaultLocationService()
     @StateObject private var liveBreadcrumbs = FireVaultBreadcrumbStore()
     @StateObject private var quickActions = FireVaultQuickActionCenter.shared
+    @StateObject private var widgetDeepLinks = FireVaultWidgetDeepLinkCenter.shared
     @StateObject private var privacyLock = FireVaultPrivacyLockController()
     @State private var demoBreadcrumbs: FireVaultBreadcrumbStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -58,6 +60,8 @@ struct ContentView: View {
             store.configureCategoryRules(settings.preferences.categoryRules ?? [])
             privacyLock.configure(enabled: settings.preferences.privacy.enabled)
             handlePendingQuickAction()
+            handlePendingWidgetDeepLink()
+            updateWidgetSnapshot()
             guard showsSplash else { return }
             try? await Task.sleep(for: .seconds(reduceMotion ? 1.15 : 3.65))
             guard !Task.isCancelled else { return }
@@ -74,6 +78,7 @@ struct ContentView: View {
                     privacyLock.authenticate()
                 } else {
                     handlePendingQuickAction()
+                    handlePendingWidgetDeepLink()
                 }
             case .background:
                 privacyLock.enteredBackground()
@@ -82,10 +87,16 @@ struct ContentView: View {
             }
         }
         .onChange(of: privacyLock.isUnlocked) { _, unlocked in
-            if unlocked { handlePendingQuickAction() }
+            if unlocked {
+                handlePendingQuickAction()
+                handlePendingWidgetDeepLink()
+            }
         }
         .onChange(of: quickActions.pendingAction) { _, _ in
             handlePendingQuickAction()
+        }
+        .onChange(of: widgetDeepLinks.pendingLink) { _, _ in
+            handlePendingWidgetDeepLink()
         }
         .onChange(of: settings.preferences.privacy.enabled) { _, enabled in
             privacyLock.configure(enabled: enabled)
@@ -96,6 +107,16 @@ struct ContentView: View {
         }
         .onChange(of: store.demoMode) { _, _ in
             prepareActiveVault()
+            updateWidgetSnapshot()
+        }
+        .onChange(of: store.selectedAccountID) { _, _ in
+            updateWidgetSnapshot()
+        }
+        .onChange(of: activeBreadcrumbs.days) { _, _ in
+            updateWidgetSnapshot()
+        }
+        .onChange(of: activeBreadcrumbs.isRecording) { _, _ in
+            updateWidgetSnapshot()
         }
         .onChange(of: store.accounts.count) { _, count in
             guard store.demoMode, count <= 4 else { return }
@@ -114,13 +135,14 @@ struct ContentView: View {
 
     private func applicationContent(availableSize: CGSize) -> some View {
         let isLandscapeWindow = availableSize.width > availableSize.height
-        let usesRegularIPad = horizontalSizeClass == .regular && availableSize.width >= 600
+        let isIPadDevice = UIDevice.current.userInterfaceIdiom == .pad
+        let usesRegularIPad = (horizontalSizeClass == .regular || isIPadDevice)
+            && availableSize.width >= 600
         let usesWideWorkspace = usesRegularIPad
             && isLandscapeWindow
             && availableSize.width >= 900
-        let usesPortraitIPadNearby = usesRegularIPad
+        let usesPortraitIPadWorkspace = usesRegularIPad
             && !isLandscapeWindow
-            && store.selectedTab == .nearby
             && store.selectedAccount == nil
         let payload = store.appPayload(
             userCoordinate: locationService.coordinate,
@@ -133,16 +155,7 @@ struct ContentView: View {
             ZStack {
                 NativeShellPalette.background.ignoresSafeArea()
 
-                if let account = store.selectedAccount, usesRegularIPad {
-                    FireVaultAdaptiveAccountDetailsView(
-                        account: account,
-                        store: store,
-                        locationService: locationService,
-                        returnTab: store.selectedTab,
-                        returnTitle: store.selectedTab == .nearby ? "Nearby" : "Account List"
-                    )
-                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
-                } else if usesWideWorkspace {
+                if usesWideWorkspace {
                     FireVaultIPadWorkspaceV3(
                         payload: payload,
                         store: store,
@@ -151,6 +164,15 @@ struct ContentView: View {
                         breadcrumbs: activeBreadcrumbs
                     )
                     .transition(.opacity)
+                } else if let account = store.selectedAccount, usesRegularIPad {
+                    FireVaultAdaptiveAccountDetailsView(
+                        account: account,
+                        store: store,
+                        locationService: locationService,
+                        returnTab: store.selectedTab,
+                        returnTitle: store.selectedTab == .nearby ? "Nearby" : "Account List"
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 } else if let account = store.selectedAccount {
                     FieldWorkspaceView(
                         account: account,
@@ -159,8 +181,8 @@ struct ContentView: View {
                         locationService: locationService
                     )
                         .transition(.opacity.combined(with: .scale(scale: 0.985)))
-                } else if usesPortraitIPadNearby {
-                    FireVaultIPadPortraitNearbyViewV2(
+                } else if usesPortraitIPadWorkspace {
+                    FireVaultIPadPortraitWorkspace(
                         payload: payload,
                         store: store,
                         settings: settings,
@@ -216,24 +238,102 @@ struct ContentView: View {
             store.closeAccount(to: .photo)
             store.requestCapture(.scan)
         }
+        updateWidgetSnapshot()
+    }
+
+    private func handlePendingWidgetDeepLink() {
+        guard !isPrivacyLocked, let link = widgetDeepLinks.consume() else { return }
+
+        switch link {
+        case .tripLog:
+            store.closeAccount(to: .trip)
+        case .startTripLog:
+            store.closeAccount(to: .trip)
+            if let day = activeBreadcrumbs.activeDay, day.isPaused {
+                activeBreadcrumbs.resumeWorkday(accounts: store.accounts)
+            } else if activeBreadcrumbs.activeDay == nil {
+                activeBreadcrumbs.startWorkday(accounts: store.accounts)
+            }
+        case .accounts:
+            store.closeAccount(to: .accounts)
+        case .photo:
+            store.closeAccount(to: .photo)
+            store.requestCapture(.photo)
+        }
+        updateWidgetSnapshot()
+    }
+
+    private func updateWidgetSnapshot() {
+        let existing = FireVaultWidgetSharedStore.load()
+        let day = activeBreadcrumbs.activeDay ?? activeBreadcrumbs.today
+        let account = store.selectedAccount
+
+        let state: FireVaultWidgetSnapshot.TripState
+        if activeBreadcrumbs.isRecording {
+            state = .recording
+        } else if activeBreadcrumbs.activeDay?.isPaused == true {
+            state = .paused
+        } else if day?.endedAt != nil {
+            state = .complete
+        } else {
+            state = .ready
+        }
+
+        FireVaultWidgetSharedStore.save(
+            FireVaultWidgetSnapshot(
+                updatedAt: Date(),
+                tripState: state,
+                tripStartedAt: day?.startedAt,
+                elapsedSeconds: day?.elapsedTime ?? 0,
+                distanceMiles: (day?.totalDistanceMeters ?? 0) / 1_609.344,
+                stopCount: day?.stops.count ?? 0,
+                accountName: account?.name ?? existing.accountName,
+                accountID: account?.accountId ?? existing.accountID,
+                accountCategory: account?.category ?? existing.accountCategory
+            )
+        )
     }
 }
 
 private struct FireVaultPrivacyShieldView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         ZStack {
             NativeShellPalette.background.ignoresSafeArea()
-            VStack(spacing: 12) {
-                Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 46))
-                    .foregroundStyle(NativeShellPalette.blue)
-                Text("FireVault Pro")
-                    .font(.title2.bold())
-                Text("Workspace hidden")
+            VStack(spacing: 16) {
+                ZStack(alignment: .bottomTrailing) {
+                    FireVaultProIconBadge(size: 92, cornerRadius: 21)
+                        .shadow(color: .black.opacity(0.38), radius: 12, y: 7)
+
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 34)
+                        .background(NativeShellPalette.red, in: Circle())
+                        .overlay {
+                            Circle()
+                                .stroke(NativeShellPalette.background, lineWidth: 4)
+                        }
+                        .offset(x: 7, y: 7)
+                }
+
+                FireVaultProWordmark(
+                    vaultColor: colorScheme == .light ? .black : .white,
+                    proColor: colorScheme == .light ? .black : .white,
+                    fontSize: 27,
+                    proFontSize: 9,
+                    tracking: 1.1,
+                    hasBackground: false
+                )
+
+                Text("Workspace protected")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("FireVault Pro workspace protected")
         .accessibilityIdentifier("firevault-app-switcher-shield")
     }
 }
@@ -302,7 +402,6 @@ private struct FireVaultSplashView: View {
     @State private var logoIsVisible = false
     @State private var titleIsVisible = false
     @State private var detailIsVisible = false
-    @State private var haloIsExpanded = false
     @State private var shineOffset: CGFloat = -220
 
     var body: some View {
@@ -323,11 +422,6 @@ private struct FireVaultSplashView: View {
 
             VStack(spacing: 24) {
                 ZStack {
-                    Circle()
-                        .stroke(NativeShellPalette.red.opacity(haloIsExpanded ? 0.04 : 0.28), lineWidth: 2)
-                        .frame(width: 218, height: 218)
-                        .scaleEffect(haloIsExpanded ? 1.16 : 0.82)
-
                     FireVaultProIconBadge(size: 176, cornerRadius: 39)
                         .overlay {
                             RoundedRectangle(cornerRadius: 39, style: .continuous)
@@ -394,16 +488,12 @@ private struct FireVaultSplashView: View {
                 logoIsVisible = true
                 titleIsVisible = true
                 detailIsVisible = true
-                haloIsExpanded = true
             } else {
                 try? await Task.sleep(for: .milliseconds(140))
                 guard !Task.isCancelled else { return }
 
                 withAnimation(.spring(response: 0.7, dampingFraction: 0.7)) {
                     logoIsVisible = true
-                }
-                withAnimation(.easeOut(duration: 1.4)) {
-                    haloIsExpanded = true
                 }
 
                 try? await Task.sleep(for: .milliseconds(650))
