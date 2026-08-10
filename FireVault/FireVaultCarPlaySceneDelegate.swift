@@ -16,7 +16,12 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private weak var interfaceController: CPInterfaceController?
     private let store = FireVaultStore()
     private let settings = FireVaultNativeSettingsStore()
-    private let breadcrumbs = FireVaultBreadcrumbStore()
+    // Share the live Trip Log owner with the handset scene. Demo Mode keeps a
+    // separate deterministic archive so CarPlay can never write demo activity
+    // into the technician's live history.
+    private lazy var breadcrumbs: FireVaultBreadcrumbStore = store.demoMode
+        ? FireVaultDemoShowroom.makeBreadcrumbStore()
+        : FireVaultBreadcrumbStore.shared
     private let locationService = FireVaultLocationService()
 
     private var nearbyTemplate: CPListTemplate?
@@ -421,17 +426,17 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
               let interfaceController else { return }
 
         announcedArrivalAccountID = account.id
-        let viewPoints = CPAlertAction(title: "View Arrival Points", style: .default) { [weak self] _ in
+        let viewPoints = CPAlertAction(title: "View Map", style: .default) { [weak self] _ in
             self?.dismissArrivalPrompt {
                 self?.showArrivalPoints(for: account)
             }
         }
-        let dismiss = CPAlertAction(title: "Not Now", style: .cancel) { [weak self] _ in
+        let dismiss = CPAlertAction(title: "Dismiss", style: .cancel) { [weak self] _ in
             self?.dismissArrivalPrompt()
         }
         interfaceController.presentTemplate(
             CPAlertTemplate(
-                titleVariants: ["Arriving at \(account.name)", "Arrival points are available"],
+                titleVariants: ["Arrival Points Ready"],
                 actions: [viewPoints, dismiss]
             ),
             animated: true,
@@ -487,7 +492,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
             CPInformationItem(title: "ELEVATION", detail: store.demoMode ? "5,284 ft" : currentElevationText(location, day: day)),
             CPInformationItem(title: "TRIP", detail: store.demoMode ? "42.6 mi" : distanceText(day)),
             CPInformationItem(title: "TIME", detail: store.demoMode ? "00:48:17" : elapsedText(day?.elapsedTime ?? 0)),
-            CPInformationItem(title: "STOPS", detail: store.demoMode ? "2 stops" : stopCountText(day))
+            CPInformationItem(title: "STOPS", detail: store.demoMode ? "2 stops" : stopSummaryText(day))
         ]
     }
 
@@ -528,16 +533,30 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private func confirmEndTripLog() {
         guard let interfaceController else { return }
         let end = CPAlertAction(title: "End Trip Log", style: .destructive) { [weak self] _ in
-            guard let self else { return }
-            breadcrumbs.endWorkday()
-            refreshCarPlayState()
+            self?.endTripLogAndReturnHome()
         }
-        let cancel = CPAlertAction(title: "Keep Recording", style: .cancel) { _ in }
+        let cancel = CPAlertAction(title: "Keep Recording", style: .cancel) { [weak self] _ in
+            self?.dismissTripLogConfirmation()
+        }
         interfaceController.presentTemplate(
             CPAlertTemplate(titleVariants: ["End today’s Trip Log?"], actions: [end, cancel]),
             animated: true,
             completion: nil
         )
+    }
+
+    private func endTripLogAndReturnHome() {
+        breadcrumbs.endWorkday()
+        refreshCarPlayState()
+
+        guard let interfaceController else { return }
+        interfaceController.dismissTemplate(animated: true) { [weak self] _, _ in
+            self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
+        }
+    }
+
+    private func dismissTripLogConfirmation() {
+        interfaceController?.dismissTemplate(animated: true, completion: nil)
     }
 
     // MARK: - Live refresh
@@ -624,6 +643,9 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     }
 
     private var tripLogStatus: String {
+        if breadcrumbs.activeDay?.stops.contains(where: { $0.departure == nil }) == true {
+            return "On Site"
+        }
         if breadcrumbs.isRecording { return "Recording" }
         if breadcrumbs.activeDay?.isPaused == true { return "Paused" }
         if breadcrumbs.activeDay == nil { return "Ready" }
@@ -698,6 +720,14 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private func stopCountText(_ day: FireVaultBreadcrumbDay?) -> String {
         let count = day?.stops.count ?? 0
         return count == 1 ? "1 stop" : "\(count) stops"
+    }
+
+    private func stopSummaryText(_ day: FireVaultBreadcrumbDay?) -> String {
+        guard let day,
+              let activeStop = day.stops.last(where: { $0.departure == nil }) else {
+            return stopCountText(day)
+        }
+        return "\(stopCountText(day)) • On site \(elapsedText(activeStop.duration))"
     }
 
     private func elapsedText(_ elapsedTime: TimeInterval) -> String {

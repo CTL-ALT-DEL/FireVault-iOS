@@ -40,7 +40,10 @@ enum FireVaultDemoShowroom {
         if forceReset || !FileManager.default.fileExists(atPath: url.path) {
             writeBreadcrumbArchive(to: url)
         }
-        return FireVaultBreadcrumbStore(archiveURL: url)
+        return FireVaultBreadcrumbStore(
+            archiveURL: url,
+            liveActivitiesEnabled: false
+        )
     }
 
     static var summary: (equipment: Int, locations: Int, notes: Int, routePoints: Int) {

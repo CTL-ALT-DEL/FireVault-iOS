@@ -45,6 +45,8 @@
 	<string>FireVault Pro uses your location to identify nearby accounts and record a workday route when you start Trip Log.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>FireVault Pro imports site and equipment photos that you select from your photo library.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

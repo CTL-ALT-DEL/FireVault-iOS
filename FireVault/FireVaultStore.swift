@@ -394,6 +394,32 @@ final class FireVaultStore: ObservableObject {
     ) -> Bool {
         guard let index = accounts.firstIndex(where: { $0.id == id }) else { return false }
 
+        return updateAccount(
+            id: id,
+            name: name,
+            address: address,
+            category: category,
+            accountId: accountId,
+            phone: phone,
+            latitude: accounts[index].latitude,
+            longitude: accounts[index].longitude
+        )
+    }
+
+    @discardableResult
+    func updateAccount(
+        id: String,
+        name: String,
+        address: String,
+        category: String,
+        accountId: String,
+        phone: String,
+        latitude: Double?,
+        longitude: Double?
+    ) -> Bool {
+        guard let index = accounts.firstIndex(where: { $0.id == id }),
+              Self.isValidCoordinatePair(latitude: latitude, longitude: longitude) else { return false }
+
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedName.isEmpty else { return false }
 
@@ -402,6 +428,8 @@ final class FireVaultStore: ObservableObject {
         accounts[index].category = category.trimmingCharacters(in: .whitespacesAndNewlines)
         accounts[index].accountId = accountId.trimmingCharacters(in: .whitespacesAndNewlines)
         accounts[index].phone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+        accounts[index].latitude = latitude
+        accounts[index].longitude = longitude
         persist()
         return true
     }

@@ -13,7 +13,7 @@ final class FireVaultBreadcrumbCoordinator: ObservableObject {
     @Published private(set) var demo: FireVaultBreadcrumbStore
 
     init() {
-        live = FireVaultBreadcrumbStore()
+        live = FireVaultBreadcrumbStore.shared
         demo = FireVaultDemoShowroom.makeBreadcrumbStore()
     }
 

@@ -135,51 +135,59 @@ struct NativeAppShellView: View {
     @State private var keyboardVisible = false
 
     var body: some View {
-        ZStack {
-            NativeShellPalette.background.ignoresSafeArea()
-            Group {
-                switch store.selectedTab {
-                case .nearby:
-                    NativeNearbyView(
-                        payload: payload,
-                        store: store,
-                        settings: settings,
-                        locationService: locationService,
-                        breadcrumbs: breadcrumbs
-                    )
-                case .accounts:
-                    NativeAccountsView(
-                        payload: payload,
-                        store: store,
-                        settings: settings
-                    )
-                case .trip:
-                    FireVaultTripLogPortraitView(
-                        breadcrumbs: breadcrumbs,
-                        store: store,
-                        technicianName: settings.preferences.technician.name,
-                        companyName: settings.preferences.technician.company,
-                        includeCoordinatesInReports: settings.gps.includeCoordinatesInReports,
-                        showsCloseButton: false
-                    )
-                case .photo: NativePhotoView(store: store, settings: settings)
-                case .settings:
-                    NativeSettingsView(
-                        payload: payload,
-                        store: store,
-                        settings: settings,
-                        locationService: locationService,
-                        breadcrumbs: breadcrumbs
-                    )
+        VStack(spacing: 0) {
+            ZStack {
+                NativeShellPalette.background
+                Group {
+                    switch store.selectedTab {
+                    case .nearby:
+                        NativeNearbyView(
+                            payload: payload,
+                            store: store,
+                            settings: settings,
+                            locationService: locationService,
+                            breadcrumbs: breadcrumbs
+                        )
+                    case .accounts:
+                        NativeAccountsView(
+                            payload: payload,
+                            store: store,
+                            settings: settings
+                        )
+                    case .trip:
+                        FireVaultTripLogPortraitView(
+                            breadcrumbs: breadcrumbs,
+                            store: store,
+                            technicianName: settings.preferences.technician.name,
+                            companyName: settings.preferences.technician.company,
+                            includeCoordinatesInReports: settings.gps.includeCoordinatesInReports,
+                            showsCloseButton: false
+                        )
+                    case .photo: NativePhotoView(store: store, settings: settings)
+                    case .settings:
+                        NativeSettingsView(
+                            payload: payload,
+                            store: store,
+                            settings: settings,
+                            locationService: locationService,
+                            breadcrumbs: breadcrumbs
+                        )
+                    }
                 }
             }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
             if !keyboardVisible {
                 nativeNavigation
+                    .fixedSize(horizontal: false, vertical: true)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .background(NativeShellPalette.background.ignoresSafeArea())
+        // Prevent a stale keyboard safe-area inset from leaving the navigation
+        // controls suspended above a large blank region after dismissing a
+        // sheet or returning from another app.
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .tint(NativeShellPalette.blue)
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             withAnimation(.easeOut(duration: 0.18)) { keyboardVisible = true }
@@ -248,7 +256,7 @@ struct NativeAppShellView: View {
         .padding(.horizontal, 8)
         .padding(.top, 5)
         .padding(.bottom, 3)
-        .background(NativeShellPalette.navigationBackground.ignoresSafeArea(edges: .bottom))
+        .background(NativeShellPalette.navigationBackground)
         .overlay(alignment: Alignment.top) {
             Rectangle()
                 .fill(NativeShellPalette.navigationDivider)
@@ -2986,7 +2994,7 @@ private struct NativeGPSSettingsView: View {
             } header: {
                 Text("Trip Log Stop Detection")
             } footer: {
-                Text("Five minutes is recommended. GPS filtering prevents signal loss from creating false stops. Duplicate merging combines repeated detections at the same place within 15 minutes.")
+                Text("Five minutes is recommended. FireVault ignores isolated GPS jumps, waits for consistent departure evidence, preserves a stop through temporary signal loss, and merges repeated detections at the same place within 15 minutes.")
             }
 
             Section("Diagnostics") {
@@ -3484,45 +3492,86 @@ private struct NativeAboutFireVaultView: View {
     var body: some View {
         List {
             Section {
-                VStack(spacing: 10) {
+                VStack(spacing: 14) {
                     FireVaultBrandMark()
-                        .scaleEffect(1.32)
-                        .padding(.vertical, 8)
-                    Text("Field information, organized around the service call.")
-                        .font(.subheadline.weight(.medium))
+                        .scaleEffect(1.16)
+                        .padding(.top, 4)
+                    Text("The field workspace for fire-alarm service professionals.")
+                        .font(.body.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 8) {
+                        aboutBadge("iPhone & iPad", systemImage: "iphone.gen3")
+                        aboutBadge("CarPlay", systemImage: "car.fill")
+                        aboutBadge("Widgets", systemImage: "rectangle.grid.2x2.fill")
+                    }
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
+                .padding(.vertical, 14)
                 .accessibilityElement(children: .combine)
             }
 
-            Section("Purpose") {
-                FireVaultJustifiedText(
-                    "FireVault Pro is a field workspace for organizing customer accounts, equipment, arrival points, service notes, photographs, scanned documents, and Trip Log records. It is intended to reduce time spent searching for site information before and during a service visit."
+            Section("Field Workspace") {
+                FireVaultAboutFeatureRow(
+                    title: "Account Records",
+                    detail: "Keep site details, service notes, equipment, files, and scans together.",
+                    systemImage: "building.2.fill",
+                    tint: NativeShellPalette.blue
                 )
-                FireVaultJustifiedText(
-                    "The application supports both iPhone and iPad workflows, keeps demonstration records separate from live data, and provides configurable reporting, mapping, storage, privacy, and photo-overlay tools."
+                FireVaultAboutFeatureRow(
+                    title: "Arrival Maps",
+                    detail: "Save accurate parking, entrance, panel, and riser locations for each account.",
+                    systemImage: "mappin.and.ellipse",
+                    tint: NativeShellPalette.green
+                )
+                FireVaultAboutFeatureRow(
+                    title: "Trip Log",
+                    detail: "Record routes, account visits, stop times, and daily or weekly reports.",
+                    systemImage: "truck.box.fill",
+                    tint: NativeShellPalette.red
+                )
+                FireVaultAboutFeatureRow(
+                    title: "Field Capture",
+                    detail: "Capture photographs and documents with configurable account overlays.",
+                    systemImage: "camera.fill",
+                    tint: NativeShellPalette.amber
                 )
             }
 
-            Section("Data & Privacy") {
-                Label("Live and Demo workspaces remain separate.", systemImage: "square.stack.3d.up.fill")
-                Label("Location access is used for Nearby, Arrival Maps, and Trip Log features.", systemImage: "location.fill")
-                Label("Storage and report-delivery services operate only when configured.", systemImage: "externaldrive.fill")
-                Text("Review individual permissions and service connections in Settings. FireVault does not treat a configured destination as connected until its authentication is complete.")
+            Section("Privacy & Data") {
+                FireVaultAboutFeatureRow(
+                    title: "Separate Workspaces",
+                    detail: "Demo records remain isolated from live customer data.",
+                    systemImage: "square.stack.3d.up.fill",
+                    tint: .purple
+                )
+                FireVaultAboutFeatureRow(
+                    title: "Location Control",
+                    detail: "GPS is used only for enabled Nearby, Arrival Map, and Trip Log features.",
+                    systemImage: "location.fill",
+                    tint: NativeShellPalette.blue
+                )
+                FireVaultAboutFeatureRow(
+                    title: "Connected Services",
+                    detail: "Storage and report delivery remain inactive until you configure them.",
+                    systemImage: "externaldrive.fill",
+                    tint: NativeShellPalette.amber
+                )
+                Text("Permissions and service connections can be reviewed at any time in Settings.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            Section("Developer") {
-                LabeledContent("Designed and developed by", value: "David Bannerman")
-                LabeledContent("Professional background", value: "Fire alarm technician")
+            Section("Created By") {
+                LabeledContent("Developer", value: "David Bannerman")
+                LabeledContent("Field experience", value: "Fire alarm technician")
                 Link("Contact David Bannerman", destination: URL(string: "mailto:David@Bannerman.us")!)
             }
 
-            Section("Application") {
+            Section("App Information") {
                 LabeledContent("Version", value: versionInfo.version)
                     .contentShape(Rectangle())
                     .onTapGesture(count: 4) {
@@ -3556,6 +3605,17 @@ private struct NativeAboutFireVaultView: View {
         }
     }
 
+    private func aboutBadge(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.76)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(.thinMaterial, in: Capsule())
+    }
+
     private var updatedAtText: String {
         let date = Bundle.main.executableURL
             .flatMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }
@@ -3564,49 +3624,33 @@ private struct NativeAboutFireVaultView: View {
     }
 }
 
-private struct FireVaultJustifiedText: UIViewRepresentable {
-    let text: String
+private struct FireVaultAboutFeatureRow: View {
+    let title: String
+    let detail: String
+    let systemImage: String
+    let tint: Color
 
-    init(_ text: String) {
-        self.text = text
-    }
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(width: 34, height: 34)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-    func makeUIView(context: Context) -> UITextView {
-        let view = UITextView()
-        view.isEditable = false
-        view.isScrollEnabled = false
-        view.isSelectable = false
-        view.backgroundColor = .clear
-        view.textContainerInset = .zero
-        view.textContainer.lineFragmentPadding = 0
-        view.adjustsFontForContentSizeCategory = true
-        return view
-    }
-
-    func updateUIView(_ view: UITextView, context: Context) {
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .justified
-        paragraph.lineSpacing = 2
-        view.attributedText = NSAttributedString(
-            string: text,
-            attributes: [
-                .font: UIFont.preferredFont(forTextStyle: .body),
-                .foregroundColor: UIColor.secondaryLabel,
-                .paragraphStyle: paragraph
-            ]
-        )
-    }
-
-    func sizeThatFits(
-        _ proposal: ProposedViewSize,
-        uiView: UITextView,
-        context: Context
-    ) -> CGSize? {
-        guard let width = proposal.width else { return nil }
-        let size = uiView.sizeThatFits(
-            CGSize(width: width, height: .greatestFiniteMagnitude)
-        )
-        return CGSize(width: width, height: size.height)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 4)
     }
 }
 

@@ -22,10 +22,11 @@ static void FVConfigureLowPowerManager(CLLocationManager *manager) {
         return;
     }
 
+    // The Swift Trip Log store owns accuracy, distance, and pause behavior.
+    // Overriding those values after recording starts can silently pause GPS
+    // before a legitimate three- or five-minute stop is confirmed. This shim
+    // now limits only the frequency passed to the route recorder below.
     manager.activityType = CLActivityTypeAutomotiveNavigation;
-    manager.desiredAccuracy = kCLLocationAccuracyHundredMeters;
-    manager.distanceFilter = 75.0;
-    manager.pausesLocationUpdatesAutomatically = YES;
 
     objc_setAssociatedObject(
         manager,

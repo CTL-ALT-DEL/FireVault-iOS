@@ -472,7 +472,7 @@ struct FireVaultTripLogPortraitView: View {
                             portraitTimelineRow(
                                 timeText: stopTimeRange(stop, in: day),
                                 title: stop.title,
-                                subtitle: "\(stop.subtitle) • \(day.stopDuration(for: stop).tripLogDuration)",
+                                subtitle: stopSubtitle(stop, in: day),
                                 symbol: "\(index + 1).circle.fill",
                                 tint: stopTint(stop),
                                 showsDisclosure: true
@@ -651,7 +651,16 @@ struct FireVaultTripLogPortraitView: View {
 
     private func stopTint(_ stop: FireVaultBreadcrumbStop) -> Color {
         if stop.isPersonalStop { return .secondary }
-        return stop.accountID == nil ? NativeShellPalette.amber : NativeShellPalette.blue
+        if stop.needsReview { return NativeShellPalette.amber }
+        return stop.accountID == nil ? NativeShellPalette.green : NativeShellPalette.blue
+    }
+
+    private func stopSubtitle(
+        _ stop: FireVaultBreadcrumbStop,
+        in day: FireVaultBreadcrumbDay
+    ) -> String {
+        let review = stop.needsReview ? "Needs review • " : ""
+        return "\(review)\(stop.subtitle) • \(day.stopDuration(for: stop).tripLogDuration)"
     }
 }
 

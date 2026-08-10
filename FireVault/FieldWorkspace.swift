@@ -245,16 +245,19 @@ struct FieldWorkspaceView: View {
                 appNavigation
             }
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .tint(FieldWorkspacePalette.blue)
         .sheet(isPresented: $isShowingAccountEditor) {
-            FireVaultEditAccountSheet(account: account) { draft in
+            FireVaultEditAccountSheet(account: account, locationService: locationService) { draft in
                 store.updateAccount(
                     id: account.id,
                     name: draft.name,
                     address: draft.address,
                     category: draft.category,
                     accountId: draft.accountId,
-                    phone: draft.phone
+                    phone: draft.phone,
+                    latitude: draft.latitude,
+                    longitude: draft.longitude
                 )
             }
         }
@@ -501,7 +504,7 @@ struct FieldWorkspaceView: View {
         .padding(.horizontal, 8)
         .padding(.top, 5)
         .padding(.bottom, 3)
-        .background(FieldWorkspacePalette.navigationBackground.ignoresSafeArea(edges: .bottom))
+        .background(FieldWorkspacePalette.navigationBackground)
         .overlay(alignment: Alignment.top) {
             Rectangle()
                 .fill(FieldWorkspacePalette.navigationDivider)
@@ -521,12 +524,15 @@ struct FireVaultAccountEditDraft: Equatable {
     var category: String
     var accountId: String
     var phone: String
+    var latitude: Double?
+    var longitude: Double?
 }
 
 struct FireVaultEditAccountSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     private let accountID: String
+    @ObservedObject private var locationService: FireVaultLocationService
     private let save: (FireVaultAccountEditDraft) -> Bool
 
     @State private var name: String
@@ -534,23 +540,62 @@ struct FireVaultEditAccountSheet: View {
     @State private var category: String
     @State private var accountId: String
     @State private var phone: String
+    @State private var latitudeText: String
+    @State private var longitudeText: String
+    @State private var mapPosition: MapCameraPosition
+    @State private var isShowingPinEditor = false
+    @State private var isWaitingForCurrentLocation = false
+    @State private var gpsStatus: String?
     @FocusState private var isTextInputFocused: Bool
 
     init(
         account: FireVaultWorkspaceAccount,
+        locationService: FireVaultLocationService,
         save: @escaping (FireVaultAccountEditDraft) -> Bool
     ) {
         accountID = account.id
+        self.locationService = locationService
         self.save = save
         _name = State(initialValue: account.name)
         _address = State(initialValue: account.address)
         _category = State(initialValue: account.category)
         _accountId = State(initialValue: account.accountId)
         _phone = State(initialValue: account.phone)
+        _latitudeText = State(initialValue: account.latitude.map { String($0) } ?? "")
+        _longitudeText = State(initialValue: account.longitude.map { String($0) } ?? "")
+        let initialCoordinate = account.coordinate
+            ?? CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)
+        _mapPosition = State(initialValue: .region(.init(
+            center: initialCoordinate,
+            span: .init(latitudeDelta: 0.0012, longitudeDelta: 0.0012)
+        )))
     }
 
     private var normalizedName: String {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var parsedCoordinatePair: (Double?, Double?)? {
+        let latitudeValue = latitudeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let longitudeValue = longitudeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if latitudeValue.isEmpty && longitudeValue.isEmpty { return (nil, nil) }
+        guard let latitude = Double(latitudeValue),
+              let longitude = Double(longitudeValue),
+              CLLocationCoordinate2DIsValid(.init(latitude: latitude, longitude: longitude)) else {
+            return nil
+        }
+        return (latitude, longitude)
+    }
+
+    private var accountCoordinate: CLLocationCoordinate2D? {
+        guard let parsedCoordinatePair,
+              let latitude = parsedCoordinatePair.0,
+              let longitude = parsedCoordinatePair.1 else { return nil }
+        return .init(latitude: latitude, longitude: longitude)
+    }
+
+    private var canSave: Bool {
+        !normalizedName.isEmpty && parsedCoordinatePair != nil
     }
 
     var body: some View {
@@ -615,8 +660,60 @@ struct FireVaultEditAccountSheet: View {
                 }
 
                 Section {
+                    accountGPSMap
+                        .frame(height: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(.white.opacity(0.18), lineWidth: 1)
+                        }
+
+                    Button("Adjust Pin on Map", systemImage: "mappin.and.ellipse") {
+                        isTextInputFocused = false
+                        isShowingPinEditor = true
+                    }
+                    .disabled(accountCoordinate == nil && locationService.coordinate == nil)
+
+                    Button("Use Current Location", systemImage: "location.fill") {
+                        isTextInputFocused = false
+                        isWaitingForCurrentLocation = true
+                        gpsStatus = "Finding this iPhone…"
+                        locationService.requestCurrentLocation(highAccuracy: true)
+                    }
+
+                    HStack(spacing: 10) {
+                        TextField("Latitude", text: $latitudeText)
+                            .keyboardType(.numbersAndPunctuation)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($isTextInputFocused)
+                        TextField("Longitude", text: $longitudeText)
+                            .keyboardType(.numbersAndPunctuation)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($isTextInputFocused)
+                    }
+
+                    if parsedCoordinatePair == nil {
+                        Label("Enter both valid coordinates, or clear both fields.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else if let gpsStatus {
+                        Label(gpsStatus, systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(FieldWorkspacePalette.green)
+                    }
+
+                    Text("This site coordinate controls Nearby distance, account routing, and automatic Trip Log account matching. Saved Arrival Points remain separate and are also considered by Trip Log.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Account GPS Position")
+                } footer: {
+                    Text("For the most accurate result, stand at the site or drag the pin to the building entrance or parking area used by technicians.")
+                }
+
+                Section {
                     Label(
-                        "Map coordinates, field records, files, equipment, and history remain unchanged.",
+                        "Field records, files, equipment, saved arrival points, and history remain unchanged.",
                         systemImage: "checkmark.shield.fill"
                     )
                         .font(.footnote)
@@ -639,12 +736,14 @@ struct FireVaultEditAccountSheet: View {
                             address: address,
                             category: category,
                             accountId: accountId,
-                            phone: phone
+                            phone: phone,
+                            latitude: parsedCoordinatePair?.0,
+                            longitude: parsedCoordinatePair?.1
                         )
                         if save(draft) { dismiss() }
                     }
                     .fontWeight(.semibold)
-                    .disabled(normalizedName.isEmpty)
+                    .disabled(!canSave)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
@@ -655,6 +754,24 @@ struct FireVaultEditAccountSheet: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .accessibilityIdentifier("edit-account-\(accountID)")
+        .fullScreenCover(isPresented: $isShowingPinEditor) {
+            FireVaultFullScreenPinEditor(
+                pinLabel: normalizedName.isEmpty ? "Account" : normalizedName,
+                pinSystemImage: "building.2.fill",
+                pinTint: FieldWorkspacePalette.red,
+                initialCoordinate: accountCoordinate,
+                fallbackCoordinate: locationService.coordinate
+            ) { coordinate in
+                apply(coordinate, status: "Account pin adjusted")
+            }
+        }
+        .onReceive(locationService.$coordinate.compactMap { $0 }) { coordinate in
+            guard isWaitingForCurrentLocation else { return }
+            isWaitingForCurrentLocation = false
+            apply(coordinate, status: "Using this iPhone’s current position")
+        }
+        .onChange(of: latitudeText) { _, _ in refreshMapFromFields() }
+        .onChange(of: longitudeText) { _, _ in refreshMapFromFields() }
     }
 
     private func accountEditField(
@@ -680,6 +797,51 @@ struct FireVaultEditAccountSheet: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private var accountGPSMap: some View {
+        Map(position: $mapPosition, interactionModes: []) {
+            if let accountCoordinate {
+                Annotation("", coordinate: accountCoordinate) {
+                    Image(systemName: "building.2.fill")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(FieldWorkspacePalette.red, in: Circle())
+                        .overlay(Circle().stroke(.white, lineWidth: 2))
+                        .shadow(color: .black.opacity(0.4), radius: 5, y: 3)
+                }
+            }
+        }
+        .mapStyle(.hybrid(elevation: .realistic))
+        .overlay {
+            if accountCoordinate == nil {
+                ContentUnavailableView(
+                    "GPS Position Needed",
+                    systemImage: "mappin.slash",
+                    description: Text("Use the current location, adjust the pin, or enter coordinates.")
+                )
+                .background(.regularMaterial)
+            }
+        }
+    }
+
+    private func apply(_ coordinate: CLLocationCoordinate2D, status: String) {
+        latitudeText = String(format: "%.6f", coordinate.latitude)
+        longitudeText = String(format: "%.6f", coordinate.longitude)
+        mapPosition = .region(.init(
+            center: coordinate,
+            span: .init(latitudeDelta: 0.0012, longitudeDelta: 0.0012)
+        ))
+        gpsStatus = status
+    }
+
+    private func refreshMapFromFields() {
+        guard let accountCoordinate else { return }
+        mapPosition = .region(.init(
+            center: accountCoordinate,
+            span: .init(latitudeDelta: 0.0012, longitudeDelta: 0.0012)
+        ))
     }
 }
 

@@ -1,3 +1,4 @@
+import ActivityKit
 import Foundation
 import SwiftUI
 import UIKit
@@ -10,6 +11,8 @@ final class FireVaultNotificationService {
     private enum Identifier {
         static let recording = "firevault.triplog.recording"
         static let paused = "firevault.triplog.paused"
+        static func arrival(_ stopID: UUID) -> String { "firevault.triplog.arrival.\(stopID.uuidString)" }
+        static func review(_ stopID: UUID) -> String { "firevault.triplog.review.\(stopID.uuidString)" }
     }
 
     private let center = UNUserNotificationCenter.current()
@@ -59,6 +62,47 @@ final class FireVaultNotificationService {
 
     func tripLogEnded() {
         center.removePendingNotificationRequests(withIdentifiers: [Identifier.recording, Identifier.paused])
+    }
+
+    func accountArrivalDetected(
+        stop: FireVaultBreadcrumbStop,
+        preferences: FireVaultNotificationPreferences
+    ) {
+        guard preferences.isEnabled, preferences.arrivalAlerts ?? false else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Account arrival confirmed"
+        content.body = preferences.hidesSensitiveDetails
+            ? "Trip Log confirmed an on-site account stop."
+            : "Trip Log confirmed your arrival at \(stop.accountName ?? "an account")."
+        content.sound = .default
+        center.add(.init(
+            identifier: Identifier.arrival(stop.id),
+            content: content,
+            trigger: nil
+        ))
+    }
+
+    func unknownStopDetected(
+        stop: FireVaultBreadcrumbStop,
+        preferences: FireVaultNotificationPreferences
+    ) {
+        guard preferences.isEnabled, preferences.unknownStopReview ?? false else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Trip Log stop needs review"
+        content.body = "Confirm, identify, or disregard this stop when it is safe to use your iPhone."
+        content.sound = .default
+        content.userInfo = ["tripLogStopID": stop.id.uuidString]
+        center.add(.init(
+            identifier: Identifier.review(stop.id),
+            content: content,
+            trigger: nil
+        ))
+    }
+
+    func stopReviewed(stopID: UUID) {
+        let identifiers = [Identifier.review(stopID), Identifier.arrival(stopID)]
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        center.removeDeliveredNotifications(withIdentifiers: identifiers)
     }
 
     func sendDeveloperTest(title: String, body: String, delay: TimeInterval, sound: Bool) async throws -> String {
@@ -147,6 +191,26 @@ struct NativeNotificationSettingsView: View {
                 }
             }
 
+            Section {
+                Toggle(
+                    "Show Trip Log Live Activity",
+                    isOn: optionalBinding(\.liveActivitiesEnabled, default: true)
+                )
+                Toggle(
+                    "Show mileage and stop totals",
+                    isOn: optionalBinding(\.liveActivityMetricsVisible, default: true)
+                )
+                .disabled(!draft.liveActivitiesAreEnabled)
+                LabeledContent(
+                    "System availability",
+                    value: ActivityAuthorizationInfo().areActivitiesEnabled ? "Available" : "Off"
+                )
+            } header: {
+                Text("Live Activity")
+            } footer: {
+                Text("The Lock Screen never shows account names, addresses, notes, or GPS coordinates. Turn off metrics to show only status and elapsed time.")
+            }
+
             Section("Service") {
                 Toggle("Upcoming inspections", isOn: optionalBinding(\.upcomingInspections, default: true))
                 Toggle("Shared account updates", isOn: optionalBinding(\.sharedAccountUpdates, default: false))
@@ -190,6 +254,23 @@ struct NativeNotificationSettingsView: View {
                     } icon: {
                         Image(systemName: "hammer.fill")
                             .foregroundStyle(.orange)
+                    }
+                }
+
+                NavigationLink {
+                    FireVaultLiveActivityDeveloperView()
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Live Activity Test")
+                                .font(.headline)
+                            Text("Preview recording, paused, and completed states")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "rectangle.inset.filled.and.person.filled")
+                            .foregroundStyle(.cyan)
                     }
                 }
             } header: {
@@ -239,6 +320,7 @@ struct NativeNotificationSettingsView: View {
         var preferences = settings.preferences
         preferences.notifications = draft
         settings.save(preferences)
+        FireVaultBreadcrumbStore.shared.refreshLiveActivityPreferences()
     }
 }
 
@@ -381,6 +463,114 @@ private struct FireVaultNotificationDeveloperView: View {
     private func refreshCounts() async {
         pendingCount = await FireVaultNotificationService.shared.pendingRequests().count
         deliveredCount = await FireVaultNotificationService.shared.deliveredNotifications().count
+    }
+}
+
+private struct FireVaultLiveActivityDeveloperView: View {
+    @State private var sampleDay = Self.makeSampleDay()
+    @State private var statusMessage = "Ready"
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent(
+                    "System availability",
+                    value: ActivityAuthorizationInfo().areActivitiesEnabled ? "Available" : "Off"
+                )
+                LabeledContent("Status", value: statusMessage)
+            } footer: {
+                Text("These controls create sample Lock Screen and Dynamic Island content without adding a Trip Log day or changing customer data.")
+            }
+
+            Section("Preview State") {
+                Button("Show Recording", systemImage: "record.circle.fill") {
+                    show(.recording)
+                }
+                .tint(.red)
+
+                Button("Show Paused", systemImage: "pause.circle.fill") {
+                    show(.paused)
+                }
+                .tint(.orange)
+
+                Button("Show Completed", systemImage: "checkmark.circle.fill") {
+                    sampleDay.endedAt = Date()
+                    FireVaultTripLogLiveActivityController.end(
+                        day: sampleDay,
+                        showsMetrics: true
+                    )
+                    statusMessage = "Completed preview shown"
+                }
+                .tint(.green)
+            }
+
+            Section("Privacy Preview") {
+                Button("Show Status Only", systemImage: "eye.slash") {
+                    FireVaultTripLogLiveActivityController.synchronize(
+                        day: sampleDay,
+                        status: .recording,
+                        showsMetrics: false
+                    )
+                    statusMessage = "Private status-only preview shown"
+                }
+            }
+
+            Section {
+                Button("Dismiss Live Activity", systemImage: "xmark.circle", role: .destructive) {
+                    FireVaultTripLogLiveActivityController.dismissAll()
+                    statusMessage = "Live Activity dismissed"
+                }
+            }
+        }
+        .navigationTitle("Live Activity Lab")
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaPadding(.bottom, 82)
+    }
+
+    private func show(_ status: FireVaultTripLogActivityAttributes.Status) {
+        sampleDay.endedAt = nil
+        sampleDay.isPaused = status == .paused
+        FireVaultTripLogLiveActivityController.synchronize(
+            day: sampleDay,
+            status: status,
+            showsMetrics: true
+        )
+        statusMessage = "\(status.title) preview shown"
+    }
+
+    private static func makeSampleDay() -> FireVaultBreadcrumbDay {
+        let now = Date()
+        return FireVaultBreadcrumbDay(
+            startedAt: now.addingTimeInterval(-48 * 60 - 17),
+            points: [
+                .init(
+                    timestamp: now.addingTimeInterval(-45 * 60),
+                    latitude: 43.6150,
+                    longitude: -116.2023,
+                    horizontalAccuracy: 8
+                ),
+                .init(
+                    timestamp: now,
+                    latitude: 43.6900,
+                    longitude: -116.1350,
+                    horizontalAccuracy: 8
+                )
+            ],
+            stops: [
+                .init(
+                    arrival: now.addingTimeInterval(-35 * 60),
+                    departure: now.addingTimeInterval(-28 * 60),
+                    latitude: 43.6350,
+                    longitude: -116.1850
+                ),
+                .init(
+                    arrival: now.addingTimeInterval(-12 * 60),
+                    departure: now.addingTimeInterval(-7 * 60),
+                    latitude: 43.6700,
+                    longitude: -116.1500
+                )
+            ]
+        )
     }
 }
 #endif
