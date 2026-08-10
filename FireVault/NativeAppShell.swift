@@ -235,6 +235,7 @@ struct NativeAppShellView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: NativeShellMetrics.navigationItemHeight)
+                    .offset(y: NativeShellMetrics.navigationContentOffset)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -244,28 +245,17 @@ struct NativeAppShellView: View {
                 .accessibilityIdentifier("main-navigation-\(tab.rawValue)")
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
-        .background(
-            NativeShellPalette.navigationBackground,
-            in: RoundedRectangle(cornerRadius: NativeShellMetrics.navigationRadius, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: NativeShellMetrics.navigationRadius, style: .continuous)
-                .stroke(.white.opacity(0.13), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.28), radius: 10, x: 0, y: 5)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 8)
         .padding(.top, 5)
-        .padding(.bottom, 2)
-        .background(NativeShellPalette.background.ignoresSafeArea(edges: .bottom))
-        .overlay(alignment: .top) {
-            Capsule()
+        .padding(.bottom, 3)
+        .background(NativeShellPalette.navigationBackground.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: Alignment.top) {
+            Rectangle()
                 .fill(NativeShellPalette.navigationDivider)
                 .frame(height: 1)
-                .padding(.horizontal, 16)
                 .accessibilityHidden(true)
         }
+        .shadow(color: .black.opacity(0.24), radius: 8, x: 0, y: -3)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Main navigation")
         .accessibilityIdentifier("main-navigation")
@@ -3941,7 +3931,8 @@ enum NativeShellMetrics {
     static let cardRadius: CGFloat = 18
     static let mapRadius: CGFloat = 22
     static let navigationRadius: CGFloat = 20
-    static let navigationItemHeight: CGFloat = 50
+    static let navigationItemHeight: CGFloat = 48
+    static let navigationContentOffset: CGFloat = 3
     static let pageHorizontalPadding: CGFloat = 16
     static let sectionSpacing: CGFloat = 10
 }
