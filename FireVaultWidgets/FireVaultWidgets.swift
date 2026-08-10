@@ -10,6 +10,7 @@ import WidgetKit
 struct FireVaultWidgetBundle: WidgetBundle {
     var body: some Widget {
         FireVaultFieldWidget()
+        FireVaultTripLogLiveActivity()
     }
 }
 

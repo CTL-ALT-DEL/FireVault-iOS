@@ -12,6 +12,46 @@ import MapKit
 
 @MainActor
 final class FireVaultTests: XCTestCase {
+    func testTripLogLiveActivityTimerReferencePreservesElapsedDuration() {
+        let updatedAt = Date(timeIntervalSince1970: 1_700_000_600)
+        let state = FireVaultTripLogActivityAttributes.ContentState(
+            status: .recording,
+            updatedAt: updatedAt,
+            elapsedSeconds: 600,
+            distanceMiles: 8.5,
+            stopCount: 2
+        )
+
+        XCTAssertEqual(
+            state.timerReferenceDate,
+            Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        XCTAssertEqual(state.formattedElapsedTime, "00:10:00")
+    }
+
+    func testTripLogLiveActivityContentStateRoundTripsWithoutPrivateSiteData() throws {
+        let state = FireVaultTripLogActivityAttributes.ContentState(
+            status: .paused,
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_600),
+            elapsedSeconds: 600,
+            distanceMiles: 8.5,
+            stopCount: 2
+        )
+
+        let data = try JSONEncoder().encode(state)
+        let encoded = try XCTUnwrap(String(data: data, encoding: .utf8))
+        let decoded = try JSONDecoder().decode(
+            FireVaultTripLogActivityAttributes.ContentState.self,
+            from: data
+        )
+
+        XCTAssertEqual(decoded, state)
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("account"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("address"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("latitude"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("longitude"))
+    }
+
     func testRecordingWidgetElapsedTimeAdvancesFromSnapshotWithoutDoubleCounting() {
         let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
         let snapshot = FireVaultWidgetSnapshot(

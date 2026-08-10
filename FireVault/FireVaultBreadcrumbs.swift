@@ -402,6 +402,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     private let manager: CLLocationManager
     private let archiveURL: URL
+    private let liveActivitiesEnabled: Bool
     private var accounts: [FireVaultWorkspaceAccount] = []
     private var candidateLocations: [CLLocation] = []
     private var activeStopID: UUID?
@@ -424,10 +425,14 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         )
     }
 
-    init(archiveURL: URL? = nil) {
+    init(
+        archiveURL: URL? = nil,
+        liveActivitiesEnabled: Bool? = nil
+    ) {
         let manager = CLLocationManager()
         self.manager = manager
         self.archiveURL = archiveURL ?? Self.defaultArchiveURL
+        self.liveActivitiesEnabled = liveActivitiesEnabled ?? (archiveURL == nil)
         let loaded = Self.load(from: archiveURL ?? Self.defaultArchiveURL)
         days = loaded.days
         authorizationStatus = manager.authorizationStatus
@@ -475,6 +480,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         updateActiveDay { $0.isPaused = true }
         statusText = "Trip Log paused"
         FireVaultNotificationService.shared.tripLogPaused(preferences: notificationPreferences)
+        synchronizeLiveActivity(status: .paused)
     }
 
     func resumeWorkday(accounts: [FireVaultWorkspaceAccount]) {
@@ -495,11 +501,17 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         refreshRuntimePreferences()
         authorizationStatus = manager.authorizationStatus
         accuracyAuthorization = manager.accuracyAuthorization
-        guard let activeDay else { return }
+        guard let activeDay else {
+            if liveActivitiesEnabled {
+                FireVaultTripLogLiveActivityController.dismissAll()
+            }
+            return
+        }
         guard !activeDay.isPaused else {
             sessionIsPrepared = false
             stopLocationUpdates()
             statusText = "Trip Log paused"
+            synchronizeLiveActivity(status: .paused)
             return
         }
         guard !isRecording else { return }
@@ -522,6 +534,9 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         FireVaultNotificationService.shared.tripLogEnded()
         persist()
         let completedDay = days[index]
+        if liveActivitiesEnabled {
+            FireVaultTripLogLiveActivityController.end(day: completedDay)
+        }
         let preferences = FireVaultNativeSettingsStore().preferences
         Task {
             await FireVaultTripLogAutomationService.shared.syncCompletedDay(
@@ -578,6 +593,11 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         days[dayIndex].stops[stopIndex] = stop
         days[dayIndex].stops.sort { $0.arrival < $1.arrival }
         persist()
+        if days[dayIndex].isActive {
+            synchronizeLiveActivity(
+                status: days[dayIndex].isPaused ? .paused : .recording
+            )
+        }
         return true
     }
 
@@ -594,6 +614,11 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             candidateLocations.removeAll()
         }
         persist()
+        if days[dayIndex].isActive {
+            synchronizeLiveActivity(
+                status: days[dayIndex].isPaused ? .paused : .recording
+            )
+        }
         return true
     }
 
@@ -617,9 +642,11 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         case .denied:
             stopLocationUpdates()
             statusText = "Location access is off for Trip Log"
+            dismissLiveActivity()
         case .restricted:
             stopLocationUpdates()
             statusText = "Location access is restricted"
+            dismissLiveActivity()
         case .notDetermined:
             statusText = "Waiting for location permission…"
         @unknown default:
@@ -638,6 +665,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         if let locationError = error as? CLError, locationError.code == .denied {
             stopLocationUpdates()
             statusText = "Location access is off for Trip Log"
+            dismissLiveActivity()
         } else {
             statusText = "Waiting for a reliable GPS position…"
         }
@@ -665,9 +693,11 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         case .denied:
             stopLocationUpdates()
             statusText = "Location access is off for Trip Log"
+            dismissLiveActivity()
         case .restricted:
             stopLocationUpdates()
             statusText = "Location access is restricted"
+            dismissLiveActivity()
         @unknown default:
             stopLocationUpdates()
             statusText = "Location is unavailable"
@@ -683,6 +713,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         statusText = accuracyAuthorization == .fullAccuracy
             ? "Recording today’s route"
             : "Recording with approximate location"
+        synchronizeLiveActivity(status: .recording)
     }
 
     private func stopLocationUpdates() {
@@ -716,6 +747,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             ? "Recording • \(days[index].points.count) GPS points"
             : "Recording approximate location • \(days[index].points.count) points"
         persist()
+        synchronizeLiveActivity(status: .recording)
     }
 
     private func restoreTrackingContext() {
@@ -909,6 +941,18 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         guard let index = activeDayIndex else { return }
         change(&days[index])
         persist()
+    }
+
+    private func synchronizeLiveActivity(
+        status: FireVaultTripLogActivityAttributes.Status
+    ) {
+        guard liveActivitiesEnabled, let day = activeDay else { return }
+        FireVaultTripLogLiveActivityController.synchronize(day: day, status: status)
+    }
+
+    private func dismissLiveActivity() {
+        guard liveActivitiesEnabled else { return }
+        FireVaultTripLogLiveActivityController.dismissAll()
     }
 
     private func persist() {
