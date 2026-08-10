@@ -407,6 +407,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     private var candidateLocations: [CLLocation] = []
     private var activeStopID: UUID?
     private var sessionIsPrepared = false
+    private var liveActivityControlObservation: AnyCancellable?
     private var gpsPreferences: FireVaultGPSPreferences
     private var notificationPreferences: FireVaultNotificationPreferences
 
@@ -447,6 +448,19 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         manager.desiredAccuracy = kCLLocationAccuracyBest
         manager.distanceFilter = FireVaultBreadcrumbRules.minimumPointDistance
         manager.pausesLocationUpdatesAutomatically = true
+
+        if self.liveActivitiesEnabled {
+            liveActivityControlObservation = NotificationCenter.default
+                .publisher(for: .fireVaultTripLogControlRequested)
+                .sink { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        self?.consumeLiveActivityControl()
+                    }
+                }
+            Task { @MainActor [weak self] in
+                self?.consumeLiveActivityControl()
+            }
+        }
 
         if loaded.recoveredFromBackup {
             lastRecoveryAt = Date()
@@ -535,7 +549,10 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         persist()
         let completedDay = days[index]
         if liveActivitiesEnabled {
-            FireVaultTripLogLiveActivityController.end(day: completedDay)
+            FireVaultTripLogLiveActivityController.end(
+                day: completedDay,
+                showsMetrics: liveActivityPreferences.showsLiveActivityMetrics
+            )
         }
         let preferences = FireVaultNativeSettingsStore().preferences
         Task {
@@ -625,6 +642,20 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     func openLocationSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
+    }
+
+    func refreshLiveActivityPreferences() {
+        guard liveActivitiesEnabled else { return }
+        let preferences = liveActivityPreferences
+        guard preferences.liveActivitiesAreEnabled else {
+            dismissLiveActivity()
+            return
+        }
+        guard let activeDay else {
+            dismissLiveActivity()
+            return
+        }
+        synchronizeLiveActivity(status: activeDay.isPaused ? .paused : .recording)
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
@@ -947,12 +978,41 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         status: FireVaultTripLogActivityAttributes.Status
     ) {
         guard liveActivitiesEnabled, let day = activeDay else { return }
-        FireVaultTripLogLiveActivityController.synchronize(day: day, status: status)
+        let preferences = liveActivityPreferences
+        guard preferences.liveActivitiesAreEnabled else {
+            dismissLiveActivity()
+            return
+        }
+        FireVaultTripLogLiveActivityController.synchronize(
+            day: day,
+            status: status,
+            showsMetrics: preferences.showsLiveActivityMetrics
+        )
     }
 
     private func dismissLiveActivity() {
         guard liveActivitiesEnabled else { return }
         FireVaultTripLogLiveActivityController.dismissAll()
+    }
+
+    private var liveActivityPreferences: FireVaultNotificationPreferences {
+        FireVaultNativeSettingsStore().preferences.notifications
+            ?? FireVaultNotificationPreferences()
+    }
+
+    private func consumeLiveActivityControl() {
+        guard let command = FireVaultTripLogControlMailbox.consume() else { return }
+        switch command {
+        case .pause:
+            guard activeDay?.isPaused == false else { return }
+            pauseWorkday()
+        case .resume:
+            guard activeDay?.isPaused == true else { return }
+            resumeWorkday(accounts: accounts)
+        case .end:
+            guard activeDay != nil else { return }
+            endWorkday()
+        }
     }
 
     private func persist() {

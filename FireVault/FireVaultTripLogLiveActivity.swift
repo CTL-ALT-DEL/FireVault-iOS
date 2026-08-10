@@ -14,10 +14,15 @@ enum FireVaultTripLogLiveActivityController {
 
     static func synchronize(
         day: FireVaultBreadcrumbDay,
-        status: Attributes.Status
+        status: Attributes.Status,
+        showsMetrics: Bool
     ) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        let content = activityContent(for: day, status: status)
+        let content = activityContent(
+            for: day,
+            status: status,
+            showsMetrics: showsMetrics
+        )
         let attributes = Attributes(tripID: day.id, startedAt: day.startedAt)
 
         Task {
@@ -45,8 +50,12 @@ enum FireVaultTripLogLiveActivityController {
         }
     }
 
-    static func end(day: FireVaultBreadcrumbDay) {
-        let content = activityContent(for: day, status: .complete)
+    static func end(day: FireVaultBreadcrumbDay, showsMetrics: Bool) {
+        let content = activityContent(
+            for: day,
+            status: .complete,
+            showsMetrics: showsMetrics
+        )
         Task {
             for activity in Activity<Attributes>.activities where activity.attributes.tripID == day.id {
                 await activity.end(
@@ -67,7 +76,8 @@ enum FireVaultTripLogLiveActivityController {
 
     private static func activityContent(
         for day: FireVaultBreadcrumbDay,
-        status: Attributes.Status
+        status: Attributes.Status,
+        showsMetrics: Bool
     ) -> ActivityContent<Attributes.ContentState> {
         ActivityContent(
             state: .init(
@@ -75,7 +85,8 @@ enum FireVaultTripLogLiveActivityController {
                 updatedAt: Date(),
                 elapsedSeconds: day.elapsedTime,
                 distanceMiles: day.totalDistanceMeters / 1_609.344,
-                stopCount: day.stops.count
+                stopCount: day.stops.count,
+                showsMetrics: showsMetrics
             ),
             staleDate: Date().addingTimeInterval(status == .recording ? 10 * 60 : 60 * 60)
         )

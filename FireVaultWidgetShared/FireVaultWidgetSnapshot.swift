@@ -74,7 +74,7 @@ struct FireVaultWidgetSnapshot: Codable, Equatable {
 }
 
 enum FireVaultWidgetSharedStore {
-    static let appGroup = "group.us.bannerman.firevault"
+    nonisolated static let appGroup = "group.us.bannerman.firevault"
     private static let snapshotKey = "firevault.widget.snapshot.v1"
 
     static func load() -> FireVaultWidgetSnapshot {

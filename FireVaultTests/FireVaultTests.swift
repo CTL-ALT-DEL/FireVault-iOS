@@ -19,7 +19,8 @@ final class FireVaultTests: XCTestCase {
             updatedAt: updatedAt,
             elapsedSeconds: 600,
             distanceMiles: 8.5,
-            stopCount: 2
+            stopCount: 2,
+            showsMetrics: true
         )
 
         XCTAssertEqual(
@@ -35,7 +36,8 @@ final class FireVaultTests: XCTestCase {
             updatedAt: Date(timeIntervalSince1970: 1_700_000_600),
             elapsedSeconds: 600,
             distanceMiles: 8.5,
-            stopCount: 2
+            stopCount: 2,
+            showsMetrics: true
         )
 
         let data = try JSONEncoder().encode(state)
@@ -50,6 +52,43 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(encoded.localizedCaseInsensitiveContains("address"))
         XCTAssertFalse(encoded.localizedCaseInsensitiveContains("latitude"))
         XCTAssertFalse(encoded.localizedCaseInsensitiveContains("longitude"))
+    }
+
+    func testLegacyLiveActivityStateDefaultsToVisibleMetrics() throws {
+        let legacy = """
+        {
+          "status": "paused",
+          "updatedAt": 700000000,
+          "elapsedSeconds": 600,
+          "distanceMiles": 8.5,
+          "stopCount": 2
+        }
+        """
+        let state = try JSONDecoder().decode(
+            FireVaultTripLogActivityAttributes.ContentState.self,
+            from: Data(legacy.utf8)
+        )
+
+        XCTAssertTrue(state.showsMetrics)
+        XCTAssertEqual(state.status, .paused)
+        XCTAssertEqual(state.stopCount, 2)
+    }
+
+    func testLegacyNotificationPreferencesEnableLiveActivitiesSafely() throws {
+        let legacy = """
+        {
+          "enabled": true,
+          "tripLogStillRecording": true,
+          "hideSensitiveDetails": true
+        }
+        """
+        let preferences = try JSONDecoder().decode(
+            FireVaultNotificationPreferences.self,
+            from: Data(legacy.utf8)
+        )
+
+        XCTAssertTrue(preferences.liveActivitiesAreEnabled)
+        XCTAssertTrue(preferences.showsLiveActivityMetrics)
     }
 
     func testRecordingWidgetElapsedTimeAdvancesFromSnapshotWithoutDoubleCounting() {

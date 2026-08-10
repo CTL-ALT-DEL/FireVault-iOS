@@ -257,6 +257,8 @@ struct FireVaultGPSPreferences: Codable, Equatable {
 struct FireVaultPlusCodePreferences: Codable, Equatable { var enabled = true; var autoGenerate = true; var accountLength = 10; var locationLength = 11; var verifyAfterDays = 180; var searchable = true; var includeInReports = true }
 struct FireVaultNotificationPreferences: Codable, Equatable {
     var enabled: Bool? = true
+    var liveActivitiesEnabled: Bool? = true
+    var liveActivityMetricsVisible: Bool? = true
     var tripLogStillRecording: Bool? = true
     var tripLogPaused: Bool? = true
     var upcomingInspections: Bool? = true
@@ -272,6 +274,8 @@ struct FireVaultNotificationPreferences: Codable, Equatable {
     var endOfDayHour: Int? = 18
 
     var isEnabled: Bool { enabled ?? true }
+    var liveActivitiesAreEnabled: Bool { liveActivitiesEnabled ?? true }
+    var showsLiveActivityMetrics: Bool { liveActivityMetricsVisible ?? true }
     var recordingReminderEnabled: Bool { tripLogStillRecording ?? true }
     var pausedReminderEnabled: Bool { tripLogPaused ?? true }
     var hidesSensitiveDetails: Bool { hideSensitiveDetails ?? true }

@@ -5,6 +5,7 @@
 
 
 import ActivityKit
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -30,16 +31,28 @@ struct FireVaultTripLogLiveActivity: Widget {
                         .foregroundStyle(.white.opacity(0.68))
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    HStack(spacing: 10) {
-                        metric(
-                            title: "MILES",
-                            value: String(format: "%.1f", context.state.distanceMiles),
-                            symbol: "road.lanes"
-                        )
-                        metric(
-                            title: "STOPS",
-                            value: "\(context.state.stopCount)",
-                            symbol: "mappin.and.ellipse"
+                    VStack(spacing: 8) {
+                        if context.state.showsMetrics {
+                            HStack(spacing: 10) {
+                                metric(
+                                    title: "MILES",
+                                    value: String(format: "%.1f", context.state.distanceMiles),
+                                    symbol: "road.lanes"
+                                )
+                                metric(
+                                    title: "STOPS",
+                                    value: "\(context.state.stopCount)",
+                                    symbol: "mappin.and.ellipse"
+                                )
+                            }
+                        } else {
+                            Label("Mileage and stops hidden", systemImage: "eye.slash.fill")
+                                .font(.caption2.bold())
+                                .foregroundStyle(.white.opacity(0.58))
+                        }
+                        FireVaultTripLogActivityControls(
+                            status: context.state.status,
+                            compact: true
                         )
                     }
                 }
@@ -148,12 +161,23 @@ private struct FireVaultTripLogLockScreenView: View {
                     elapsed
                 }
                 Spacer()
-                lockMetric(
-                    value: String(format: "%.1f", context.state.distanceMiles),
-                    label: "MILES"
-                )
-                lockMetric(value: "\(context.state.stopCount)", label: "STOPS")
+                if context.state.showsMetrics {
+                    lockMetric(
+                        value: String(format: "%.1f", context.state.distanceMiles),
+                        label: "MILES"
+                    )
+                    lockMetric(value: "\(context.state.stopCount)", label: "STOPS")
+                } else {
+                    Label("Metrics hidden", systemImage: "eye.slash.fill")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white.opacity(0.52))
+                }
             }
+
+            FireVaultTripLogActivityControls(
+                status: context.state.status,
+                compact: false
+            )
         }
         .padding(.horizontal, 17)
         .padding(.vertical, 14)
@@ -223,5 +247,53 @@ private struct FireVaultTripLogLockScreenView: View {
         case .paused: .orange
         case .complete: .green
         }
+    }
+}
+
+private struct FireVaultTripLogActivityControls: View {
+    let status: FireVaultTripLogActivityAttributes.Status
+    let compact: Bool
+
+    var body: some View {
+        HStack(spacing: compact ? 8 : 10) {
+            if status == .recording {
+                Button(intent: FireVaultPauseTripLogIntent()) {
+                    controlLabel("Pause", symbol: "pause.fill", color: .orange)
+                }
+                .buttonStyle(.plain)
+            } else if status == .paused {
+                Button(intent: FireVaultResumeTripLogIntent()) {
+                    controlLabel("Resume", symbol: "play.fill", color: .green)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if status != .complete {
+                Button(intent: FireVaultEndTripLogIntent()) {
+                    controlLabel("End", symbol: "stop.fill", color: .red)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Link(destination: URL(string: "firevault://triplog")!) {
+                controlLabel("Open", symbol: "arrow.up.right", color: .blue)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private func controlLabel(
+        _ title: String,
+        symbol: String,
+        color: Color
+    ) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.system(size: compact ? 10 : 11, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .padding(.horizontal, compact ? 9 : 11)
+            .frame(height: compact ? 28 : 31)
+            .background(color.opacity(0.82), in: Capsule())
     }
 }
