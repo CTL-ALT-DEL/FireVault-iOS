@@ -63,10 +63,13 @@ struct FireVaultWidgetSnapshot: Codable, Equatable {
     )
 
     func elapsedTime(at date: Date) -> TimeInterval {
-        guard tripState == .recording, let tripStartedAt else {
+        guard tripState == .recording else {
             return max(0, elapsedSeconds)
         }
-        return max(elapsedSeconds, date.timeIntervalSince(tripStartedAt))
+        // `elapsedSeconds` is already the complete elapsed value captured at
+        // `updatedAt`. Advance from that snapshot boundary so a timeline
+        // refresh never adds the full trip duration a second time.
+        return max(0, elapsedSeconds + max(0, date.timeIntervalSince(updatedAt)))
     }
 }
 

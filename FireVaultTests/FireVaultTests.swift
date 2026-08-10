@@ -12,6 +12,53 @@ import MapKit
 
 @MainActor
 final class FireVaultTests: XCTestCase {
+    func testRecordingWidgetElapsedTimeAdvancesFromSnapshotWithoutDoubleCounting() {
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let snapshot = FireVaultWidgetSnapshot(
+            updatedAt: capturedAt,
+            tripState: .recording,
+            tripStartedAt: capturedAt.addingTimeInterval(-600),
+            elapsedSeconds: 600,
+            distanceMiles: 8.5,
+            stopCount: 1,
+            accountName: nil,
+            accountID: nil,
+            accountCategory: nil
+        )
+
+        XCTAssertEqual(
+            snapshot.elapsedTime(at: capturedAt.addingTimeInterval(30)),
+            630,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            snapshot.elapsedTime(at: capturedAt.addingTimeInterval(-30)),
+            600,
+            accuracy: 0.001
+        )
+    }
+
+    func testStoppedWidgetElapsedTimeRemainsFrozen() {
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let snapshot = FireVaultWidgetSnapshot(
+            updatedAt: capturedAt,
+            tripState: .complete,
+            tripStartedAt: capturedAt.addingTimeInterval(-600),
+            elapsedSeconds: 600,
+            distanceMiles: 8.5,
+            stopCount: 1,
+            accountName: nil,
+            accountID: nil,
+            accountCategory: nil
+        )
+
+        XCTAssertEqual(
+            snapshot.elapsedTime(at: capturedAt.addingTimeInterval(3_600)),
+            600,
+            accuracy: 0.001
+        )
+    }
+
     func testTripLogIntegrityRemovesDuplicateRecordsAndRepairsTimes() {
         let dayID = UUID()
         let pointID = UUID()

@@ -385,6 +385,10 @@ struct FireVaultBreadcrumbPermissionState: Equatable {
 
 @MainActor
 final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationManagerDelegate {
+    /// The single live archive owner shared by the iPhone/iPad scene and
+    /// CarPlay. Demo stores continue to use their own isolated archive URLs.
+    static let shared = FireVaultBreadcrumbStore()
+
     @Published private(set) var days: [FireVaultBreadcrumbDay]
     @Published private(set) var isRecording = false
     @Published private(set) var authorizationStatus: CLAuthorizationStatus

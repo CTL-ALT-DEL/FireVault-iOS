@@ -12,7 +12,7 @@ struct ContentView: View {
     @StateObject private var store = FireVaultStore()
     @StateObject private var settings = FireVaultNativeSettingsStore()
     @StateObject private var locationService = FireVaultLocationService()
-    @StateObject private var liveBreadcrumbs = FireVaultBreadcrumbStore()
+    @StateObject private var liveBreadcrumbs = FireVaultBreadcrumbStore.shared
     @StateObject private var quickActions = FireVaultQuickActionCenter.shared
     @StateObject private var widgetDeepLinks = FireVaultWidgetDeepLinkCenter.shared
     @StateObject private var privacyLock = FireVaultPrivacyLockController()

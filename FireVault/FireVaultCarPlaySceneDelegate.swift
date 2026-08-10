@@ -16,7 +16,12 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private weak var interfaceController: CPInterfaceController?
     private let store = FireVaultStore()
     private let settings = FireVaultNativeSettingsStore()
-    private let breadcrumbs = FireVaultBreadcrumbStore()
+    // Share the live Trip Log owner with the handset scene. Demo Mode keeps a
+    // separate deterministic archive so CarPlay can never write demo activity
+    // into the technician's live history.
+    private lazy var breadcrumbs: FireVaultBreadcrumbStore = store.demoMode
+        ? FireVaultDemoShowroom.makeBreadcrumbStore()
+        : FireVaultBreadcrumbStore.shared
     private let locationService = FireVaultLocationService()
 
     private var nearbyTemplate: CPListTemplate?
