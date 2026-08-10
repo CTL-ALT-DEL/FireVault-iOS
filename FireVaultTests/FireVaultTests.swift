@@ -361,6 +361,43 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(persisted, updated)
     }
 
+    func testUpdatingAccountGPSRecalibratesCoordinateWithoutChangingFieldData() throws {
+        let suite = "FireVaultTests.RecalibrateAccountGPS.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let account = store.addAccount()
+        let index = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        store.accounts[index].notes = [
+            .init(id: "note-1", title: "Access", text: "Call first", date: "Today")
+        ]
+
+        XCTAssertTrue(
+            store.updateAccount(
+                id: account.id,
+                name: "API Systems Integrators",
+                address: "7306 W Yellowstone Hwy, Casper, WY 82604",
+                category: "Commercial",
+                accountId: "AE230020",
+                phone: "307-555-0100",
+                latitude: 42.8734,
+                longitude: -106.4431
+            )
+        )
+
+        let updated = try XCTUnwrap(store.selectedAccount)
+        XCTAssertEqual(updated.latitude, 42.8734)
+        XCTAssertEqual(updated.longitude, -106.4431)
+        XCTAssertEqual(updated.notes.map(\.id), ["note-1"])
+
+        let reloaded = FireVaultStore(defaults: defaults)
+        let persisted = try XCTUnwrap(reloaded.accounts.first(where: { $0.id == account.id }))
+        XCTAssertEqual(persisted.latitude, 42.8734)
+        XCTAssertEqual(persisted.longitude, -106.4431)
+        XCTAssertEqual(persisted.notes.map(\.id), ["note-1"])
+    }
+
     func testAccountNoteLifecyclePersistsWithoutChangingOtherAccountData() throws {
         let suite = "FireVaultTests.NoteLifecycle.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -843,6 +880,85 @@ final class FireVaultTests: XCTestCase {
 
         XCTAssertEqual(coordinate.latitude, 43.61502, accuracy: 0.000_001)
         XCTAssertEqual(coordinate.longitude, -116.20202, accuracy: 0.000_001)
+    }
+
+    func testBreadcrumbStopCandidateAcceptsSparseBackgroundSamples() {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let first = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: timestamp
+        )
+        let knownAccountSample = testLocation(
+            latitude: 43.61502,
+            longitude: -116.20202,
+            timestamp: timestamp.addingTimeInterval(3 * 60)
+        )
+        let unknownTooSoon = testLocation(
+            latitude: 43.61501,
+            longitude: -116.20201,
+            timestamp: timestamp.addingTimeInterval(4 * 60 + 59)
+        )
+        let unknownQualified = testLocation(
+            latitude: 43.61501,
+            longitude: -116.20201,
+            timestamp: timestamp.addingTimeInterval(5 * 60)
+        )
+
+        XCTAssertTrue(
+            FireVaultBreadcrumbRules.confirmsStopCandidate(
+                locations: [first, knownAccountSample],
+                isKnownAccount: true,
+                minimumUnknownStopMinutes: 5
+            )
+        )
+        XCTAssertFalse(
+            FireVaultBreadcrumbRules.confirmsStopCandidate(
+                locations: [first, unknownTooSoon],
+                isKnownAccount: false,
+                minimumUnknownStopMinutes: 5
+            )
+        )
+        XCTAssertTrue(
+            FireVaultBreadcrumbRules.confirmsStopCandidate(
+                locations: [first, unknownQualified],
+                isKnownAccount: false,
+                minimumUnknownStopMinutes: 5
+            )
+        )
+        XCTAssertGreaterThan(
+            FireVaultBreadcrumbRules.maximumCandidateGap,
+            FireVaultBreadcrumbRules.minimumUnrecognizedStopDuration
+        )
+    }
+
+    func testBreadcrumbStopDwellRecoversVisitWhenGPSIsQuietUntilDeparture() {
+        let arrival = Date(timeIntervalSince1970: 1_700_000_000)
+
+        XCTAssertTrue(
+            FireVaultBreadcrumbRules.confirmsStopDwell(
+                arrival: arrival,
+                departure: arrival.addingTimeInterval(3 * 60),
+                isKnownAccount: true,
+                minimumUnknownStopMinutes: 5
+            )
+        )
+        XCTAssertFalse(
+            FireVaultBreadcrumbRules.confirmsStopDwell(
+                arrival: arrival,
+                departure: arrival.addingTimeInterval(4 * 60 + 59),
+                isKnownAccount: false,
+                minimumUnknownStopMinutes: 5
+            )
+        )
+        XCTAssertTrue(
+            FireVaultBreadcrumbRules.confirmsStopDwell(
+                arrival: arrival,
+                departure: arrival.addingTimeInterval(5 * 60),
+                isKnownAccount: false,
+                minimumUnknownStopMinutes: 5
+            )
+        )
     }
 
     func testBreadcrumbDepartureRequiresConsistentEvidence() {

@@ -275,10 +275,13 @@ enum FireVaultBreadcrumbRules {
     static let stopRadius: CLLocationDistance = 85
     static let minimumAccountStopDuration: TimeInterval = 180
     static let minimumUnrecognizedStopDuration: TimeInterval = 300
-    static let maximumCandidateGap: TimeInterval = 150
+    // Background location delivery can become sparse after the vehicle stops.
+    // Keep a stationary candidate long enough to satisfy the longest supported
+    // stop threshold instead of resetting it before it can qualify.
+    static let maximumCandidateGap: TimeInterval = 12 * 60
     static let maximumUnrecognizedAccuracy: CLLocationAccuracy = 50
     static let maximumStationarySpeed: CLLocationSpeed = 2.5
-    static let minimumConfirmationSamples = 3
+    static let minimumConfirmationSamples = 2
     static let minimumDepartureSamples = 2
     static let minimumDepartureEvidenceDuration: TimeInterval = 20
     static let maximumDepartureClusterRadius: CLLocationDistance = 110
@@ -351,6 +354,32 @@ enum FireVaultBreadcrumbRules {
             latitude: median(latitudes),
             longitude: median(longitudes)
         )
+    }
+
+    static func confirmsStopCandidate(
+        locations: [CLLocation],
+        isKnownAccount: Bool,
+        minimumUnknownStopMinutes: Int
+    ) -> Bool {
+        guard locations.count >= minimumConfirmationSamples,
+              let first = locations.first,
+              let last = locations.last else { return false }
+        let requiredDuration = isKnownAccount
+            ? minimumAccountStopDuration
+            : TimeInterval(max(1, minimumUnknownStopMinutes) * 60)
+        return last.timestamp.timeIntervalSince(first.timestamp) >= requiredDuration
+    }
+
+    static func confirmsStopDwell(
+        arrival: Date,
+        departure: Date,
+        isKnownAccount: Bool,
+        minimumUnknownStopMinutes: Int
+    ) -> Bool {
+        let requiredDuration = isKnownAccount
+            ? minimumAccountStopDuration
+            : TimeInterval(max(1, minimumUnknownStopMinutes) * 60)
+        return departure.timeIntervalSince(arrival) >= requiredDuration
     }
 
     static func confirmsDeparture(
@@ -868,6 +897,16 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     private func startAuthorizedUpdates() {
         guard sessionIsPrepared, activeDay?.isPaused == false else { return }
+        manager.activityType = .automotiveNavigation
+        manager.desiredAccuracy = gpsPreferences.highAccuracy
+            ? kCLLocationAccuracyBest
+            : kCLLocationAccuracyHundredMeters
+        manager.distanceFilter = FireVaultBreadcrumbRules.minimumPointDistance
+        // Automatic pausing can occur before a three- or five-minute stop has
+        // enough samples to be confirmed. Trip Log already throttles persisted
+        // points, so keep Core Location active for reliable arrival/departure
+        // recognition during an explicitly started workday.
+        manager.pausesLocationUpdatesAutomatically = false
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = true
         manager.startUpdatingLocation()
@@ -963,20 +1002,20 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
            location.timestamp.timeIntervalSince(lastCandidate.timestamp) > FireVaultBreadcrumbRules.maximumCandidateGap {
             departureCandidateLocations.removeAll()
             if activeStopID == nil {
-                candidateLocations.removeAll()
+                let candidateLocation = CLLocation(
+                    latitude: candidateCoordinate.latitude,
+                    longitude: candidateCoordinate.longitude
+                )
+                // A delayed sample at the same place is useful dwell evidence.
+                // Reset only when the first post-gap sample is somewhere else.
+                if location.distance(from: candidateLocation) > FireVaultBreadcrumbRules.stopRadius {
+                    candidateLocations.removeAll()
+                }
             }
         }
 
         guard isReliableStopSample(location) else {
-            if location.speed >= FireVaultBreadcrumbRules.maximumStationarySpeed {
-                closeActiveStopIfNeeded(
-                    dayIndex: dayIndex,
-                    departure: candidateLocations.last?.timestamp ?? location.timestamp
-                )
-                candidateLocations.removeAll()
-                departureCandidateLocations.removeAll()
-                activeStopID = nil
-            }
+            collectMovingDepartureEvidence(location, dayIndex: dayIndex)
             return
         }
 
@@ -1037,6 +1076,63 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             && speedIsStationary
     }
 
+    private func collectMovingDepartureEvidence(_ location: CLLocation, dayIndex: Int) {
+        guard !candidateLocations.isEmpty,
+              location.horizontalAccuracy >= 0,
+              location.horizontalAccuracy <= FireVaultBreadcrumbRules.maximumHorizontalAccuracy,
+              location.speed >= FireVaultBreadcrumbRules.maximumStationarySpeed else { return }
+
+        let stopCoordinate = candidateCoordinate
+        let stopLocation = CLLocation(
+            latitude: stopCoordinate.latitude,
+            longitude: stopCoordinate.longitude
+        )
+        // Ignore an isolated speed spike while the coordinate remains on site.
+        guard location.distance(from: stopLocation) > FireVaultBreadcrumbRules.stopRadius else {
+            departureCandidateLocations.removeAll()
+            return
+        }
+
+        departureCandidateLocations.append(location)
+        guard FireVaultBreadcrumbRules.confirmsDeparture(
+            from: stopCoordinate,
+            with: departureCandidateLocations
+        ) else { return }
+
+        let firstDeparture = departureCandidateLocations.first?.timestamp ?? location.timestamp
+        if activeStopID == nil,
+           let arrival = candidateLocations.first?.timestamp {
+            let account = FireVaultBreadcrumbRules.closestAccount(
+                to: stopCoordinate,
+                accounts: accounts
+            )
+            if FireVaultBreadcrumbRules.confirmsStopDwell(
+                arrival: arrival,
+                departure: firstDeparture,
+                isKnownAccount: account != nil,
+                minimumUnknownStopMinutes: gpsPreferences.resolvedTripLogMinimumUnknownStopMinutes
+            ) {
+                // Core Location may provide one final stationary sample and
+                // then remain quiet until the vehicle leaves. Recover that
+                // legitimate visit from its arrival and departure evidence.
+                beginConfirmedStop(
+                    dayIndex: dayIndex,
+                    arrival: arrival,
+                    coordinate: stopCoordinate,
+                    account: account
+                )
+            }
+        }
+
+        closeActiveStopIfNeeded(
+            dayIndex: dayIndex,
+            departure: firstDeparture
+        )
+        candidateLocations.removeAll()
+        departureCandidateLocations.removeAll()
+        activeStopID = nil
+    }
+
     private func suppressesDisregardedStop(at location: CLLocation) -> Bool {
         guard let disregardedStopCoordinate else { return false }
 
@@ -1074,14 +1170,12 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     }
 
     private var candidateCanBeConfirmed: Bool {
-        guard candidateLocations.count >= FireVaultBreadcrumbRules.minimumConfirmationSamples,
-              let first = candidateLocations.first,
-              let last = candidateLocations.last else { return false }
         let account = FireVaultBreadcrumbRules.closestAccount(to: candidateCoordinate, accounts: accounts)
-        let requiredDuration = account == nil
-            ? TimeInterval(gpsPreferences.resolvedTripLogMinimumUnknownStopMinutes * 60)
-            : FireVaultBreadcrumbRules.minimumAccountStopDuration
-        return last.timestamp.timeIntervalSince(first.timestamp) >= requiredDuration
+        return FireVaultBreadcrumbRules.confirmsStopCandidate(
+            locations: candidateLocations,
+            isKnownAccount: account != nil,
+            minimumUnknownStopMinutes: gpsPreferences.resolvedTripLogMinimumUnknownStopMinutes
+        )
     }
 
     private func beginConfirmedStop(

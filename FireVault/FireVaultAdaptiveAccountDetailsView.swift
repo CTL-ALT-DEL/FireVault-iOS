@@ -177,14 +177,16 @@ struct FireVaultAdaptiveAccountDetailsView: View {
             )
         }
         .sheet(isPresented: $isShowingAccountEditor) {
-            FireVaultEditAccountSheet(account: account) { draft in
+            FireVaultEditAccountSheet(account: account, locationService: locationService) { draft in
                 store.updateAccount(
                     id: account.id,
                     name: draft.name,
                     address: draft.address,
                     category: draft.category,
                     accountId: draft.accountId,
-                    phone: draft.phone
+                    phone: draft.phone,
+                    latitude: draft.latitude,
+                    longitude: draft.longitude
                 )
             }
         }

@@ -135,51 +135,59 @@ struct NativeAppShellView: View {
     @State private var keyboardVisible = false
 
     var body: some View {
-        ZStack {
-            NativeShellPalette.background.ignoresSafeArea()
-            Group {
-                switch store.selectedTab {
-                case .nearby:
-                    NativeNearbyView(
-                        payload: payload,
-                        store: store,
-                        settings: settings,
-                        locationService: locationService,
-                        breadcrumbs: breadcrumbs
-                    )
-                case .accounts:
-                    NativeAccountsView(
-                        payload: payload,
-                        store: store,
-                        settings: settings
-                    )
-                case .trip:
-                    FireVaultTripLogPortraitView(
-                        breadcrumbs: breadcrumbs,
-                        store: store,
-                        technicianName: settings.preferences.technician.name,
-                        companyName: settings.preferences.technician.company,
-                        includeCoordinatesInReports: settings.gps.includeCoordinatesInReports,
-                        showsCloseButton: false
-                    )
-                case .photo: NativePhotoView(store: store, settings: settings)
-                case .settings:
-                    NativeSettingsView(
-                        payload: payload,
-                        store: store,
-                        settings: settings,
-                        locationService: locationService,
-                        breadcrumbs: breadcrumbs
-                    )
+        VStack(spacing: 0) {
+            ZStack {
+                NativeShellPalette.background
+                Group {
+                    switch store.selectedTab {
+                    case .nearby:
+                        NativeNearbyView(
+                            payload: payload,
+                            store: store,
+                            settings: settings,
+                            locationService: locationService,
+                            breadcrumbs: breadcrumbs
+                        )
+                    case .accounts:
+                        NativeAccountsView(
+                            payload: payload,
+                            store: store,
+                            settings: settings
+                        )
+                    case .trip:
+                        FireVaultTripLogPortraitView(
+                            breadcrumbs: breadcrumbs,
+                            store: store,
+                            technicianName: settings.preferences.technician.name,
+                            companyName: settings.preferences.technician.company,
+                            includeCoordinatesInReports: settings.gps.includeCoordinatesInReports,
+                            showsCloseButton: false
+                        )
+                    case .photo: NativePhotoView(store: store, settings: settings)
+                    case .settings:
+                        NativeSettingsView(
+                            payload: payload,
+                            store: store,
+                            settings: settings,
+                            locationService: locationService,
+                            breadcrumbs: breadcrumbs
+                        )
+                    }
                 }
             }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
             if !keyboardVisible {
                 nativeNavigation
+                    .fixedSize(horizontal: false, vertical: true)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .background(NativeShellPalette.background.ignoresSafeArea())
+        // Prevent a stale keyboard safe-area inset from leaving the navigation
+        // controls suspended above a large blank region after dismissing a
+        // sheet or returning from another app.
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .tint(NativeShellPalette.blue)
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             withAnimation(.easeOut(duration: 0.18)) { keyboardVisible = true }
@@ -248,7 +256,7 @@ struct NativeAppShellView: View {
         .padding(.horizontal, 8)
         .padding(.top, 5)
         .padding(.bottom, 3)
-        .background(NativeShellPalette.navigationBackground.ignoresSafeArea(edges: .bottom))
+        .background(NativeShellPalette.navigationBackground)
         .overlay(alignment: Alignment.top) {
             Rectangle()
                 .fill(NativeShellPalette.navigationDivider)
