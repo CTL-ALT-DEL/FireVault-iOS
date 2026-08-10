@@ -533,16 +533,30 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private func confirmEndTripLog() {
         guard let interfaceController else { return }
         let end = CPAlertAction(title: "End Trip Log", style: .destructive) { [weak self] _ in
-            guard let self else { return }
-            breadcrumbs.endWorkday()
-            refreshCarPlayState()
+            self?.endTripLogAndReturnHome()
         }
-        let cancel = CPAlertAction(title: "Keep Recording", style: .cancel) { _ in }
+        let cancel = CPAlertAction(title: "Keep Recording", style: .cancel) { [weak self] _ in
+            self?.dismissTripLogConfirmation()
+        }
         interfaceController.presentTemplate(
             CPAlertTemplate(titleVariants: ["End today’s Trip Log?"], actions: [end, cancel]),
             animated: true,
             completion: nil
         )
+    }
+
+    private func endTripLogAndReturnHome() {
+        breadcrumbs.endWorkday()
+        refreshCarPlayState()
+
+        guard let interfaceController else { return }
+        interfaceController.dismissTemplate(animated: true) { [weak self] _, _ in
+            self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
+        }
+    }
+
+    private func dismissTripLogConfirmation() {
+        interfaceController?.dismissTemplate(animated: true, completion: nil)
     }
 
     // MARK: - Live refresh
