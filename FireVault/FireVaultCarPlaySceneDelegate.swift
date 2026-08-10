@@ -426,17 +426,17 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
               let interfaceController else { return }
 
         announcedArrivalAccountID = account.id
-        let viewPoints = CPAlertAction(title: "View Arrival Points", style: .default) { [weak self] _ in
+        let viewPoints = CPAlertAction(title: "View Map", style: .default) { [weak self] _ in
             self?.dismissArrivalPrompt {
                 self?.showArrivalPoints(for: account)
             }
         }
-        let dismiss = CPAlertAction(title: "Not Now", style: .cancel) { [weak self] _ in
+        let dismiss = CPAlertAction(title: "Dismiss", style: .cancel) { [weak self] _ in
             self?.dismissArrivalPrompt()
         }
         interfaceController.presentTemplate(
             CPAlertTemplate(
-                titleVariants: ["Arriving at \(account.name)", "Arrival points are available"],
+                titleVariants: ["Arrival Points Ready"],
                 actions: [viewPoints, dismiss]
             ),
             animated: true,
