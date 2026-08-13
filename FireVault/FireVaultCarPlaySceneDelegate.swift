@@ -12,8 +12,7 @@ import MapKit
 import UIKit
 
 @MainActor
-final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate,
-    CPPointOfInterestTemplateDelegate {
+final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private weak var interfaceController: CPInterfaceController?
     private let store = FireVaultStore()
     private let settings = FireVaultNativeSettingsStore()
@@ -25,11 +24,11 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         : FireVaultBreadcrumbStore.shared
     private let locationService = FireVaultLocationService()
 
-    private var nearbyTemplate: CPPointOfInterestTemplate?
+    private var nearbyTemplate: CPListTemplate?
     private var favoritesTemplate: CPListTemplate?
     private var recentsTemplate: CPListTemplate?
-    private var tripLogTemplate: CPInformationTemplate?
-    private var homeTemplate: CPListTemplate?
+    private var tripLogTemplate: CPListTemplate?
+    private var rootTabTemplate: CPTabBarTemplate?
     private var liveRefreshTask: Task<Void, Never>?
     private var locationObservation: AnyCancellable?
     private var tripLogLocationObservation: AnyCancellable?
@@ -37,11 +36,6 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private var announcedArrivalAccountID: String?
     private var speedReferenceLocation: CLLocation?
     private var lastMeaningfulMovementAt: Date?
-    private var selectedNearbyAccountID: String?
-    private var lastNearbyRefreshAt: Date?
-    private var followsNearbyLocation = true
-    private var ignoreNearbyRegionChangesUntil: Date?
-    private var usesCompactNearbySpacer = false
 
     private let demoLocation = CLLocation(latitude: 43.6150, longitude: -116.2023)
     private let recentAccountIDsKey = "firevault.carplay.recentAccountIDs"
@@ -51,7 +45,6 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         didConnect interfaceController: CPInterfaceController
     ) {
         self.interfaceController = interfaceController
-        usesCompactNearbySpacer = templateApplicationScene.carWindow.bounds.height <= 520
 
         if store.demoMode {
             FireVaultDemoShowroom.installAccountsIfNeeded(into: store)
@@ -81,257 +74,102 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         favoritesTemplate = nil
         recentsTemplate = nil
         tripLogTemplate = nil
-        homeTemplate = nil
+        rootTabTemplate = nil
         announcedArrivalAccountID = nil
         speedReferenceLocation = nil
         lastMeaningfulMovementAt = nil
-        selectedNearbyAccountID = nil
-        lastNearbyRefreshAt = nil
-        followsNearbyLocation = true
-        ignoreNearbyRegionChangesUntil = nil
-        usesCompactNearbySpacer = false
         self.interfaceController = nil
     }
 
-    // MARK: - Compact CarPlay home
+    // MARK: - Native CarPlay tab workspace
 
-    private func makeRootTemplate() -> CPListTemplate {
+    private func makeRootTemplate() -> CPTabBarTemplate {
         let nearby = makeNearbyTemplate()
+        configureTab(nearby, title: "Nearby", symbol: "location.fill", color: .systemBlue)
         nearbyTemplate = nearby
 
         let tripLog = makeTripLogTemplate()
+        configureTab(
+            tripLog,
+            title: "Trip Log",
+            symbol: breadcrumbs.isRecording ? "record.circle.fill" : "gauge.with.dots.needle.50percent",
+            color: breadcrumbs.isRecording ? .systemRed : .systemTeal
+        )
         tripLogTemplate = tripLog
 
         let favorites = makeFavoritesTemplate()
+        configureTab(favorites, title: "Favorites", symbol: "star.fill", color: .systemYellow)
         favoritesTemplate = favorites
 
         let recents = makeRecentsTemplate()
+        configureTab(recents, title: "Recent", symbol: "clock.arrow.circlepath", color: .systemPurple)
         recentsTemplate = recents
 
-        let home = CPListTemplate(
-            title: "FireVault",
-            sections: makeHomeSections(),
-            assistantCellConfiguration: nil,
-            headerGridButtons: makeHomeGridButtons()
-        )
-        homeTemplate = home
-        return home
+        let tabs = CPTabBarTemplate(templates: [nearby, tripLog, favorites, recents])
+        rootTabTemplate = tabs
+        return tabs
     }
 
-    private func makeHomeGridButtons() -> [CPGridButton] {
-        [
-            homeGridButton(title: "Nearby", symbol: "mappin.and.ellipse", color: .systemBlue) { [weak self] in
-                guard let self, let template = nearbyTemplate else { return }
-                interfaceController?.pushTemplate(template, animated: true, completion: nil)
-            },
-            homeGridButton(
-                title: "Trip Log",
-                symbol: breadcrumbs.isRecording ? "record.circle.fill" : "point.3.connected.trianglepath.dotted",
-                color: breadcrumbs.isRecording ? .systemRed : .systemTeal
-            ) { [weak self] in
-                guard let self, let template = tripLogTemplate else { return }
-                interfaceController?.pushTemplate(template, animated: true, completion: nil)
-            },
-            homeGridButton(title: "Favorites", symbol: "star.fill", color: .systemYellow) { [weak self] in
-                guard let self, let template = favoritesTemplate else { return }
-                interfaceController?.pushTemplate(template, animated: true, completion: nil)
-            },
-            homeGridButton(title: "Recent", symbol: "clock.arrow.circlepath", color: .systemPurple) { [weak self] in
-                guard let self, let template = recentsTemplate else { return }
-                interfaceController?.pushTemplate(template, animated: true, completion: nil)
-            }
-        ]
-    }
-
-    private func homeGridButton(
+    private func configureTab(
+        _ template: CPTemplate,
         title: String,
         symbol: String,
-        color: UIColor,
-        action: @escaping @MainActor () -> Void
-    ) -> CPGridButton {
-        CPGridButton(
-            titleVariants: [title],
-            image: requiredCarPlayIcon(symbol, color: color)
-        ) { _ in
-            action()
-        }
-    }
-
-    private func makeHomeSections() -> [CPListSection] {
-        let tripLog = CPListItem(
-            text: "Trip Log • \(tripLogStatus)",
-            detailText: tripLogAtAGlanceSummary,
-            image: carPlayIcon(
-                breadcrumbs.isRecording ? "record.circle.fill" : "point.3.connected.trianglepath.dotted",
-                color: breadcrumbs.isRecording ? .systemRed : .systemTeal
-            ),
-            accessoryImage: nil,
-            accessoryType: .disclosureIndicator
-        )
-        tripLog.handler = { [weak self] _, completion in
-            guard let self, let template = tripLogTemplate else {
-                completion()
-                return
-            }
-            interfaceController?.pushTemplate(template, animated: true, completion: nil)
-            completion()
-        }
-
-        let nearest: CPListItem
-        if let account = sortedMappedAccounts(favoritesOnly: false).first {
-            nearest = CPListItem(
-                text: account.name,
-                detailText: nearestAccountAtAGlanceSummary(account),
-                image: carPlayIcon("building.2.fill", color: .systemBlue),
-                accessoryImage: nil,
-                accessoryType: .disclosureIndicator
-            )
-            nearest.handler = { [weak self] _, completion in
-                self?.showAccount(account)
-                completion()
-            }
-        } else {
-            nearest = emptyAccountItem(
-                title: "Nearest Account",
-                detail: "No mapped accounts are available."
-            )
-        }
-
-        return [CPListSection(items: [tripLog, nearest], header: "At a Glance", sectionIndexTitle: nil)]
+        color: UIColor
+    ) {
+        template.tabTitle = title
+        template.tabImage = requiredCarPlayIcon(symbol, color: color)
     }
 
     // MARK: - Nearby and Favorites
 
-    private func makeNearbyTemplate() -> CPPointOfInterestTemplate {
-        let points = makeNearbyPoints()
-        let template = CPPointOfInterestTemplate(
-            // Compact CarPlay displays reserve too much vertical space for a
-            // POI template title and can place the first row underneath it.
-            // The Home button already identifies this destination as Nearby.
-            title: "",
-            pointsOfInterest: points,
-            selectedIndex: points.isEmpty ? NSNotFound : selectedNearbyIndex(in: points)
+    private func makeNearbyTemplate() -> CPListTemplate {
+        let template = CPListTemplate(
+            title: "Nearby",
+            sections: makeNearbySections(),
+            assistantCellConfiguration: nil,
+            headerGridButtons: [
+                CPGridButton(
+                    titleVariants: ["Refresh"],
+                    image: requiredCarPlayIcon("location.fill", color: .systemBlue)
+                ) { [weak self] _ in
+                    self?.refreshCarPlayState()
+                }
+            ]
         )
-        template.pointOfInterestDelegate = self
-        template.trailingNavigationBarButtons = [
-            CPBarButton(image: requiredCarPlayIcon("location.fill", color: .systemBlue)) { [weak self] _ in
-                self?.recenterNearbyMap()
-            }
-        ]
-        ignoreNearbyRegionChangesUntil = Date().addingTimeInterval(2)
         return template
     }
 
-    private func makeNearbyPoints() -> [CPPointOfInterest] {
+    private func makeNearbySections() -> [CPListSection] {
         let accounts = Array(sortedMappedAccounts(favoritesOnly: false).prefix(6))
-        var points: [CPPointOfInterest] = accounts.compactMap { account in
-            guard let coordinate = account.coordinate else { return nil }
-            let mapItem = MKMapItem(
-                location: CLLocation(
-                    latitude: coordinate.latitude,
-                    longitude: coordinate.longitude
-                ),
-                address: nil
-            )
-            mapItem.name = account.name
-
+        guard !accounts.isEmpty else {
+            return [CPListSection(items: [emptyAccountItem(
+                title: "No mapped accounts",
+                detail: "Add account coordinates in FireVault."
+            )])]
+        }
+        let items = accounts.enumerated().map { index, account in
             let accountID = account.accountId.trimmingCharacters(in: .whitespacesAndNewlines)
             let identifier = accountID.isEmpty ? "No account ID" : "#\(accountID)"
-            let distance = effectiveLocation.map {
+            let miles = effectiveLocation.map {
                 String(format: "%.1f mi", self.distance(from: $0, to: account) / 1_609.344)
             } ?? "Distance unavailable"
-            let point = CPPointOfInterest(
-                location: mapItem,
-                title: account.name,
-                subtitle: "\(identifier) • \(distance)",
-                // Keep the Nearby list to one compact detail line. CarPlay
-                // renders both subtitle and summary beneath the title, so an
-                // additional summary duplicates the account information and
-                // creates an unwanted third line.
-                summary: nil,
-                detailTitle: account.name,
-                detailSubtitle: account.address,
-                detailSummary: "\(distance) • \(account.category)",
-                pinImage: nil,
-                selectedPinImage: nil
-            )
-            point.userInfo = account.id as NSString
-            point.primaryButton = CPTextButton(title: "Route", textStyle: .confirm) { [weak self] _ in
-                self?.rememberRecentAccount(account)
-                self?.openDrivingDirections(to: coordinate, name: account.name)
-            }
-            if !arrivalPoints(in: account).isEmpty {
-                point.secondaryButton = CPTextButton(title: "Arrival", textStyle: .normal) { [weak self] _ in
-                    self?.rememberRecentAccount(account)
-                    self?.showArrivalPoints(for: account)
-                }
-            }
-            return point
-        }
-
-        if usesCompactNearbySpacer,
-           let spacerCoordinate = effectiveLocation?.coordinate ?? accounts.first?.coordinate {
-            let spacerMapItem = MKMapItem(
-                location: CLLocation(
-                    latitude: spacerCoordinate.latitude,
-                    longitude: spacerCoordinate.longitude
+            let item = CPListItem(
+                text: account.name,
+                detailText: "\(identifier) • \(miles)",
+                image: carPlayIcon(
+                    index == 0 ? "location.circle.fill" : "building.2.fill",
+                    color: index == 0 ? .systemBlue : .secondaryLabel
                 ),
-                address: nil
+                accessoryImage: nil,
+                accessoryType: .disclosureIndicator
             )
-            let clearPin = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { _ in }
-            let spacer = CPPointOfInterest(
-                location: spacerMapItem,
-                // The compact CarPlay POI panel clips most of this first row.
-                // Supplying restrained header copy makes the remaining lower
-                // edge read intentionally instead of showing a blank gray bar.
-                title: "Nearby accounts",
-                subtitle: "Closest accounts",
-                summary: nil,
-                detailTitle: "Nearby accounts",
-                detailSubtitle: "Closest accounts",
-                detailSummary: nil,
-                pinImage: clearPin,
-                selectedPinImage: clearPin
-            )
-            points.insert(spacer, at: 0)
+            item.handler = { [weak self] _, completion in
+                self?.showAccount(account)
+                completion()
+            }
+            return item
         }
-
-        return points
-    }
-
-    private func selectedNearbyIndex(in points: [CPPointOfInterest]) -> Int {
-        guard let selectedNearbyAccountID,
-              let index = points.firstIndex(where: {
-                  ($0.userInfo as? String) == selectedNearbyAccountID
-              }) else {
-            // Do not force-select the first result. On compact CarPlay
-            // displays, the system offsets a selected row beneath the Nearby
-            // header and leaves its upper half obscured.
-            return NSNotFound
-        }
-        return index
-    }
-
-    func pointOfInterestTemplate(
-        _ pointOfInterestTemplate: CPPointOfInterestTemplate,
-        didChangeMapRegion region: MKCoordinateRegion
-    ) {
-        guard Date() >= (ignoreNearbyRegionChangesUntil ?? .distantPast) else { return }
-        // A manual map gesture suspends automatic following. The location
-        // button explicitly restores it, so periodic refreshes never fight a
-        // driver who chose to inspect another area.
-        followsNearbyLocation = false
-    }
-
-    func pointOfInterestTemplate(
-        _ pointOfInterestTemplate: CPPointOfInterestTemplate,
-        didSelectPointOfInterest pointOfInterest: CPPointOfInterest
-    ) {
-        guard let accountID = pointOfInterest.userInfo as? String,
-              let account = store.accounts.first(where: { $0.id == accountID }) else { return }
-        selectedNearbyAccountID = accountID
-        ignoreNearbyRegionChangesUntil = Date().addingTimeInterval(1)
-        rememberRecentAccount(account)
+        return [CPListSection(items: items, header: "Closest accounts", sectionIndexTitle: nil)]
     }
 
     private func makeFavoritesTemplate() -> CPListTemplate {
@@ -619,18 +457,18 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         ])
     }
 
-    // MARK: - Trip Log information dashboard
+    // MARK: - Trip Log dashboard
 
-    private func makeTripLogTemplate() -> CPInformationTemplate {
-        CPInformationTemplate(
+    private func makeTripLogTemplate() -> CPListTemplate {
+        CPListTemplate(
             title: "Trip Log",
-            layout: .twoColumn,
-            items: makeTripLogInformationItems(),
-            actions: makeTripLogActions()
+            sections: makeTripLogSections(),
+            assistantCellConfiguration: nil,
+            headerGridButtons: makeTripLogGridButtons()
         )
     }
 
-    private func makeTripLogInformationItems() -> [CPInformationItem] {
+    private func makeTripLogSections() -> [CPListSection] {
         let location = effectiveLocation
         let day = breadcrumbs.activeDay ?? breadcrumbs.today
 
@@ -641,40 +479,77 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         let time = store.demoMode ? "00:48:17" : elapsedText(day?.elapsedTime ?? 0)
         let accuracy = store.demoMode ? "±10 ft" : currentGPSAccuracyText(location)
 
-        // CPInformationTemplate's `.twoColumn` layout places each item's
-        // title and detail in the two columns; it does not pair adjacent
-        // information items. Keep this to three explicit rows so every
-        // metric remains visible above the CarPlay action buttons.
-        return [
-            CPInformationItem(
-                title: "SPEED  ·  \(speed)",
-                detail: carPlayRightColumn(label: "ELEVATION", value: elevation)
-            ),
-            CPInformationItem(
-                title: "TRIP  ·  \(trip)",
-                detail: carPlayRightColumn(label: "STOPS", value: stops)
-            ),
-            CPInformationItem(
-                title: "TIME  ·  \(time)",
-                detail: carPlayRightColumn(label: "GPS ACCURACY", value: accuracy)
+        let status = CPListItem(
+            text: tripLogStatus,
+            detailText: tripLogStatusDetail,
+            image: carPlayIcon(
+                breadcrumbs.isRecording ? "record.circle.fill" : "pause.circle.fill",
+                color: breadcrumbs.isRecording ? .systemRed : .systemTeal
             )
+        )
+        status.isEnabled = false
+
+        let telemetry = [
+            telemetryItem(
+                primaryLabel: "Speed",
+                primaryValue: speed,
+                secondaryLabel: "Elevation",
+                secondaryValue: elevation,
+                symbol: "speedometer"
+            ),
+            telemetryItem(
+                primaryLabel: "Trip",
+                primaryValue: trip,
+                secondaryLabel: "Stops",
+                secondaryValue: stops,
+                symbol: "point.3.connected.trianglepath.dotted"
+            ),
+            telemetryItem(
+                primaryLabel: "Time",
+                primaryValue: time,
+                secondaryLabel: "GPS Accuracy",
+                secondaryValue: accuracy,
+                symbol: "location.circle.fill"
+            )
+        ]
+
+        return [
+            CPListSection(items: [status], header: "Today", sectionIndexTitle: nil),
+            CPListSection(items: telemetry, header: "Live telemetry", sectionIndexTitle: nil)
         ]
     }
 
-    private func carPlayRightColumn(label: String, value: String) -> String {
-        let text = "\(label)  ·  \(value)"
-        // CPInformationTemplate right-aligns its detail column and exposes no
-        // text-alignment control. Non-breaking trailing spaces give all three
-        // rows a consistent rendered width, producing a flush-left visual
-        // edge without relying on custom or unsupported CarPlay UI.
-        let targetWidth = 28
-        let paddingCount = max(0, targetWidth - text.count)
-        return text + String(repeating: "\u{00A0}", count: paddingCount)
+    private func telemetryItem(
+        primaryLabel: String,
+        primaryValue: String,
+        secondaryLabel: String,
+        secondaryValue: String,
+        symbol: String
+    ) -> CPListItem {
+        let item = CPListItem(
+            text: "\(primaryLabel)  \(primaryValue)  •  \(secondaryLabel)  \(secondaryValue)",
+            detailText: nil,
+            image: carPlayIcon(symbol, color: .systemTeal)
+        )
+        item.isEnabled = false
+        return item
     }
 
-    private func makeTripLogActions() -> [CPTextButton] {
+    private var tripLogStatusDetail: String {
+        guard let day = breadcrumbs.activeDay ?? breadcrumbs.today else {
+            return "Ready to record today’s route"
+        }
+        if day.isPaused { return "Recording paused" }
+        if breadcrumbs.isRecording { return "Recording route and stops" }
+        return day.endedAt == nil ? "Ready to resume" : "Today’s Trip Log is complete"
+    }
+
+    private func makeTripLogGridButtons() -> [CPGridButton] {
         if breadcrumbs.activeDay == nil {
-            return [CPTextButton(title: "Start", textStyle: .confirm) { [weak self] _ in
+            return [CPGridButton(
+                titleVariants: ["Start"],
+                image: requiredCarPlayIcon("play.fill", color: .systemGreen)
+            ) { [weak self] _ in
                 guard let self else { return }
                 breadcrumbs.startWorkday(accounts: store.accounts)
                 refreshCarPlayState()
@@ -683,24 +558,36 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
         if breadcrumbs.activeDay?.isPaused == true {
             return [
-                CPTextButton(title: "Resume", textStyle: .confirm) { [weak self] _ in
+                CPGridButton(
+                    titleVariants: ["Resume"],
+                    image: requiredCarPlayIcon("play.fill", color: .systemGreen)
+                ) { [weak self] _ in
                     guard let self else { return }
                     breadcrumbs.resumeWorkday(accounts: store.accounts)
                     refreshCarPlayState()
                 },
-                CPTextButton(title: "End", textStyle: .cancel) { [weak self] _ in
+                CPGridButton(
+                    titleVariants: ["End"],
+                    image: requiredCarPlayIcon("stop.fill", color: .systemRed)
+                ) { [weak self] _ in
                     self?.confirmEndTripLog()
                 }
             ]
         }
 
         return [
-            CPTextButton(title: "Pause", textStyle: .normal) { [weak self] _ in
+            CPGridButton(
+                titleVariants: ["Pause"],
+                image: requiredCarPlayIcon("pause.fill", color: .systemOrange)
+            ) { [weak self] _ in
                 guard let self else { return }
                 breadcrumbs.pauseWorkday()
                 refreshCarPlayState()
             },
-            CPTextButton(title: "End", textStyle: .cancel) { [weak self] _ in
+            CPGridButton(
+                titleVariants: ["End"],
+                image: requiredCarPlayIcon("stop.fill", color: .systemRed)
+            ) { [weak self] _ in
                 self?.confirmEndTripLog()
             }
         ]
@@ -726,9 +613,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         refreshCarPlayState()
 
         guard let interfaceController else { return }
-        interfaceController.dismissTemplate(animated: true) { [weak self] _, _ in
-            self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
-        }
+        interfaceController.dismissTemplate(animated: true, completion: nil)
     }
 
     private func dismissTripLogConfirmation() {
@@ -790,36 +675,17 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     }
 
     private func refreshCarPlayState() {
-        homeTemplate?.updateSections(makeHomeSections())
-        homeTemplate?.headerGridButtons = makeHomeGridButtons()
-        refreshNearbyMapIfNeeded()
+        nearbyTemplate?.updateSections(makeNearbySections())
         favoritesTemplate?.updateSections(makeFavoriteSections())
         recentsTemplate?.updateSections(makeRecentSections())
-        tripLogTemplate?.items = makeTripLogInformationItems()
-        tripLogTemplate?.actions = makeTripLogActions()
-        checkForArrival()
-    }
-
-    private func refreshNearbyMapIfNeeded() {
-        guard followsNearbyLocation else { return }
-        let now = Date()
-        guard lastNearbyRefreshAt == nil
-                || now.timeIntervalSince(lastNearbyRefreshAt!) >= 15 else { return }
-        lastNearbyRefreshAt = now
-        let points = makeNearbyPoints()
-        ignoreNearbyRegionChangesUntil = now.addingTimeInterval(2)
-        nearbyTemplate?.setPointsOfInterest(
-            points,
-            selectedIndex: points.isEmpty ? NSNotFound : selectedNearbyIndex(in: points)
+        tripLogTemplate?.updateSections(makeTripLogSections())
+        tripLogTemplate?.headerGridButtons = makeTripLogGridButtons()
+        tripLogTemplate?.tabImage = requiredCarPlayIcon(
+            breadcrumbs.isRecording ? "record.circle.fill" : "gauge.with.dots.needle.50percent",
+            color: breadcrumbs.isRecording ? .systemRed : .systemTeal
         )
-    }
-
-    private func recenterNearbyMap() {
-        followsNearbyLocation = true
-        selectedNearbyAccountID = nil
-        lastNearbyRefreshAt = nil
-        ignoreNearbyRegionChangesUntil = Date().addingTimeInterval(2)
-        refreshNearbyMapIfNeeded()
+        tripLogTemplate?.showsTabBadge = breadcrumbs.isRecording
+        checkForArrival()
     }
 
     // MARK: - Data helpers
@@ -881,25 +747,6 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         return "Complete"
     }
 
-    private var nearestAccountSummary: String {
-        guard let account = sortedMappedAccounts(favoritesOnly: false).first else {
-            return "No mapped accounts"
-        }
-        guard let location = effectiveLocation else { return account.name }
-        let miles = distance(from: location, to: account) / 1_609.344
-        return "\(account.name) • \(String(format: "%.1f mi", miles))"
-    }
-
-    private var favoriteAccountSummary: String {
-        let count = sortedMappedAccounts(favoritesOnly: true).count
-        return count == 1 ? "1 saved site" : "\(count) saved sites"
-    }
-
-    private var recentAccountSummary: String {
-        guard let account = recentAccounts.first else { return "No recent sites yet" }
-        return "Last: \(account.name)"
-    }
-
     private var recentAccounts: [FireVaultWorkspaceAccount] {
         let ids = UserDefaults.standard.stringArray(forKey: recentAccountIDsKey) ?? []
         let accountsByID = Dictionary(uniqueKeysWithValues: store.accounts.map { ($0.id, $0) })
@@ -912,27 +759,6 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         ids.insert(account.id, at: 0)
         UserDefaults.standard.set(Array(ids.prefix(8)), forKey: recentAccountIDsKey)
         recentsTemplate?.updateSections(makeRecentSections())
-        homeTemplate?.updateSections(makeHomeSections())
-    }
-
-    private var tripLogHomeSummary: String {
-        let day = breadcrumbs.activeDay ?? breadcrumbs.today
-        return "\(tripLogStatus) • \(distanceText(day)) • \(timeAndStopsText(day))"
-    }
-
-    private var tripLogAtAGlanceSummary: String {
-        let day = breadcrumbs.activeDay ?? breadcrumbs.today
-        return "\(distanceText(day)) • \(elapsedText(day?.elapsedTime ?? 0)) • \(stopCountText(day))"
-    }
-
-    private func nearestAccountAtAGlanceSummary(_ account: FireVaultWorkspaceAccount) -> String {
-        let accountID = account.accountId.trimmingCharacters(in: .whitespacesAndNewlines)
-        let identifier = accountID.isEmpty ? account.category : "#\(accountID)"
-        guard let location = effectiveLocation else {
-            return identifier
-        }
-        let miles = distance(from: location, to: account) / 1_609.344
-        return "\(identifier) • \(String(format: "%.1f mi", miles))"
     }
 
     private func currentSpeedText(_ location: CLLocation?) -> String {
@@ -994,11 +820,6 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private func distanceText(_ day: FireVaultBreadcrumbDay?) -> String {
         guard let day else { return "0.0 mi" }
         return String(format: "%.1f mi", day.totalDistanceMeters / 1_609.344)
-    }
-
-    private func timeAndStopsText(_ day: FireVaultBreadcrumbDay?) -> String {
-        guard let day else { return "00:00:00 • 0" }
-        return "\(elapsedText(day.elapsedTime)) • \(day.stops.count)"
     }
 
     private func stopCountText(_ day: FireVaultBreadcrumbDay?) -> String {
