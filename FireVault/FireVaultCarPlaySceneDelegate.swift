@@ -41,6 +41,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private var lastNearbyRefreshAt: Date?
     private var followsNearbyLocation = true
     private var ignoreNearbyRegionChangesUntil: Date?
+    private var usesCompactNearbySpacer = false
 
     private let demoLocation = CLLocation(latitude: 43.6150, longitude: -116.2023)
     private let recentAccountIDsKey = "firevault.carplay.recentAccountIDs"
@@ -50,6 +51,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         didConnect interfaceController: CPInterfaceController
     ) {
         self.interfaceController = interfaceController
+        usesCompactNearbySpacer = templateApplicationScene.carWindow.bounds.height <= 520
 
         if store.demoMode {
             FireVaultDemoShowroom.installAccountsIfNeeded(into: store)
@@ -87,6 +89,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         lastNearbyRefreshAt = nil
         followsNearbyLocation = true
         ignoreNearbyRegionChangesUntil = nil
+        usesCompactNearbySpacer = false
         self.interfaceController = nil
     }
 
@@ -220,7 +223,8 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     }
 
     private func makeNearbyPoints() -> [CPPointOfInterest] {
-        Array(sortedMappedAccounts(favoritesOnly: false).prefix(6)).compactMap { account in
+        let accounts = Array(sortedMappedAccounts(favoritesOnly: false).prefix(6))
+        var points: [CPPointOfInterest] = accounts.compactMap { account in
             guard let coordinate = account.coordinate else { return nil }
             let mapItem = MKMapItem(
                 location: CLLocation(
@@ -264,6 +268,32 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
             }
             return point
         }
+
+        if usesCompactNearbySpacer,
+           let spacerCoordinate = effectiveLocation?.coordinate ?? accounts.first?.coordinate {
+            let spacerMapItem = MKMapItem(
+                location: CLLocation(
+                    latitude: spacerCoordinate.latitude,
+                    longitude: spacerCoordinate.longitude
+                ),
+                address: nil
+            )
+            let clearPin = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { _ in }
+            let spacer = CPPointOfInterest(
+                location: spacerMapItem,
+                title: " ",
+                subtitle: nil,
+                summary: nil,
+                detailTitle: " ",
+                detailSubtitle: nil,
+                detailSummary: nil,
+                pinImage: clearPin,
+                selectedPinImage: clearPin
+            )
+            points.insert(spacer, at: 0)
+        }
+
+        return points
     }
 
     private func selectedNearbyIndex(in points: [CPPointOfInterest]) -> Int {
