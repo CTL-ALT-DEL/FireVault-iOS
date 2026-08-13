@@ -27,7 +27,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private var nearbyTemplate: CPListTemplate?
     private var favoritesTemplate: CPListTemplate?
     private var recentsTemplate: CPListTemplate?
-    private var tripLogTemplate: CPListTemplate?
+    private var tripLogTemplate: CPInformationTemplate?
     private var rootTabTemplate: CPTabBarTemplate?
     private var liveRefreshTask: Task<Void, Never>?
     private var locationObservation: AnyCancellable?
@@ -123,20 +123,10 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     // MARK: - Nearby and Favorites
 
     private func makeNearbyTemplate() -> CPListTemplate {
-        let template = CPListTemplate(
+        CPListTemplate(
             title: "Nearby",
-            sections: makeNearbySections(),
-            assistantCellConfiguration: nil,
-            headerGridButtons: [
-                CPGridButton(
-                    titleVariants: ["Refresh"],
-                    image: requiredCarPlayIcon("location.fill", color: .systemBlue)
-                ) { [weak self] _ in
-                    self?.refreshCarPlayState()
-                }
-            ]
+            sections: makeNearbySections()
         )
-        return template
     }
 
     private func makeNearbySections() -> [CPListSection] {
@@ -459,16 +449,23 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
     // MARK: - Trip Log dashboard
 
-    private func makeTripLogTemplate() -> CPListTemplate {
-        CPListTemplate(
+    private func makeTripLogTemplate() -> CPInformationTemplate {
+        let template = CPInformationTemplate(
             title: "Trip Log",
-            sections: makeTripLogSections(),
-            assistantCellConfiguration: nil,
-            headerGridButtons: makeTripLogGridButtons()
+            layout: .leading,
+            items: makeTripLogInformationItems(),
+            actions: makeTripLogActions()
         )
+        template.trailingNavigationBarButtons = [
+            CPBarButton(
+                title: "GPS",
+                handler: { [weak self] _ in self?.showGPSDiagnostics() }
+            )
+        ]
+        return template
     }
 
-    private func makeTripLogSections() -> [CPListSection] {
+    private func makeTripLogInformationItems() -> [CPInformationItem] {
         let location = effectiveLocation
         let day = breadcrumbs.activeDay ?? breadcrumbs.today
 
@@ -479,60 +476,12 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         let time = store.demoMode ? "00:48:17" : elapsedText(day?.elapsedTime ?? 0)
         let accuracy = store.demoMode ? "±10 ft" : currentGPSAccuracyText(location)
 
-        let status = CPListItem(
-            text: tripLogStatus,
-            detailText: tripLogStatusDetail,
-            image: carPlayIcon(
-                breadcrumbs.isRecording ? "record.circle.fill" : "pause.circle.fill",
-                color: breadcrumbs.isRecording ? .systemRed : .systemTeal
-            )
-        )
-        status.isEnabled = false
-
-        let telemetry = [
-            telemetryItem(
-                primaryLabel: "Speed",
-                primaryValue: speed,
-                secondaryLabel: "Elevation",
-                secondaryValue: elevation,
-                symbol: "speedometer"
-            ),
-            telemetryItem(
-                primaryLabel: "Trip",
-                primaryValue: trip,
-                secondaryLabel: "Stops",
-                secondaryValue: stops,
-                symbol: "point.3.connected.trianglepath.dotted"
-            ),
-            telemetryItem(
-                primaryLabel: "Time",
-                primaryValue: time,
-                secondaryLabel: "GPS Accuracy",
-                secondaryValue: accuracy,
-                symbol: "location.circle.fill"
-            )
-        ]
-
         return [
-            CPListSection(items: [status], header: "Today", sectionIndexTitle: nil),
-            CPListSection(items: telemetry, header: "Live telemetry", sectionIndexTitle: nil)
+            CPInformationItem(title: tripLogStatus.uppercased(), detail: tripLogStatusDetail),
+            CPInformationItem(title: "SPEED  \(speed)", detail: "ELEVATION  \(elevation)"),
+            CPInformationItem(title: "TRIP  \(trip)", detail: "STOPS  \(stops)"),
+            CPInformationItem(title: "TIME  \(time)", detail: "GPS ACCURACY  \(accuracy)")
         ]
-    }
-
-    private func telemetryItem(
-        primaryLabel: String,
-        primaryValue: String,
-        secondaryLabel: String,
-        secondaryValue: String,
-        symbol: String
-    ) -> CPListItem {
-        let item = CPListItem(
-            text: "\(primaryLabel)  \(primaryValue)  •  \(secondaryLabel)  \(secondaryValue)",
-            detailText: nil,
-            image: carPlayIcon(symbol, color: .systemTeal)
-        )
-        item.isEnabled = false
-        return item
     }
 
     private var tripLogStatusDetail: String {
@@ -544,12 +493,9 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         return day.endedAt == nil ? "Ready to resume" : "Today’s Trip Log is complete"
     }
 
-    private func makeTripLogGridButtons() -> [CPGridButton] {
+    private func makeTripLogActions() -> [CPTextButton] {
         if breadcrumbs.activeDay == nil {
-            return [CPGridButton(
-                titleVariants: ["Start"],
-                image: requiredCarPlayIcon("play.fill", color: .systemGreen)
-            ) { [weak self] _ in
+            return [CPTextButton(title: "Start", textStyle: .confirm) { [weak self] _ in
                 guard let self else { return }
                 breadcrumbs.startWorkday(accounts: store.accounts)
                 refreshCarPlayState()
@@ -558,39 +504,77 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
         if breadcrumbs.activeDay?.isPaused == true {
             return [
-                CPGridButton(
-                    titleVariants: ["Resume"],
-                    image: requiredCarPlayIcon("play.fill", color: .systemGreen)
-                ) { [weak self] _ in
+                CPTextButton(title: "Resume", textStyle: .confirm) { [weak self] _ in
                     guard let self else { return }
                     breadcrumbs.resumeWorkday(accounts: store.accounts)
                     refreshCarPlayState()
                 },
-                CPGridButton(
-                    titleVariants: ["End"],
-                    image: requiredCarPlayIcon("stop.fill", color: .systemRed)
-                ) { [weak self] _ in
+                CPTextButton(title: "End", textStyle: .cancel) { [weak self] _ in
                     self?.confirmEndTripLog()
                 }
             ]
         }
 
         return [
-            CPGridButton(
-                titleVariants: ["Pause"],
-                image: requiredCarPlayIcon("pause.fill", color: .systemOrange)
-            ) { [weak self] _ in
+            CPTextButton(title: "Pause", textStyle: .normal) { [weak self] _ in
                 guard let self else { return }
                 breadcrumbs.pauseWorkday()
                 refreshCarPlayState()
             },
-            CPGridButton(
-                titleVariants: ["End"],
-                image: requiredCarPlayIcon("stop.fill", color: .systemRed)
-            ) { [weak self] _ in
+            CPTextButton(title: "End", textStyle: .cancel) { [weak self] _ in
                 self?.confirmEndTripLog()
             }
         ]
+    }
+
+    private func showGPSDiagnostics() {
+        let template = CPInformationTemplate(
+            title: "GPS Diagnostics",
+            layout: .leading,
+            items: makeGPSDiagnosticItems(),
+            actions: []
+        )
+        interfaceController?.pushTemplate(template, animated: true, completion: nil)
+    }
+
+    private func makeGPSDiagnosticItems() -> [CPInformationItem] {
+        let location = effectiveLocation
+        let source = breadcrumbs.isRecording ? "Trip Log recorder" : "Live nearby service"
+        let horizontal = location.map(currentGPSAccuracyText) ?? "No fix"
+        let vertical: String
+        if let location, location.verticalAccuracy >= 0 {
+            vertical = "±\(Int((location.verticalAccuracy * 3.280_84).rounded())) ft"
+        } else {
+            vertical = "Unavailable"
+        }
+        let age: String
+        if let location {
+            age = "\(max(0, Int(Date().timeIntervalSince(location.timestamp).rounded()))) sec"
+        } else {
+            age = "No location"
+        }
+
+        return [
+            CPInformationItem(title: "LOCATION ACCESS", detail: locationAuthorizationText),
+            CPInformationItem(title: "SOURCE", detail: source),
+            CPInformationItem(title: "HORIZONTAL", detail: horizontal),
+            CPInformationItem(title: "VERTICAL", detail: vertical),
+            CPInformationItem(title: "LAST UPDATE", detail: age),
+            CPInformationItem(title: "TRACKING", detail: breadcrumbs.isRecording ? "Recording" : "Standby")
+        ]
+    }
+
+    private var locationAuthorizationText: String {
+        switch breadcrumbs.isRecording
+            ? breadcrumbs.authorizationStatus
+            : locationService.authorizationStatus {
+        case .authorizedAlways: "Always"
+        case .authorizedWhenInUse: "While Using"
+        case .denied: "Denied"
+        case .restricted: "Restricted"
+        case .notDetermined: "Not Requested"
+        @unknown default: "Unknown"
+        }
     }
 
     private func confirmEndTripLog() {
@@ -678,8 +662,8 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         nearbyTemplate?.updateSections(makeNearbySections())
         favoritesTemplate?.updateSections(makeFavoriteSections())
         recentsTemplate?.updateSections(makeRecentSections())
-        tripLogTemplate?.updateSections(makeTripLogSections())
-        tripLogTemplate?.headerGridButtons = makeTripLogGridButtons()
+        tripLogTemplate?.items = makeTripLogInformationItems()
+        tripLogTemplate?.actions = makeTripLogActions()
         tripLogTemplate?.tabImage = requiredCarPlayIcon(
             breadcrumbs.isRecording ? "record.circle.fill" : "gauge.with.dots.needle.50percent",
             color: breadcrumbs.isRecording ? .systemRed : .systemTeal
