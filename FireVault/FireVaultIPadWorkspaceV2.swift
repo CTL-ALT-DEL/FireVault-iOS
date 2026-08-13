@@ -376,8 +376,8 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                 }
                 .frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("TRIP LOG").font(.caption2.bold()).tracking(1).foregroundStyle(NativeShellPalette.red)
-                    Text(tripLogStatusTitle).font(.subheadline.bold()).foregroundStyle(tripLogStatusTint)
+                    Text("TRIP LOG").font(.caption2.weight(.heavy)).tracking(1).foregroundStyle(NativeShellPalette.red)
+                    Text(tripLogStatusTitle).font(.subheadline.weight(.heavy)).foregroundStyle(tripLogStatusTint)
                 }
                 Divider().frame(height: 30)
                 tripMetric("MILES", value: tripMiles, symbol: "road.lanes")
@@ -399,14 +399,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 17, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [NativeShellPalette.red.opacity(0.52), NativeShellPalette.blue.opacity(0.42)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        lineWidth: 1
-                    )
+                    .stroke(NativeShellPalette.tripLogBorder, lineWidth: 1.8)
             }
             .shadow(color: .black.opacity(0.18), radius: 7, y: 3)
             .contentShape(RoundedRectangle(cornerRadius: 17, style: .continuous))

@@ -521,11 +521,11 @@ private struct NativeNearbyView: View {
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text("TRIP LOG")
-                            .font(.caption2.bold())
+                            .font(.caption2.weight(.heavy))
                             .tracking(1.05)
                             .foregroundStyle(NativeShellPalette.red)
                         Text(tripLogStateText)
-                            .font(.subheadline.bold())
+                            .font(.subheadline.weight(.heavy))
                             .foregroundStyle(tripLogStatusTint)
                     }
 
@@ -559,14 +559,7 @@ private struct NativeNearbyView: View {
         )
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [NativeShellPalette.red.opacity(0.52), NativeShellPalette.blue.opacity(0.42)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    ),
-                    lineWidth: 1
-                )
+                .stroke(NativeShellPalette.tripLogBorder, lineWidth: 1.8)
         }
         .shadow(color: .black.opacity(0.18), radius: 7, y: 3)
     }
@@ -584,12 +577,12 @@ private struct NativeNearbyView: View {
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text(displayedTripLogDetail.rawValue)
-                            .font(.caption2.bold())
+                            .font(.caption2.weight(.heavy))
                             .tracking(0.8)
                             .foregroundStyle(.secondary)
                         HStack(spacing: 5) {
                             Text(tripLogDetailPrimaryText)
-                                .font(.caption.bold().monospacedDigit())
+                                .font(.caption.weight(.heavy).monospacedDigit())
                                 .foregroundStyle(.primary)
                             Text(tripLogDetailSecondaryText)
                                 .font(.caption2.weight(.semibold))
@@ -4038,12 +4031,16 @@ enum NativeShellPalette {
         dark: UIColor(red: 0.68, green: 0.48, blue: 1.0, alpha: 1)
     )
     static let tripLogLeading = adaptive(
-        light: UIColor(red: 0.985, green: 0.925, blue: 0.900, alpha: 1),
-        dark: UIColor(red: 0.130, green: 0.068, blue: 0.082, alpha: 1)
+        light: UIColor(red: 1.000, green: 0.985, blue: 0.945, alpha: 1),
+        dark: UIColor(red: 0.105, green: 0.105, blue: 0.098, alpha: 1)
     )
     static let tripLogTrailing = adaptive(
-        light: UIColor(red: 0.900, green: 0.945, blue: 0.985, alpha: 1),
-        dark: UIColor(red: 0.050, green: 0.105, blue: 0.155, alpha: 1)
+        light: UIColor(red: 0.940, green: 0.915, blue: 0.855, alpha: 1),
+        dark: UIColor(red: 0.145, green: 0.140, blue: 0.125, alpha: 1)
+    )
+    static let tripLogBorder = adaptive(
+        light: UIColor(red: 0.22, green: 0.21, blue: 0.19, alpha: 0.86),
+        dark: UIColor(red: 0.72, green: 0.69, blue: 0.62, alpha: 0.72)
     )
     static let navigationBackground = adaptive(
         light: UIColor(red: 0.925, green: 0.894, blue: 0.835, alpha: 1),

@@ -214,11 +214,11 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text("TRIP LOG")
-                        .font(.caption2.bold())
+                        .font(.caption2.weight(.heavy))
                         .tracking(1)
                         .foregroundStyle(NativeShellPalette.red)
                     Text(tripLogStatusTitle)
-                        .font(.subheadline.bold())
+                        .font(.subheadline.weight(.heavy))
                         .foregroundStyle(tripLogStatusTint)
                 }
 
@@ -244,14 +244,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [NativeShellPalette.red.opacity(0.52), NativeShellPalette.blue.opacity(0.42)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        lineWidth: 1
-                    )
+                    .stroke(NativeShellPalette.tripLogBorder, lineWidth: 1.8)
             }
             .shadow(color: .black.opacity(0.18), radius: 7, y: 3)
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
