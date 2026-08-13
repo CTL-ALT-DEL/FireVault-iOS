@@ -1899,7 +1899,10 @@ struct FireVaultBreadcrumbStopEditor: View {
     @State private var isPersonal: Bool
     @State private var showsAccountPicker = false
     @State private var confirmsDelete = false
-    @State private var showsGooglePlacesSetup = false
+    @State private var isCheckingGooglePlaces = false
+    @State private var googlePlacesMatches: [FireVaultGooglePlaceMatch] = []
+    @State private var showsGooglePlacesMatches = false
+    @State private var googlePlacesError: String?
 
     init(
         breadcrumbs: FireVaultBreadcrumbStore,
@@ -1985,10 +1988,20 @@ struct FireVaultBreadcrumbStopEditor: View {
             } message: {
                 Text("The route remains intact, but this false stop will be removed from the daily log.")
             }
-            .alert("Google Places Setup Required", isPresented: $showsGooglePlacesSetup) {
+            .sheet(isPresented: $showsGooglePlacesMatches) {
+                FireVaultGooglePlacesMatchPicker(matches: googlePlacesMatches) { match in
+                    customTitle = match.name
+                    customAddress = match.address
+                    selectedAccountID = nil
+                    isPersonal = false
+                    showsGooglePlacesMatches = false
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }
+            }
+            .alert("Google Places", isPresented: googlePlacesErrorBinding) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text("Connect the protected Google Places lookup through the FireVault Supabase backend before enabling automatic business matching. You can enter the stop name and address manually now.")
+                Text(googlePlacesError ?? "Google Places is unavailable right now.")
             }
         }
         .tint(NativeShellPalette.blue)
@@ -2043,9 +2056,16 @@ struct FireVaultBreadcrumbStopEditor: View {
                     TextField("Address or location description", text: $customAddress)
                         .textInputAutocapitalization(.words)
 
-                    Button("Check Google Places", systemImage: "mappin.and.ellipse") {
-                        showsGooglePlacesSetup = true
+                    Button {
+                        checkGooglePlaces()
+                    } label: {
+                        if isCheckingGooglePlaces {
+                            Label("Checking Google Places…", systemImage: "mappin.and.ellipse")
+                        } else {
+                            Label("Check Google Places", systemImage: "mappin.and.ellipse")
+                        }
                     }
+                    .disabled(isCheckingGooglePlaces)
 
                     Button("Add as New Account", systemImage: "building.2.crop.circle.badge.plus") {
                         createAccountFromStop()
@@ -2193,6 +2213,43 @@ struct FireVaultBreadcrumbStopEditor: View {
         customTitle.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var googlePlacesErrorBinding: Binding<Bool> {
+        Binding(
+            get: { googlePlacesError != nil },
+            set: { presented in
+                if !presented { googlePlacesError = nil }
+            }
+        )
+    }
+
+    private func checkGooglePlaces() {
+        guard !isCheckingGooglePlaces,
+              let stop = breadcrumbs.stop(dayID: dayID, stopID: stopID) else {
+            return
+        }
+        isCheckingGooglePlaces = true
+        googlePlacesError = nil
+
+        Task {
+            do {
+                let matches = try await FireVaultGooglePlacesService.shared.matches(
+                    latitude: stop.latitude,
+                    longitude: stop.longitude
+                )
+                await MainActor.run {
+                    googlePlacesMatches = matches
+                    isCheckingGooglePlaces = false
+                    showsGooglePlacesMatches = true
+                }
+            } catch {
+                await MainActor.run {
+                    isCheckingGooglePlaces = false
+                    googlePlacesError = error.localizedDescription
+                }
+            }
+        }
+    }
+
     private func createAccountFromStop() {
         guard !normalizedCustomTitle.isEmpty,
               let stop = breadcrumbs.stop(dayID: dayID, stopID: stopID) else {
@@ -2226,6 +2283,57 @@ struct FireVaultBreadcrumbStopEditor: View {
         } else {
             dismiss()
         }
+    }
+}
+
+private struct FireVaultGooglePlacesMatchPicker: View {
+    let matches: [FireVaultGooglePlaceMatch]
+    let select: (FireVaultGooglePlaceMatch) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(matches) { match in
+                Button {
+                    select(match)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "building.2.crop.circle")
+                            .font(.title2)
+                            .foregroundStyle(NativeShellPalette.blue)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(match.name)
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                            Text(match.address)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                            Text(match.distanceText)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(NativeShellPalette.amber)
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.bold())
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Uses this place for the stop name and address")
+            }
+            .navigationTitle("Nearby Google Places")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .tint(NativeShellPalette.blue)
     }
 }
 

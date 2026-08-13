@@ -2239,6 +2239,34 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(Set(NativeSettingsCatalog.groups.flatMap(\.items).map(\.id)), expected)
     }
 
+    func testGooglePlaceMatchDecodesProtectedLookupResponse() throws {
+        let data = try XCTUnwrap(
+            """
+            {
+              "placeID": "sample-place",
+              "name": "Mountain View Medical Center",
+              "address": "100 Demo Avenue, Casper, WY 82601",
+              "distanceMeters": 42.5,
+              "primaryType": "hospital"
+            }
+            """.data(using: .utf8)
+        )
+
+        let match = try JSONDecoder().decode(FireVaultGooglePlaceMatch.self, from: data)
+
+        XCTAssertEqual(match.id, "sample-place")
+        XCTAssertEqual(match.name, "Mountain View Medical Center")
+        XCTAssertEqual(match.address, "100 Demo Avenue, Casper, WY 82601")
+        XCTAssertEqual(match.distanceMeters, 42.5)
+        XCTAssertEqual(match.primaryType, "hospital")
+    }
+
+    func testGooglePlacesErrorsGiveActionableMessages() {
+        XCTAssertTrue(FireVaultGooglePlacesError.notAuthenticated.localizedDescription.contains("Sign in"))
+        XCTAssertTrue(FireVaultGooglePlacesError.noMatches.localizedDescription.contains("manually"))
+        XCTAssertTrue(FireVaultGooglePlacesError.unavailable.localizedDescription.contains("try again"))
+    }
+
     private func testLocation(
         latitude: Double,
         longitude: Double,
