@@ -24,6 +24,16 @@ struct FireVaultBackupMergeResult: Equatable {
     let preserved: Int
 }
 
+struct FireVaultMediaStorageReport: Equatable {
+    var referencedFiles: Int
+    var orphanedFiles: Int
+    var totalBytes: Int64
+
+    var formattedSize: String {
+        ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+    }
+}
+
 enum FireVaultMediaError: LocalizedError {
     case accountUnavailable
     case emptyScan
@@ -65,6 +75,13 @@ final class FireVaultStore: ObservableObject {
     @Published private(set) var pendingCaptureQuickAction: FireVaultCaptureQuickAction?
 
     private let defaults: UserDefaults
+    private let accountArchiveURLOverride: URL?
+    private let usesFileArchive: Bool
+    private var accountPersistenceGeneration = 0
+    private var accountArchiveURL: URL? {
+        accountArchiveURLOverride
+            ?? (usesFileArchive ? FireVaultAccountArchive.primaryURL(demoMode: demoMode) : nil)
+    }
     private let demoCoordinate = CLLocationCoordinate2D(latitude: 43.6150, longitude: -116.2023)
     private var geocodingTask: Task<Void, Never>?
     private var categoryRules: [FireVaultCategoryRule] = []
@@ -80,20 +97,36 @@ final class FireVaultStore: ObservableObject {
         static let productionCategoryRuleSuppressions = "firevault.native.production-category-rule-suppressions.v1"
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, accountArchiveURL: URL? = nil) {
         self.defaults = defaults
         let activeDemoMode = defaults.object(forKey: Key.demoMode) as? Bool ?? true
         demoMode = activeDemoMode
+        usesFileArchive = defaults === UserDefaults.standard || accountArchiveURL != nil
+        accountArchiveURLOverride = accountArchiveURL
+        let initialArchiveURL = accountArchiveURL
+            ?? (usesFileArchive ? FireVaultAccountArchive.primaryURL(demoMode: activeDemoMode) : nil)
         let suppressionKey = activeDemoMode
             ? Key.demoCategoryRuleSuppressions
             : Key.productionCategoryRuleSuppressions
         categoryRuleSuppressedAccountIDs = Set(defaults.stringArray(forKey: suppressionKey) ?? [])
         locationStatus = activeDemoMode ? "Demo location ready" : "Location ready"
 
-        if activeDemoMode {
-            accounts = Self.savedAccounts(defaults: defaults, key: Key.demoAccounts) ?? Self.demoAccounts
-        } else {
-            accounts = Self.savedAccounts(defaults: defaults, key: Key.productionAccounts) ?? []
+        let migratedAccounts = activeDemoMode
+            ? Self.savedAccounts(defaults: defaults, key: Key.demoAccounts) ?? Self.demoAccounts
+            : Self.savedAccounts(defaults: defaults, key: Key.productionAccounts) ?? []
+        accounts = initialArchiveURL.flatMap(FireVaultAccountArchive.load(from:))
+            ?? migratedAccounts
+        if let archiveURL = initialArchiveURL,
+           !FileManager.default.fileExists(atPath: archiveURL.path),
+           let migrationData = try? JSONEncoder().encode(accounts) {
+            Task {
+                try? await FireVaultAccountArchiveWriter.shared.write(
+                    migrationData,
+                    to: archiveURL,
+                    generation: 0,
+                    immediate: true
+                )
+            }
         }
     }
 
@@ -123,7 +156,8 @@ final class FireVaultStore: ObservableObject {
 
     func reloadAccounts() {
         let key = demoMode ? Key.demoAccounts : Key.productionAccounts
-        guard let refreshed = Self.savedAccounts(defaults: defaults, key: key) else { return }
+        guard let refreshed = accountArchiveURL.flatMap(FireVaultAccountArchive.load(from:))
+            ?? Self.savedAccounts(defaults: defaults, key: key) else { return }
         accounts = refreshed
         if let selectedAccountID, !accounts.contains(where: { $0.id == selectedAccountID }) {
             self.selectedAccountID = nil
@@ -782,21 +816,12 @@ final class FireVaultStore: ObservableObject {
     }
 
     private func mediaURL(accountID: String, fileName: String) throws -> URL {
-        guard let applicationSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first else {
-            throw FireVaultMediaError.storageUnavailable
-        }
-
         let safeAccountID = accountID.replacingOccurrences(
             of: "[^A-Za-z0-9_-]",
             with: "_",
             options: .regularExpression
         )
-        let directory = applicationSupport
-            .appendingPathComponent("FireVault", isDirectory: true)
-            .appendingPathComponent("Media", isDirectory: true)
+        let directory = try mediaRootURL()
             .appendingPathComponent(safeAccountID, isDirectory: true)
 
         do {
@@ -808,6 +833,31 @@ final class FireVaultStore: ObservableObject {
         } catch {
             throw FireVaultMediaError.writeFailed(error.localizedDescription)
         }
+    }
+
+    private func mediaRootURL() throws -> URL {
+        guard let applicationSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
+            throw FireVaultMediaError.storageUnavailable
+        }
+        return applicationSupport
+            .appendingPathComponent("FireVault", isDirectory: true)
+            .appendingPathComponent("Media", isDirectory: true)
+    }
+
+    private var referencedMediaPaths: Set<String> {
+        Set(accounts.flatMap { account in
+            account.documents.compactMap { document in
+                guard let fileName = document.mediaFileName,
+                      fileName == URL(fileURLWithPath: fileName).lastPathComponent,
+                      let url = try? mediaURL(accountID: account.id, fileName: fileName) else {
+                    return nil
+                }
+                return url.standardizedFileURL.path
+            }
+        })
     }
 
     @discardableResult
@@ -912,6 +962,7 @@ final class FireVaultStore: ObservableObject {
         captureAccountID = nil
         defaults.removeObject(forKey: Key.demoAccounts)
         defaults.removeObject(forKey: Key.demoCategoryRuleSuppressions)
+        persistAccounts()
     }
 
     func exitDemoMode() {
@@ -920,7 +971,9 @@ final class FireVaultStore: ObservableObject {
         captureAccountID = nil
         demoMode = false
         defaults.set(false, forKey: Key.demoMode)
-        accounts = Self.savedAccounts(defaults: defaults, key: Key.productionAccounts) ?? []
+        accounts = accountArchiveURL.flatMap(FireVaultAccountArchive.load(from:))
+            ?? Self.savedAccounts(defaults: defaults, key: Key.productionAccounts)
+            ?? []
         categoryRuleSuppressedAccountIDs = Set(
             defaults.stringArray(forKey: Key.productionCategoryRuleSuppressions) ?? []
         )
@@ -933,7 +986,9 @@ final class FireVaultStore: ObservableObject {
         captureAccountID = nil
         demoMode = true
         defaults.set(true, forKey: Key.demoMode)
-        accounts = Self.savedAccounts(defaults: defaults, key: Key.demoAccounts) ?? Self.demoAccounts
+        accounts = accountArchiveURL.flatMap(FireVaultAccountArchive.load(from:))
+            ?? Self.savedAccounts(defaults: defaults, key: Key.demoAccounts)
+            ?? Self.demoAccounts
         categoryRuleSuppressedAccountIDs = Set(
             defaults.stringArray(forKey: Key.demoCategoryRuleSuppressions) ?? []
         )
@@ -1092,6 +1147,108 @@ final class FireVaultStore: ObservableObject {
         return .init(added: added, preserved: preserved)
     }
 
+    func backupMediaRecords() throws -> [FireVaultVaultMediaRecord] {
+        var records: [FireVaultVaultMediaRecord] = []
+        for account in accounts {
+            for document in account.documents {
+                guard let fileName = document.mediaFileName,
+                      fileName == URL(fileURLWithPath: fileName).lastPathComponent else { continue }
+                let url = try mediaURL(accountID: account.id, fileName: fileName)
+                guard FileManager.default.fileExists(atPath: url.path) else { continue }
+                records.append(
+                    .init(
+                        accountID: account.id,
+                        fileName: fileName,
+                        data: try Data(contentsOf: url, options: .mappedIfSafe)
+                    )
+                )
+            }
+        }
+        return records
+    }
+
+    @discardableResult
+    func installBackupMedia(
+        _ records: [FireVaultVaultMediaRecord],
+        allowedAccountIDs: Set<String>
+    ) throws -> Int {
+        var restored = 0
+        for record in records where allowedAccountIDs.contains(record.accountID) && record.isValid {
+            let url = try mediaURL(accountID: record.accountID, fileName: record.fileName)
+            guard !FileManager.default.fileExists(atPath: url.path) else { continue }
+            try record.data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            restored += 1
+        }
+        return restored
+    }
+
+    @discardableResult
+    func deleteDocument(accountID: String, documentID: String) -> Bool {
+        guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
+              let documentIndex = accounts[accountIndex].documents.firstIndex(where: { $0.id == documentID }) else {
+            return false
+        }
+        let document = accounts[accountIndex].documents[documentIndex]
+        if let fileName = document.mediaFileName,
+           fileName == URL(fileURLWithPath: fileName).lastPathComponent,
+           let url = try? mediaURL(accountID: accountID, fileName: fileName),
+           FileManager.default.fileExists(atPath: url.path) {
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                return false
+            }
+        }
+        accounts[accountIndex].documents.remove(at: documentIndex)
+        persist()
+        return true
+    }
+
+    func mediaStorageReport() -> FireVaultMediaStorageReport {
+        let referenced = referencedMediaPaths
+        var storedFiles = Set<String>()
+        var totalBytes: Int64 = 0
+        guard let root = try? mediaRootURL(),
+              let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return .init(referencedFiles: referenced.count, orphanedFiles: 0, totalBytes: 0)
+        }
+        for case let url as URL in enumerator {
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                  values.isRegularFile == true else { continue }
+            storedFiles.insert(url.standardizedFileURL.path)
+            totalBytes += Int64(values.fileSize ?? 0)
+        }
+        return .init(
+            referencedFiles: referenced.intersection(storedFiles).count,
+            orphanedFiles: storedFiles.subtracting(referenced).count,
+            totalBytes: totalBytes
+        )
+    }
+
+    @discardableResult
+    func removeOrphanedMedia() -> Int {
+        let referenced = referencedMediaPaths
+        guard let root = try? mediaRootURL(),
+              let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+              ) else { return 0 }
+        var removed = 0
+        for case let url as URL in enumerator {
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+                  !referenced.contains(url.standardizedFileURL.path) else { continue }
+            if (try? FileManager.default.removeItem(at: url)) != nil {
+                removed += 1
+            }
+        }
+        return removed
+    }
+
     private static func csvIdentityKey(name: String, address: String) -> String {
         "\(name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())|\(address.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
     }
@@ -1103,13 +1260,25 @@ final class FireVaultStore: ObservableObject {
 
     private func persistAccounts() {
         guard let data = try? JSONEncoder().encode(accounts) else { return }
-        let key = demoMode ? Key.demoAccounts : Key.productionAccounts
-        let backupKey = demoMode ? Key.demoAccountsBackup : Key.productionAccountsBackup
-        if let existing = defaults.data(forKey: key),
-           (try? JSONDecoder().decode([FireVaultWorkspaceAccount].self, from: existing)) != nil {
-            defaults.set(existing, forKey: backupKey)
+        if let accountArchiveURL {
+            accountPersistenceGeneration += 1
+            let generation = accountPersistenceGeneration
+            Task {
+                try? await FireVaultAccountArchiveWriter.shared.write(
+                    data,
+                    to: accountArchiveURL,
+                    generation: generation
+                )
+            }
+        } else {
+            let key = demoMode ? Key.demoAccounts : Key.productionAccounts
+            let backupKey = demoMode ? Key.demoAccountsBackup : Key.productionAccountsBackup
+            if let existing = defaults.data(forKey: key),
+               (try? JSONDecoder().decode([FireVaultWorkspaceAccount].self, from: existing)) != nil {
+                defaults.set(existing, forKey: backupKey)
+            }
+            defaults.set(data, forKey: key)
         }
-        defaults.set(data, forKey: key)
         let suppressionKey = demoMode
             ? Key.demoCategoryRuleSuppressions
             : Key.productionCategoryRuleSuppressions

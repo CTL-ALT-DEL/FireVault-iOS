@@ -1976,6 +1976,11 @@ private struct FilesScansView: View {
                         .padding(.vertical, 4)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Delete File", systemImage: "trash", role: .destructive) {
+                            store.deleteDocument(accountID: account.id, documentID: document.id)
+                        }
+                    }
                 }
             }
         }

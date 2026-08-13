@@ -160,4 +160,59 @@ final class FireVaultUITests: XCTestCase {
             XCUIApplication().launch()
         }
     }
+
+    @MainActor
+    func testWarmIvorySettingsVisualReference() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-firevault.native.settings.appearance.v1", "light",
+            "-UIAccessibilityReduceMotionEnabled", "YES"
+        ]
+        app.launch()
+        let settingsTab = app.buttons["main-navigation-settings"]
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 8))
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [XCTNSPredicateExpectation(
+                    predicate: NSPredicate(format: "hittable == true"),
+                    object: settingsTab
+                )],
+                timeout: 8
+            ),
+            .completed
+        )
+        settingsTab.tap()
+        XCTAssertTrue(settingsTab.exists)
+        XCTAssertFalse(app.webViews.firstMatch.exists)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Warm Ivory - Settings Overview"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    func testSettingsRemainReachableAtAccessibilityTextSize() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-firevault.native.settings.appearance.v1", "light",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge"
+        ]
+        app.launch()
+        let settings = app.buttons["main-navigation-settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 8))
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [XCTNSPredicateExpectation(
+                    predicate: NSPredicate(format: "hittable == true"),
+                    object: settings
+                )],
+                timeout: 8
+            ),
+            .completed
+        )
+        settings.tap()
+        app.swipeUp()
+        XCTAssertTrue(settings.exists)
+        XCTAssertFalse(app.webViews.firstMatch.exists)
+    }
 }

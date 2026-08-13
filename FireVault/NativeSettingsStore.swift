@@ -528,6 +528,21 @@ final class FireVaultNativeSettingsStore: ObservableObject {
         persist()
     }
 
+    func restore(
+        _ backup: FireVaultNativePreferences,
+        settingsView backupSettingsView: FireVaultSettingsViewPreferences? = nil,
+        appearance backupAppearance: FireVaultAppearanceMode? = nil
+    ) {
+        preferences = backup.normalized
+        persist()
+        if let backupSettingsView {
+            saveSettingsView(backupSettingsView)
+        }
+        if let backupAppearance {
+            saveAppearance(backupAppearance)
+        }
+    }
+
     func saveGPS(_ updated: FireVaultGPSPreferences) {
         var next = preferences; next.gps = updated; save(next)
     }

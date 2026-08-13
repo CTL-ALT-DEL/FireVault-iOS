@@ -2594,6 +2594,7 @@ struct NativeSettingsView: View {
                     .foregroundStyle(NativeShellPalette.tint(group.tint))
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
+                    .accessibilityIdentifier("settings-group-\(group.id)")
             }
         }
         .listSectionSpacing(.compact)
@@ -2672,7 +2673,7 @@ struct NativeSettingsView: View {
         case "sync": NativeSyncSettingsView(settings: settings)
         case "customerImport": NativeCSVImportView(store: store)
         case "categories": NativeCategoriesSettingsView(settings: settings, store: store)
-        case "backup": NativeBackupRestoreView(store: store)
+        case "backup": NativeBackupRestoreView(store: store, settings: settings, breadcrumbs: breadcrumbs)
         case "webdav": NativeWebDAVSettingsView(settings: settings)
         case "privacy": NativePrivacySettingsView(settings: settings)
         case "security": NativeSecuritySettingsView(settings: settings)
@@ -2898,7 +2899,7 @@ struct FireVaultIPadSettingsWorkspace: View {
         case "sync": NativeSyncSettingsView(settings: settings)
         case "customerImport": NativeCSVImportView(store: store)
         case "categories": NativeCategoriesSettingsView(settings: settings, store: store)
-        case "backup": NativeBackupRestoreView(store: store)
+        case "backup": NativeBackupRestoreView(store: store, settings: settings, breadcrumbs: breadcrumbs)
         case "webdav": NativeWebDAVSettingsView(settings: settings)
         case "privacy": NativePrivacySettingsView(settings: settings)
         case "security": NativeSecuritySettingsView(settings: settings)

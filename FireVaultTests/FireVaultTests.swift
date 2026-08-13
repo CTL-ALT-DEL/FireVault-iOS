@@ -8,6 +8,7 @@
 import XCTest
 import CoreLocation
 import MapKit
+import SwiftUI
 @testable import FireVault
 
 @MainActor
@@ -30,6 +31,16 @@ final class FireVaultTests: XCTestCase {
         XCTAssertLessThan(darkComponents.red + darkComponents.green + darkComponents.blue, 0.5)
     }
 
+    func testWarmIvoryPrimaryTextAndInteractiveAccentMeetContrastTargets() {
+        let traits = UITraitCollection(userInterfaceStyle: .light)
+        let surface = NativeShellPalette.surfaceUIColor.resolvedColor(with: traits)
+        let primary = NativeShellPalette.primaryTextUIColor.resolvedColor(with: traits)
+        let accent = UIColor(NativeShellPalette.blue).resolvedColor(with: traits)
+
+        XCTAssertGreaterThanOrEqual(contrastRatio(primary, surface), 7.0)
+        XCTAssertGreaterThanOrEqual(contrastRatio(accent, surface), 4.5)
+    }
+
     private func rgba(_ color: UIColor) -> (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) {
         var red: CGFloat = 0
         var green: CGFloat = 0
@@ -37,6 +48,23 @@ final class FireVaultTests: XCTestCase {
         var alpha: CGFloat = 0
         XCTAssertTrue(color.getRed(&red, green: &green, blue: &blue, alpha: &alpha))
         return (red, green, blue, alpha)
+    }
+
+    private func contrastRatio(_ first: UIColor, _ second: UIColor) -> CGFloat {
+        let firstLuminance = relativeLuminance(first)
+        let secondLuminance = relativeLuminance(second)
+        return (max(firstLuminance, secondLuminance) + 0.05)
+            / (min(firstLuminance, secondLuminance) + 0.05)
+    }
+
+    private func relativeLuminance(_ color: UIColor) -> CGFloat {
+        let components = rgba(color)
+        func linear(_ value: CGFloat) -> CGFloat {
+            value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(components.red)
+            + 0.7152 * linear(components.green)
+            + 0.0722 * linear(components.blue)
     }
 
     func testTripLogLiveActivityTimerReferencePreservesElapsedDuration() {
@@ -2324,6 +2352,83 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(FireVaultGooglePlacesError.notAuthenticated.localizedDescription.contains("Sign in"))
         XCTAssertTrue(FireVaultGooglePlacesError.noMatches.localizedDescription.contains("manually"))
         XCTAssertTrue(FireVaultGooglePlacesError.unavailable.localizedDescription.contains("try again"))
+    }
+
+    func testFullVaultBackupRoundTripsAccountsSettingsTripLogAndMediaIntegrity() throws {
+        var preferences = FireVaultNativePreferences()
+        preferences.technician.name = "Backup Technician"
+        let day = FireVaultBreadcrumbDay(
+            startedAt: Date(timeIntervalSince1970: 1_786_000_000),
+            endedAt: Date(timeIntervalSince1970: 1_786_003_600)
+        )
+        let media = FireVaultVaultMediaRecord(
+            accountID: "sample-account",
+            fileName: "sample.jpg",
+            data: Data("field-photo".utf8)
+        )
+        let payload = FireVaultVaultBackupPayload(
+            appVersion: "1.08.60",
+            accounts: [],
+            preferences: preferences,
+            settingsView: FireVaultSettingsViewPreferences(mode: .advanced),
+            appearance: .light,
+            tripLogDays: [day],
+            media: [media]
+        )
+
+        let decoded = try FireVaultVaultBackupPayload.decode(payload.encoded())
+
+        XCTAssertEqual(decoded.preferences.technician.name, "Backup Technician")
+        XCTAssertEqual(decoded.settingsView.mode, .advanced)
+        XCTAssertEqual(decoded.appearance, .light)
+        XCTAssertEqual(decoded.tripLogDays, [day])
+        XCTAssertEqual(decoded.media, [media])
+    }
+
+    func testFullVaultBackupRejectsTamperedMedia() throws {
+        var media = FireVaultVaultMediaRecord(
+            accountID: "sample-account",
+            fileName: "sample.jpg",
+            data: Data("original".utf8)
+        )
+        media.data = Data("tampered".utf8)
+        let payload = FireVaultVaultBackupPayload(
+            appVersion: "1.08.60",
+            accounts: [],
+            preferences: FireVaultNativePreferences(),
+            settingsView: FireVaultSettingsViewPreferences(),
+            appearance: .dark,
+            tripLogDays: [],
+            media: [media]
+        )
+
+        XCTAssertThrowsError(try FireVaultVaultBackupPayload.decode(payload.encoded()))
+    }
+
+    func testProductionAccountArchiveMigratesAndReloadsOutsideUserDefaults() async throws {
+        let suite = "FireVaultTests.AccountArchive.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultAccountArchive-\(UUID().uuidString)", isDirectory: true)
+        let archiveURL = directory.appendingPathComponent("accounts.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = FireVaultStore(defaults: defaults, accountArchiveURL: archiveURL)
+        let account = store.addAccount()
+        try await Task.sleep(for: .milliseconds(450))
+        defaults.removeObject(forKey: "firevault.native.production-accounts.v1")
+
+        let reloaded = FireVaultStore(defaults: defaults, accountArchiveURL: archiveURL)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archiveURL.path))
+        XCTAssertEqual(reloaded.accounts.map(\.id), [account.id])
+    }
+
+    func testTripLogRouteSamplingUsesBatteryConsciousDensity() {
+        XCTAssertEqual(FireVaultBreadcrumbRules.minimumPointDistance, 75)
+        XCTAssertEqual(FireVaultBreadcrumbRules.maximumPointInterval, 120)
     }
 
     private func testLocation(

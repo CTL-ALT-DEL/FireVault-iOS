@@ -633,6 +633,11 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 } else {
                     ForEach(account.documents) { document in
                         dataRow(title: document.title, subtitle: document.subtitle, trailing: document.date, symbol: document.kind == "scan" ? "doc.viewfinder" : "doc")
+                            .contextMenu {
+                                Button("Delete File", systemImage: "trash", role: .destructive) {
+                                    store.deleteDocument(accountID: account.id, documentID: document.id)
+                                }
+                            }
                     }
                 }
             case .equipment:

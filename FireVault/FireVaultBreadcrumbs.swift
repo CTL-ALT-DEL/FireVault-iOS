@@ -270,8 +270,10 @@ enum FireVaultTripLogTelemetry {
 
 enum FireVaultBreadcrumbRules {
     static let maximumHorizontalAccuracy: CLLocationAccuracy = 100
-    static let minimumPointDistance: CLLocationDistance = 12
-    static let maximumPointInterval: TimeInterval = 30
+    // Route geometry is persisted at a practical field-work density while
+    // every delivered location still participates in stop detection.
+    static let minimumPointDistance: CLLocationDistance = 75
+    static let maximumPointInterval: TimeInterval = 120
     static let stopRadius: CLLocationDistance = 85
     static let minimumAccountStopDuration: TimeInterval = 180
     static let minimumUnrecognizedStopDuration: TimeInterval = 300
@@ -569,6 +571,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     private var disregardedStopCoordinate: CLLocationCoordinate2D?
     private var disregardedDepartureLocations: [CLLocation] = []
     private var activeStopID: UUID?
+    private var previousDetectionLocation: CLLocation?
     private var sessionIsPrepared = false
     private var liveActivityControlObservation: AnyCancellable?
     private var gpsPreferences: FireVaultGPSPreferences
@@ -639,7 +642,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         sessionIsPrepared = true
         if activeDay == nil {
             days.insert(.init(startedAt: Date()), at: 0)
-            persist()
+            persist(immediate: true)
         } else {
             updateActiveDay { $0.isPaused = false }
         }
@@ -654,8 +657,9 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         candidateLocations.removeAll()
         departureCandidateLocations.removeAll()
         activeStopID = nil
+        previousDetectionLocation = nil
         sessionIsPrepared = false
-        updateActiveDay { $0.isPaused = true }
+        updateActiveDay(immediate: true) { $0.isPaused = true }
         statusText = "Trip Log paused"
         FireVaultNotificationService.shared.tripLogPaused(preferences: notificationPreferences)
         synchronizeLiveActivity(status: .paused)
@@ -669,7 +673,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         self.accounts = accounts
         refreshRuntimePreferences()
         sessionIsPrepared = true
-        updateActiveDay { $0.isPaused = false }
+        updateActiveDay(immediate: true) { $0.isPaused = false }
         beginLocationUpdates()
         FireVaultNotificationService.shared.tripLogStarted(preferences: notificationPreferences)
     }
@@ -714,10 +718,11 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         disregardedStopCoordinate = nil
         disregardedDepartureLocations.removeAll()
         activeStopID = nil
+        previousDetectionLocation = nil
         sessionIsPrepared = false
         statusText = "Workday complete"
         FireVaultNotificationService.shared.tripLogEnded()
-        persist()
+        persist(immediate: true)
         let completedDay = days[index]
         if liveActivitiesEnabled {
             FireVaultTripLogLiveActivityController.end(
@@ -738,6 +743,32 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         guard days.first(where: { $0.id == id })?.isActive != true else { return }
         days.removeAll { $0.id == id }
         persist()
+    }
+
+    @discardableResult
+    func mergeBackupDays(
+        _ incoming: [FireVaultBreadcrumbDay],
+        restoredAt: Date
+    ) -> (added: Int, preserved: Int) {
+        var existingIDs = Set(days.map(\.id))
+        var added = 0
+        var preserved = 0
+        for original in FireVaultTripLogIntegrity.normalized(incoming) {
+            guard existingIDs.insert(original.id).inserted else {
+                preserved += 1
+                continue
+            }
+            var restored = original
+            if restored.isActive {
+                restored.endedAt = max(restored.startedAt, restoredAt)
+                restored.isPaused = false
+            }
+            days.append(restored)
+            added += 1
+        }
+        days.sort { $0.startedAt > $1.startedAt }
+        persist()
+        return (added, preserved)
     }
 
     func stop(dayID: UUID, stopID: UUID) -> FireVaultBreadcrumbStop? {
@@ -944,7 +975,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         manager.desiredAccuracy = gpsPreferences.highAccuracy
             ? kCLLocationAccuracyBest
             : kCLLocationAccuracyHundredMeters
-        manager.distanceFilter = FireVaultBreadcrumbRules.minimumPointDistance
+        manager.distanceFilter = 12
         // Automatic pausing can occur before a three- or five-minute stop has
         // enough samples to be confirmed. Trip Log already throttles persisted
         // points, so keep Core Location active for reliable arrival/departure
@@ -955,6 +986,9 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         manager.startMonitoringVisits()
         manager.startUpdatingLocation()
         isRecording = true
+        if activeStopID != nil {
+            applyOnSiteEnergyProfile()
+        }
         statusText = accuracyAuthorization == .fullAccuracy
             ? "Recording today’s route"
             : "Recording with approximate location"
@@ -971,6 +1005,9 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     private func record(_ location: CLLocation) {
         guard let index = activeDayIndex, !days[index].isPaused else { return }
+        let detectionPrevious = previousDetectionLocation
+        previousDetectionLocation = location
+        updateStopDetection(with: location, previous: detectionPrevious, dayIndex: index)
         let previous = days[index].points.last?.location
         guard FireVaultBreadcrumbRules.accepts(location, after: previous) else {
             rejectedLocationCount += 1
@@ -988,7 +1025,6 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
                 speedMetersPerSecond: location.speed >= 0 ? location.speed : nil
             )
         )
-        updateStopDetection(with: location, previous: previous, dayIndex: index)
         if let stop = days[index].stops.last(where: { $0.departure == nil }) {
             let state = stop.accountID == nil ? "Stop detected" : "On site"
             statusText = "\(state) • \(days[index].stopDuration(for: stop).fireVaultDuration)"
@@ -1301,6 +1337,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             }
             days[dayIndex].stops[previousIndex].departure = nil
             activeStopID = days[dayIndex].stops[previousIndex].id
+            applyOnSiteEnergyProfile()
             if wasUnassigned, days[dayIndex].stops[previousIndex].accountID != nil {
                 FireVaultNotificationService.shared.stopReviewed(
                     stopID: days[dayIndex].stops[previousIndex].id
@@ -1320,6 +1357,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         )
         activeStopID = stop.id
         days[dayIndex].stops.append(stop)
+        applyOnSiteEnergyProfile()
         notifyConfirmedStop(stop)
     }
 
@@ -1344,6 +1382,25 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             days[dayIndex].stops[stopIndex].arrival,
             departure
         )
+        applyDrivingEnergyProfile()
+    }
+
+    private func applyOnSiteEnergyProfile() {
+        guard isRecording else { return }
+        manager.activityType = .other
+        manager.desiredAccuracy = gpsPreferences.highAccuracy
+            ? kCLLocationAccuracyNearestTenMeters
+            : kCLLocationAccuracyHundredMeters
+        manager.distanceFilter = 25
+    }
+
+    private func applyDrivingEnergyProfile() {
+        guard isRecording else { return }
+        manager.activityType = .automotiveNavigation
+        manager.desiredAccuracy = gpsPreferences.highAccuracy
+            ? kCLLocationAccuracyBest
+            : kCLLocationAccuracyHundredMeters
+        manager.distanceFilter = 12
     }
 
     private var candidateCoordinate: CLLocationCoordinate2D {
@@ -1381,10 +1438,13 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         )
     }
 
-    private func updateActiveDay(_ change: (inout FireVaultBreadcrumbDay) -> Void) {
+    private func updateActiveDay(
+        immediate: Bool = false,
+        _ change: (inout FireVaultBreadcrumbDay) -> Void
+    ) {
         guard let index = activeDayIndex else { return }
         change(&days[index])
-        persist()
+        persist(immediate: immediate)
     }
 
     private func synchronizeLiveActivity(
@@ -1428,23 +1488,25 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         }
     }
 
-    private func persist() {
+    private func persist(immediate: Bool = false) {
         do {
-            try FileManager.default.createDirectory(
-                at: archiveURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
             let data = try JSONEncoder.fireVaultBreadcrumbs.encode(days)
-            if FileManager.default.fileExists(atPath: archiveURL.path),
-               let existing = try? Data(contentsOf: archiveURL),
-               (try? JSONDecoder.fireVaultBreadcrumbs.decode([FireVaultBreadcrumbDay].self, from: existing)) != nil {
-                let backupURL = Self.backupURL(for: archiveURL)
-                try? FileManager.default.removeItem(at: backupURL)
-                try? FileManager.default.copyItem(at: archiveURL, to: backupURL)
+            let url = archiveURL
+            Task { [weak self] in
+                do {
+                    let wrote = try await FireVaultTripLogArchiveWriter.shared.write(
+                        data,
+                        to: url,
+                        immediate: immediate
+                    )
+                    guard wrote else { return }
+                    self?.lastSuccessfulSaveAt = Date()
+                    self?.lastPersistenceError = nil
+                } catch {
+                    self?.lastPersistenceError = error.localizedDescription
+                    self?.statusText = "Route is active, but its history could not be saved"
+                }
             }
-            try data.write(to: archiveURL, options: .atomic)
-            lastSuccessfulSaveAt = Date()
-            lastPersistenceError = nil
         } catch {
             lastPersistenceError = error.localizedDescription
             statusText = "Route is active, but its history could not be saved"

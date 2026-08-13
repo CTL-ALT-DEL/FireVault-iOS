@@ -865,7 +865,7 @@ struct NativeSecuritySettingsView: View {
 }
 
 struct FireVaultVaultBackupDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
+    static var readableContentTypes: [UTType] { [.fireVaultBackup, .json] }
     var data: Data
 
     init(data: Data = Data("[]".utf8)) {
@@ -883,34 +883,61 @@ struct FireVaultVaultBackupDocument: FileDocument {
 
 struct NativeBackupRestoreView: View {
     @ObservedObject var store: FireVaultStore
+    @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @State private var exportDocument = FireVaultVaultBackupDocument()
     @State private var isExporting = false
     @State private var isImporting = false
     @State private var statusMessage = ""
     @State private var errorMessage = ""
+    @State private var storageReport = FireVaultMediaStorageReport(
+        referencedFiles: 0,
+        orphanedFiles: 0,
+        totalBytes: 0
+    )
+    @State private var confirmsMediaCleanup = false
 
     var body: some View {
         List {
             Section {
-                Label("\(store.accounts.count) accounts ready to protect", systemImage: "checkmark.shield.fill")
+                Label(
+                    "\(store.accounts.count) accounts and \(breadcrumbs.days.count) Trip Log days ready",
+                    systemImage: "checkmark.shield.fill"
+                )
                     .foregroundStyle(NativeShellPalette.green)
-                Button("Export Vault Backup", systemImage: "square.and.arrow.up") {
+                Button("Export Complete Vault", systemImage: "square.and.arrow.up") {
                     do {
-                        exportDocument = .init(data: try store.accountsBackupData())
+                        exportDocument = .init(
+                            data: try FireVaultVaultBackupCoordinator.export(
+                                store: store,
+                                settings: settings,
+                                breadcrumbs: breadcrumbs
+                            )
+                        )
                         errorMessage = ""
                         isExporting = true
                     } catch {
                         errorMessage = error.localizedDescription
                     }
                 }
-                Button("Merge From Backup", systemImage: "square.and.arrow.down") {
+                Button("Restore From Backup", systemImage: "square.and.arrow.down") {
                     errorMessage = ""
                     isImporting = true
                 }
             } header: {
-                Text("Account Vault")
+                Text("Complete Vault")
             } footer: {
-                Text("A restore merge adds accounts that are missing. Existing accounts and their field history are never overwritten.")
+                Text("The protected backup includes accounts, settings, Trip Log history, and referenced photos and scans. Restore merges missing records without overwriting an existing account or workday.")
+            }
+
+            Section("Local Media") {
+                LabeledContent("Storage used", value: storageReport.formattedSize)
+                LabeledContent("Referenced files", value: "\(storageReport.referencedFiles)")
+                LabeledContent("Orphaned files", value: "\(storageReport.orphanedFiles)")
+                Button("Clean Orphaned Media", systemImage: "trash", role: .destructive) {
+                    confirmsMediaCleanup = true
+                }
+                .disabled(storageReport.orphanedFiles == 0)
             }
 
             if !statusMessage.isEmpty {
@@ -930,11 +957,26 @@ struct NativeBackupRestoreView: View {
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Backup & Restore")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { storageReport = store.mediaStorageReport() }
+        .confirmationDialog(
+            "Remove orphaned media?",
+            isPresented: $confirmsMediaCleanup,
+            titleVisibility: .visible
+        ) {
+            Button("Remove Orphaned Files", role: .destructive) {
+                let removed = store.removeOrphanedMedia()
+                storageReport = store.mediaStorageReport()
+                statusMessage = "Removed \(removed) orphaned media file\(removed == 1 ? "" : "s")."
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Only files that are not referenced by any account record will be removed.")
+        }
         .fileExporter(
             isPresented: $isExporting,
             document: exportDocument,
-            contentType: .json,
-            defaultFilename: "FireVault-Accounts-\(Date().formatted(.iso8601.year().month().day()))"
+            contentType: .fireVaultBackup,
+            defaultFilename: "FireVault-Complete-\(Date().formatted(.iso8601.year().month().day()))"
         ) { result in
             switch result {
             case .success:
@@ -944,13 +986,28 @@ struct NativeBackupRestoreView: View {
                 errorMessage = error.localizedDescription
             }
         }
-        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
+        .fileImporter(
+            isPresented: $isImporting,
+            allowedContentTypes: [.fireVaultBackup, .json],
+            allowsMultipleSelection: false
+        ) { result in
             do {
                 guard let url = try result.get().first else { return }
                 let accessed = url.startAccessingSecurityScopedResource()
                 defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-                let merge = try store.mergeAccountsBackup(Data(contentsOf: url, options: .mappedIfSafe))
-                statusMessage = "\(merge.added) accounts restored; \(merge.preserved) existing accounts preserved."
+                let data = try Data(contentsOf: url, options: .mappedIfSafe)
+                if url.pathExtension.lowercased() == "json" {
+                    let merge = try store.mergeAccountsBackup(data)
+                    statusMessage = "Legacy backup: \(merge.added) accounts restored; \(merge.preserved) preserved."
+                } else {
+                    let restored = try FireVaultVaultBackupCoordinator.restore(
+                        data,
+                        store: store,
+                        settings: settings,
+                        breadcrumbs: breadcrumbs
+                    )
+                    statusMessage = "Restored \(restored.accountsAdded) accounts, \(restored.tripLogDaysAdded) Trip Log days, and \(restored.mediaFilesRestored) media files."
+                }
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             } catch {
                 errorMessage = error.localizedDescription
