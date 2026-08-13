@@ -3565,10 +3565,39 @@ private struct NativeAboutFireVaultView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Section("Created By") {
-                LabeledContent("Developer", value: "David Bannerman")
-                LabeledContent("Field experience", value: "Fire alarm technician")
-                Link("Contact David Bannerman", destination: URL(string: "mailto:David@Bannerman.us")!)
+            Section("Created by") {
+                HStack(spacing: 14) {
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(NativeShellPalette.red)
+                        .frame(width: 44, height: 44)
+                        .background(.thinMaterial, in: Circle())
+                        .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("David Bannerman")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        Text("Creator & Developer")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("David Bannerman, creator and developer")
+
+                    Spacer(minLength: 8)
+
+                    Link(destination: URL(string: "mailto:David@Bannerman.us")!) {
+                        Image(systemName: "envelope.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 42, height: 42)
+                            .background(NativeShellPalette.blue, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Email David Bannerman")
+                }
+                .padding(.vertical, 5)
             }
 
             Section("App Information") {

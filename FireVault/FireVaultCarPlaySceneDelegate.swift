@@ -12,7 +12,8 @@ import MapKit
 import UIKit
 
 @MainActor
-final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
+final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate,
+    CPPointOfInterestTemplateDelegate {
     private weak var interfaceController: CPInterfaceController?
     private let store = FireVaultStore()
     private let settings = FireVaultNativeSettingsStore()
@@ -24,7 +25,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         : FireVaultBreadcrumbStore.shared
     private let locationService = FireVaultLocationService()
 
-    private var nearbyTemplate: CPListTemplate?
+    private var nearbyTemplate: CPPointOfInterestTemplate?
     private var favoritesTemplate: CPListTemplate?
     private var recentsTemplate: CPListTemplate?
     private var tripLogTemplate: CPInformationTemplate?
@@ -32,6 +33,10 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private var liveRefreshTask: Task<Void, Never>?
     private var locationObservation: AnyCancellable?
     private var announcedArrivalAccountID: String?
+    private var speedReferenceLocation: CLLocation?
+    private var lastMeaningfulMovementAt: Date?
+    private var selectedNearbyAccountID: String?
+    private var lastNearbyRefreshAt: Date?
 
     private let demoLocation = CLLocation(latitude: 43.6150, longitude: -116.2023)
     private let recentAccountIDsKey = "firevault.carplay.recentAccountIDs"
@@ -68,6 +73,10 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         tripLogTemplate = nil
         homeTemplate = nil
         announcedArrivalAccountID = nil
+        speedReferenceLocation = nil
+        lastMeaningfulMovementAt = nil
+        selectedNearbyAccountID = nil
+        lastNearbyRefreshAt = nil
         self.interfaceController = nil
     }
 
@@ -86,31 +95,59 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         let recents = makeRecentsTemplate()
         recentsTemplate = recents
 
-        let home = CPListTemplate(title: "FireVault", sections: makeHomeSections())
+        let home = CPListTemplate(
+            title: "FireVault",
+            sections: makeHomeSections(),
+            assistantCellConfiguration: nil,
+            headerGridButtons: makeHomeGridButtons()
+        )
         homeTemplate = home
         return home
     }
 
-    private func makeHomeSections() -> [CPListSection] {
-        let nearby = CPListItem(
-            text: "Nearby Accounts",
-            detailText: nearestAccountSummary,
-            image: carPlayIcon("mappin.and.ellipse", color: .systemBlue),
-            accessoryImage: nil,
-            accessoryType: .disclosureIndicator
-        )
-        nearby.handler = { [weak self] _, completion in
-            guard let self, let template = nearbyTemplate else {
-                completion()
-                return
+    private func makeHomeGridButtons() -> [CPGridButton] {
+        [
+            homeGridButton(title: "Nearby", symbol: "mappin.and.ellipse", color: .systemBlue) { [weak self] in
+                guard let self, let template = nearbyTemplate else { return }
+                interfaceController?.pushTemplate(template, animated: true, completion: nil)
+            },
+            homeGridButton(
+                title: "Trip Log",
+                symbol: breadcrumbs.isRecording ? "record.circle.fill" : "point.3.connected.trianglepath.dotted",
+                color: breadcrumbs.isRecording ? .systemRed : .systemTeal
+            ) { [weak self] in
+                guard let self, let template = tripLogTemplate else { return }
+                interfaceController?.pushTemplate(template, animated: true, completion: nil)
+            },
+            homeGridButton(title: "Favorites", symbol: "star.fill", color: .systemYellow) { [weak self] in
+                guard let self, let template = favoritesTemplate else { return }
+                interfaceController?.pushTemplate(template, animated: true, completion: nil)
+            },
+            homeGridButton(title: "Recent", symbol: "clock.arrow.circlepath", color: .systemPurple) { [weak self] in
+                guard let self, let template = recentsTemplate else { return }
+                interfaceController?.pushTemplate(template, animated: true, completion: nil)
             }
-            interfaceController?.pushTemplate(template, animated: true, completion: nil)
-            completion()
-        }
+        ]
+    }
 
+    private func homeGridButton(
+        title: String,
+        symbol: String,
+        color: UIColor,
+        action: @escaping @MainActor () -> Void
+    ) -> CPGridButton {
+        CPGridButton(
+            titleVariants: [title],
+            image: requiredCarPlayIcon(symbol, color: color)
+        ) { _ in
+            action()
+        }
+    }
+
+    private func makeHomeSections() -> [CPListSection] {
         let tripLog = CPListItem(
-            text: "Trip Log",
-            detailText: tripLogHomeSummary,
+            text: "Trip Log • \(tripLogStatus)",
+            detailText: tripLogAtAGlanceSummary,
             image: carPlayIcon(
                 breadcrumbs.isRecording ? "record.circle.fill" : "point.3.connected.trianglepath.dotted",
                 color: breadcrumbs.isRecording ? .systemRed : .systemTeal
@@ -127,64 +164,109 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
             completion()
         }
 
-        let favorites = CPListItem(
-            text: "Favorite Sites",
-            detailText: favoriteAccountSummary,
-            image: carPlayIcon("star.fill", color: .systemYellow),
-            accessoryImage: nil,
-            accessoryType: .disclosureIndicator
-        )
-        favorites.handler = { [weak self] _, completion in
-            guard let self, let template = favoritesTemplate else {
+        let nearest: CPListItem
+        if let account = sortedMappedAccounts(favoritesOnly: false).first {
+            nearest = CPListItem(
+                text: account.name,
+                detailText: nearestAccountAtAGlanceSummary(account),
+                image: carPlayIcon("building.2.fill", color: .systemBlue),
+                accessoryImage: nil,
+                accessoryType: .disclosureIndicator
+            )
+            nearest.handler = { [weak self] _, completion in
+                self?.showAccount(account)
                 completion()
-                return
             }
-            interfaceController?.pushTemplate(template, animated: true, completion: nil)
-            completion()
+        } else {
+            nearest = emptyAccountItem(
+                title: "Nearest Account",
+                detail: "No mapped accounts are available."
+            )
         }
 
-        let recents = CPListItem(
-            text: "Recent Sites",
-            detailText: recentAccountSummary,
-            image: carPlayIcon("clock.arrow.circlepath", color: .systemPurple),
-            accessoryImage: nil,
-            accessoryType: .disclosureIndicator
-        )
-        recents.handler = { [weak self] _, completion in
-            guard let self, let template = recentsTemplate else {
-                completion()
-                return
-            }
-            interfaceController?.pushTemplate(template, animated: true, completion: nil)
-            completion()
-        }
-
-        let items = breadcrumbs.isRecording
-            ? [tripLog, nearby, favorites, recents]
-            : [nearby, tripLog, favorites, recents]
-        return [CPListSection(items: items)]
+        return [CPListSection(items: [tripLog, nearest], header: "At a Glance", sectionIndexTitle: nil)]
     }
 
     // MARK: - Nearby and Favorites
 
-    private func makeNearbyTemplate() -> CPListTemplate {
-        let template = CPListTemplate(title: "Nearby", sections: makeNearbySections())
-        template.emptyViewTitleVariants = ["No Nearby Accounts"]
-        template.emptyViewSubtitleVariants = ["Map account addresses in FireVault on iPhone."]
+    private func makeNearbyTemplate() -> CPPointOfInterestTemplate {
+        let points = makeNearbyPoints()
+        let template = CPPointOfInterestTemplate(
+            title: "Nearby",
+            pointsOfInterest: points,
+            selectedIndex: points.isEmpty ? NSNotFound : selectedNearbyIndex(in: points)
+        )
+        template.pointOfInterestDelegate = self
         return template
     }
 
-    private func makeNearbySections() -> [CPListSection] {
-        let accounts = Array(sortedMappedAccounts(favoritesOnly: false).prefix(4))
-        guard !accounts.isEmpty else {
-            return [CPListSection(items: [emptyAccountItem(
-                title: "No mapped accounts",
-                detail: "Add account coordinates in FireVault."
-            )])]
+    private func makeNearbyPoints() -> [CPPointOfInterest] {
+        Array(sortedMappedAccounts(favoritesOnly: false).prefix(6)).compactMap { account in
+            guard let coordinate = account.coordinate else { return nil }
+            let mapItem = MKMapItem(
+                location: CLLocation(
+                    latitude: coordinate.latitude,
+                    longitude: coordinate.longitude
+                ),
+                address: nil
+            )
+            mapItem.name = account.name
+
+            let accountID = account.accountId.trimmingCharacters(in: .whitespacesAndNewlines)
+            let identifier = accountID.isEmpty ? "No account ID" : "#\(accountID)"
+            let distance = effectiveLocation.map {
+                String(format: "%.1f mi", self.distance(from: $0, to: account) / 1_609.344)
+            } ?? "Distance unavailable"
+            let point = CPPointOfInterest(
+                location: mapItem,
+                title: account.name,
+                subtitle: "\(identifier) • \(distance)",
+                summary: "\(identifier) • \(account.category)",
+                detailTitle: account.name,
+                detailSubtitle: account.address,
+                detailSummary: "\(distance) • \(account.category)",
+                pinImage: nil,
+                selectedPinImage: nil
+            )
+            point.userInfo = account.id as NSString
+            point.primaryButton = CPTextButton(title: "Route", textStyle: .confirm) { [weak self] _ in
+                self?.rememberRecentAccount(account)
+                self?.openDrivingDirections(to: coordinate, name: account.name)
+            }
+            if !arrivalPoints(in: account).isEmpty {
+                point.secondaryButton = CPTextButton(title: "Arrival", textStyle: .normal) { [weak self] _ in
+                    self?.rememberRecentAccount(account)
+                    self?.showArrivalPoints(for: account)
+                }
+            }
+            return point
         }
-        return [CPListSection(items: accounts.enumerated().map { index, account in
-            makeAccountItem(account, isNearest: index == 0)
-        })]
+    }
+
+    private func selectedNearbyIndex(in points: [CPPointOfInterest]) -> Int {
+        guard let selectedNearbyAccountID,
+              let index = points.firstIndex(where: {
+                  ($0.userInfo as? String) == selectedNearbyAccountID
+              }) else { return 0 }
+        return index
+    }
+
+    func pointOfInterestTemplate(
+        _ pointOfInterestTemplate: CPPointOfInterestTemplate,
+        didChangeMapRegion region: MKCoordinateRegion
+    ) {
+        // FireVault intentionally keeps this to the nearest six accounts.
+        // The system remains free to pan and zoom without replacing the set.
+    }
+
+    func pointOfInterestTemplate(
+        _ pointOfInterestTemplate: CPPointOfInterestTemplate,
+        didSelectPointOfInterest pointOfInterest: CPPointOfInterest
+    ) {
+        guard let accountID = pointOfInterest.userInfo as? String,
+              let account = store.accounts.first(where: { $0.id == accountID }) else { return }
+        selectedNearbyAccountID = accountID
+        rememberRecentAccount(account)
     }
 
     private func makeFavoritesTemplate() -> CPListTemplate {
@@ -205,7 +287,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     }
 
     private func makeRecentsTemplate() -> CPListTemplate {
-        CPListTemplate(title: "Recent Sites", sections: makeRecentSections())
+        CPListTemplate(title: "Recent", sections: makeRecentSections())
     }
 
     private func makeRecentSections() -> [CPListSection] {
@@ -263,7 +345,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         rememberRecentAccount(account)
         let actions = makeAccountActions(account)
         let template = CPListTemplate(
-            title: "Site Actions",
+            title: "Account",
             sections: [CPListSection(items: actions, header: account.name, sectionIndexTitle: nil)]
         )
         interfaceController?.pushTemplate(template, animated: true, completion: nil)
@@ -274,7 +356,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
         if let coordinate = account.coordinate {
             items.append(actionItem(
-                title: "Route to Account",
+                title: "Directions",
                 detail: account.address,
                 symbol: "arrow.triangle.turn.up.right.diamond.fill",
                 color: .systemBlue
@@ -285,7 +367,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
         if account.phone.contains(where: \.isNumber) {
             items.append(actionItem(
-                title: "Call Site",
+                title: "Call",
                 detail: formattedPhone(account.phone),
                 symbol: "phone.fill",
                 color: .systemGreen
@@ -297,7 +379,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         if let parking = arrivalLocation(in: account, matching: ["parking", "park here"]),
            let coordinate = parking.coordinate {
             items.append(actionItem(
-                title: "Route to Parking",
+                title: "Parking",
                 detail: parking.label,
                 symbol: "parkingsign.circle.fill",
                 color: .systemOrange
@@ -361,7 +443,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
         guard !items.isEmpty else { return }
         let template = CPListTemplate(
-            title: "Arrival Points",
+            title: "Arrival",
             sections: [CPListSection(
                 items: Array(items),
                 header: account.name,
@@ -426,17 +508,17 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
               let interfaceController else { return }
 
         announcedArrivalAccountID = account.id
-        let viewPoints = CPAlertAction(title: "View Map", style: .default) { [weak self] _ in
+        let viewPoints = CPAlertAction(title: "View", style: .default) { [weak self] _ in
             self?.dismissArrivalPrompt {
                 self?.showArrivalPoints(for: account)
             }
         }
-        let dismiss = CPAlertAction(title: "Dismiss", style: .cancel) { [weak self] _ in
+        let dismiss = CPAlertAction(title: "Later", style: .cancel) { [weak self] _ in
             self?.dismissArrivalPrompt()
         }
         interfaceController.presentTemplate(
             CPAlertTemplate(
-                titleVariants: ["Arrival Points Ready"],
+                titleVariants: ["Arrival points available"],
                 actions: [viewPoints, dismiss]
             ),
             animated: true,
@@ -489,16 +571,17 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
         return [
             CPInformationItem(title: "SPEED", detail: store.demoMode ? "64 mph" : currentSpeedText(location)),
-            CPInformationItem(title: "ELEVATION", detail: store.demoMode ? "5,284 ft" : currentElevationText(location, day: day)),
             CPInformationItem(title: "TRIP", detail: store.demoMode ? "42.6 mi" : distanceText(day)),
+            CPInformationItem(title: "ELEVATION", detail: store.demoMode ? "5,284 ft" : currentElevationText(location, day: day)),
+            CPInformationItem(title: "STOPS", detail: store.demoMode ? "2 stops" : stopSummaryText(day)),
             CPInformationItem(title: "TIME", detail: store.demoMode ? "00:48:17" : elapsedText(day?.elapsedTime ?? 0)),
-            CPInformationItem(title: "STOPS", detail: store.demoMode ? "2 stops" : stopSummaryText(day))
+            CPInformationItem(title: "GPS", detail: store.demoMode ? "±10 ft" : currentGPSAccuracyText(location))
         ]
     }
 
     private func makeTripLogActions() -> [CPTextButton] {
         if breadcrumbs.activeDay == nil {
-            return [CPTextButton(title: "Start Trip Log", textStyle: .confirm) { [weak self] _ in
+            return [CPTextButton(title: "Start", textStyle: .confirm) { [weak self] _ in
                 guard let self else { return }
                 breadcrumbs.startWorkday(accounts: store.accounts)
                 refreshCarPlayState()
@@ -565,8 +648,9 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         locationObservation?.cancel()
         locationObservation = locationService.$latestLocation
             .compactMap { $0 }
-            .sink { [weak self] _ in
+            .sink { [weak self] location in
                 Task { @MainActor [weak self] in
+                    self?.updateMotionEvidence(with: location)
                     self?.refreshCarPlayState()
                 }
             }
@@ -588,12 +672,25 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
     private func refreshCarPlayState() {
         homeTemplate?.updateSections(makeHomeSections())
-        nearbyTemplate?.updateSections(makeNearbySections())
+        homeTemplate?.headerGridButtons = makeHomeGridButtons()
+        refreshNearbyMapIfNeeded()
         favoritesTemplate?.updateSections(makeFavoriteSections())
         recentsTemplate?.updateSections(makeRecentSections())
         tripLogTemplate?.items = makeTripLogInformationItems()
         tripLogTemplate?.actions = makeTripLogActions()
         checkForArrival()
+    }
+
+    private func refreshNearbyMapIfNeeded() {
+        let now = Date()
+        guard lastNearbyRefreshAt == nil
+                || now.timeIntervalSince(lastNearbyRefreshAt!) >= 15 else { return }
+        lastNearbyRefreshAt = now
+        let points = makeNearbyPoints()
+        nearbyTemplate?.setPointsOfInterest(
+            points,
+            selectedIndex: points.isEmpty ? NSNotFound : selectedNearbyIndex(in: points)
+        )
     }
 
     // MARK: - Data helpers
@@ -616,12 +713,12 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
     private func accountDetailText(_ account: FireVaultWorkspaceAccount) -> String {
         var details: [String] = []
+        let accountID = account.accountId.trimmingCharacters(in: .whitespacesAndNewlines)
+        details.append(accountID.isEmpty ? account.category : "#\(accountID)")
         if let location = effectiveLocation {
             let miles = distance(from: location, to: account) / 1_609.344
             details.append(String(format: "%.1f mi", miles))
         }
-        let accountID = account.accountId.trimmingCharacters(in: .whitespacesAndNewlines)
-        details.append(accountID.isEmpty ? account.category : "#\(accountID)")
         return details.joined(separator: " • ")
     }
 
@@ -691,9 +788,49 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         return "\(tripLogStatus) • \(distanceText(day)) • \(timeAndStopsText(day))"
     }
 
+    private var tripLogAtAGlanceSummary: String {
+        let day = breadcrumbs.activeDay ?? breadcrumbs.today
+        return "\(distanceText(day)) • \(elapsedText(day?.elapsedTime ?? 0)) • \(stopCountText(day))"
+    }
+
+    private func nearestAccountAtAGlanceSummary(_ account: FireVaultWorkspaceAccount) -> String {
+        let accountID = account.accountId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let identifier = accountID.isEmpty ? account.category : "#\(accountID)"
+        guard let location = effectiveLocation else {
+            return identifier
+        }
+        let miles = distance(from: location, to: account) / 1_609.344
+        return "\(identifier) • \(String(format: "%.1f mi", miles))"
+    }
+
     private func currentSpeedText(_ location: CLLocation?) -> String {
-        guard let location, location.speed >= 0 else { return "— mph" }
-        return "\(Int((location.speed * 2.236_936).rounded())) mph"
+        guard let speed = FireVaultBreadcrumbRules.resolvedLiveSpeed(
+            location: location,
+            lastMeaningfulMovementAt: lastMeaningfulMovementAt
+        ) else { return "— mph" }
+        return "\(Int((speed * 2.236_936).rounded())) mph"
+    }
+
+    private func updateMotionEvidence(with location: CLLocation) {
+        guard let reference = speedReferenceLocation else {
+            speedReferenceLocation = location
+            lastMeaningfulMovementAt = location.timestamp
+            return
+        }
+
+        let interval = location.timestamp.timeIntervalSince(reference.timestamp)
+        guard interval > 0 else { return }
+        let distance = location.distance(from: reference)
+        let derivedSpeed = distance / interval
+        if distance >= FireVaultBreadcrumbRules.minimumPointDistance
+            && derivedSpeed > FireVaultBreadcrumbRules.maximumDerivedStationarySpeed {
+            lastMeaningfulMovementAt = location.timestamp
+            speedReferenceLocation = location
+        } else if interval >= FireVaultBreadcrumbRules.maximumLiveSpeedAge {
+            // Advance the comparison window without claiming movement. This
+            // prevents accumulated GPS drift from reviving a stale MPH value.
+            speedReferenceLocation = location
+        }
     }
 
     private func currentElevationText(_ location: CLLocation?, day: FireVaultBreadcrumbDay?) -> String {
@@ -705,6 +842,21 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         }
         guard let meters else { return "Unavailable" }
         return "\(Int((meters * 3.280_84).rounded()).formatted()) ft"
+    }
+
+    private func currentGPSAccuracyText(_ location: CLLocation?) -> String {
+        guard let location, location.horizontalAccuracy >= 0 else { return "Unavailable" }
+        let feet = max(1, Int((location.horizontalAccuracy * 3.280_84).rounded()))
+        return "±\(feet.formatted()) ft • \(gpsQuality(for: feet))"
+    }
+
+    private func gpsQuality(for accuracyFeet: Int) -> String {
+        switch accuracyFeet {
+        case ...20: "Excellent"
+        case ...50: "Good"
+        case ...100: "Fair"
+        default: "Weak"
+        }
     }
 
     private func distanceText(_ day: FireVaultBreadcrumbDay?) -> String {
@@ -727,7 +879,16 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
               let activeStop = day.stops.last(where: { $0.departure == nil }) else {
             return stopCountText(day)
         }
-        return "\(stopCountText(day)) • On site \(elapsedText(activeStop.duration))"
+        return "\(stopCountText(day)) • \(compactDuration(activeStop.duration)) onsite"
+    }
+
+    private func compactDuration(_ duration: TimeInterval) -> String {
+        let seconds = max(0, Int(duration.rounded()))
+        let minutes = seconds / 60
+        if minutes >= 60 {
+            return "\(minutes / 60)h \(minutes % 60)m"
+        }
+        return "\(minutes)m"
     }
 
     private func elapsedText(_ elapsedTime: TimeInterval) -> String {
@@ -742,6 +903,12 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
     private func carPlayIcon(_ systemName: String, color: UIColor) -> UIImage? {
         UIImage(systemName: systemName)?.withTintColor(color, renderingMode: .alwaysOriginal)
+    }
+
+    private func requiredCarPlayIcon(_ systemName: String, color: UIColor) -> UIImage {
+        carPlayIcon(systemName, color: color)
+            ?? UIImage(systemName: "circle.fill")!
+                .withTintColor(color, renderingMode: .alwaysOriginal)
     }
 
 }
