@@ -281,11 +281,14 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
             let clearPin = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { _ in }
             let spacer = CPPointOfInterest(
                 location: spacerMapItem,
-                title: " ",
-                subtitle: nil,
+                // The compact CarPlay POI panel clips most of this first row.
+                // Supplying restrained header copy makes the remaining lower
+                // edge read intentionally instead of showing a blank gray bar.
+                title: "Nearby accounts",
+                subtitle: "Closest accounts",
                 summary: nil,
-                detailTitle: " ",
-                detailSubtitle: nil,
+                detailTitle: "Nearby accounts",
+                detailSubtitle: "Closest accounts",
                 detailSummary: nil,
                 pinImage: clearPin,
                 selectedPinImage: clearPin
