@@ -267,7 +267,12 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         guard let selectedNearbyAccountID,
               let index = points.firstIndex(where: {
                   ($0.userInfo as? String) == selectedNearbyAccountID
-              }) else { return 0 }
+              }) else {
+            // Do not force-select the first result. On compact CarPlay
+            // displays, the system offsets a selected row beneath the Nearby
+            // header and leaves its upper half obscured.
+            return NSNotFound
+        }
         return index
     }
 
@@ -593,13 +598,30 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         let location = effectiveLocation
         let day = breadcrumbs.activeDay ?? breadcrumbs.today
 
+        let speed = store.demoMode ? "64 mph" : currentSpeedText(location)
+        let elevation = store.demoMode ? "5,284 ft" : currentElevationText(location, day: day)
+        let trip = store.demoMode ? "42.6 mi" : distanceText(day)
+        let stops = store.demoMode ? "2 stops" : stopSummaryText(day)
+        let time = store.demoMode ? "00:48:17" : elapsedText(day?.elapsedTime ?? 0)
+        let accuracy = store.demoMode ? "±10 ft" : currentGPSAccuracyText(location)
+
+        // CPInformationTemplate's `.twoColumn` layout places each item's
+        // title and detail in the two columns; it does not pair adjacent
+        // information items. Keep this to three explicit rows so every
+        // metric remains visible above the CarPlay action buttons.
         return [
-            CPInformationItem(title: "SPEED", detail: store.demoMode ? "64 mph" : currentSpeedText(location)),
-            CPInformationItem(title: "ELEVATION", detail: store.demoMode ? "5,284 ft" : currentElevationText(location, day: day)),
-            CPInformationItem(title: "TRIP", detail: store.demoMode ? "42.6 mi" : distanceText(day)),
-            CPInformationItem(title: "STOPS", detail: store.demoMode ? "2 stops" : stopSummaryText(day)),
-            CPInformationItem(title: "TIME", detail: store.demoMode ? "00:48:17" : elapsedText(day?.elapsedTime ?? 0)),
-            CPInformationItem(title: "GPS ACCURACY", detail: store.demoMode ? "±10 ft" : currentGPSAccuracyText(location))
+            CPInformationItem(
+                title: "SPEED  ·  \(speed)",
+                detail: "ELEVATION  ·  \(elevation)"
+            ),
+            CPInformationItem(
+                title: "TRIP  ·  \(trip)",
+                detail: "STOPS  ·  \(stops)"
+            ),
+            CPInformationItem(
+                title: "TIME  ·  \(time)",
+                detail: "GPS ACCURACY  ·  \(accuracy)"
+            )
         ]
     }
 
