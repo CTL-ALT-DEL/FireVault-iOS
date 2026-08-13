@@ -202,7 +202,10 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private func makeNearbyTemplate() -> CPPointOfInterestTemplate {
         let points = makeNearbyPoints()
         let template = CPPointOfInterestTemplate(
-            title: "Nearby",
+            // Compact CarPlay displays reserve too much vertical space for a
+            // POI template title and can place the first row underneath it.
+            // The Home button already identifies this destination as Nearby.
+            title: "",
             pointsOfInterest: points,
             selectedIndex: points.isEmpty ? NSNotFound : selectedNearbyIndex(in: points)
         )
@@ -612,17 +615,28 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         return [
             CPInformationItem(
                 title: "SPEED  ·  \(speed)",
-                detail: "ELEVATION  ·  \(elevation)"
+                detail: carPlayRightColumn(label: "ELEVATION", value: elevation)
             ),
             CPInformationItem(
                 title: "TRIP  ·  \(trip)",
-                detail: "STOPS  ·  \(stops)"
+                detail: carPlayRightColumn(label: "STOPS", value: stops)
             ),
             CPInformationItem(
                 title: "TIME  ·  \(time)",
-                detail: "GPS ACCURACY  ·  \(accuracy)"
+                detail: carPlayRightColumn(label: "GPS ACCURACY", value: accuracy)
             )
         ]
+    }
+
+    private func carPlayRightColumn(label: String, value: String) -> String {
+        let text = "\(label)  ·  \(value)"
+        // CPInformationTemplate right-aligns its detail column and exposes no
+        // text-alignment control. Non-breaking trailing spaces give all three
+        // rows a consistent rendered width, producing a flush-left visual
+        // edge without relying on custom or unsupported CarPlay UI.
+        let targetWidth = 28
+        let paddingCount = max(0, targetWidth - text.count)
+        return text + String(repeating: "\u{00A0}", count: paddingCount)
     }
 
     private func makeTripLogActions() -> [CPTextButton] {
