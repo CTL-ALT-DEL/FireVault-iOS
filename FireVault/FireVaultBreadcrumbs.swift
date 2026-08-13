@@ -288,6 +288,8 @@ enum FireVaultBreadcrumbRules {
     static let duplicateStopRadius: CLLocationDistance = 125
     static let duplicateStopInterval: TimeInterval = 15 * 60
     static let accountMatchRadius: CLLocationDistance = 175
+    static let maximumLiveSpeedAge: TimeInterval = 8
+    static let maximumDerivedStationarySpeed: CLLocationSpeed = 1.5
 
     static func normalizedVisit(
         arrival: Date,
@@ -306,6 +308,36 @@ enum FireVaultBreadcrumbRules {
         guard let previous else { return true }
         return location.distance(from: previous) >= minimumPointDistance
             || location.timestamp.timeIntervalSince(previous.timestamp) >= maximumPointInterval
+    }
+
+    /// Core Location can briefly retain the vehicle's last driving speed after
+    /// the coordinates have stopped moving. Prefer measured displacement over
+    /// that stale speed so arrival detection is not blocked by a frozen MPH.
+    static func isStationary(
+        _ location: CLLocation,
+        comparedTo previous: CLLocation?
+    ) -> Bool {
+        if location.speed < 0 || location.speed <= maximumStationarySpeed {
+            return true
+        }
+        guard let previous else { return false }
+        let interval = location.timestamp.timeIntervalSince(previous.timestamp)
+        guard interval >= 5 else { return false }
+        return location.distance(from: previous) / interval <= maximumDerivedStationarySpeed
+    }
+
+    static func resolvedLiveSpeed(
+        location: CLLocation?,
+        lastMeaningfulMovementAt: Date?,
+        now: Date = Date()
+    ) -> CLLocationSpeed? {
+        guard let location, location.speed >= 0 else { return nil }
+        guard now.timeIntervalSince(location.timestamp) <= maximumLiveSpeedAge,
+              let lastMeaningfulMovementAt,
+              now.timeIntervalSince(lastMeaningfulMovementAt) <= maximumLiveSpeedAge else {
+            return 0
+        }
+        return location.speed
     }
 
     static func closestAccount(
@@ -526,6 +558,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     @Published private(set) var lastSuccessfulSaveAt: Date?
     @Published private(set) var lastRecoveryAt: Date?
     @Published private(set) var lastPersistenceError: String?
+    @Published private(set) var latestLocation: CLLocation?
 
     private let manager: CLLocationManager
     private let archiveURL: URL
@@ -644,6 +677,10 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     func restoreActiveWorkday(accounts: [FireVaultWorkspaceAccount]) {
         self.accounts = accounts
         refreshRuntimePreferences()
+        // A Live Activity/widget intent can run outside the main app process.
+        // Consume its durable App Group command every time the app becomes
+        // active, not only once when this singleton is initialized.
+        consumeLiveActivityControl()
         authorizationStatus = manager.authorizationStatus
         accuracyAuthorization = manager.accuracyAuthorization
         guard let activeDay else {
@@ -848,8 +885,14 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         for location in locations.sorted(by: { $0.timestamp < $1.timestamp }) {
+            guard location.horizontalAccuracy >= 0 else { continue }
+            latestLocation = location
             record(location)
         }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
+        recoverCompletedVisit(visit)
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -909,6 +952,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         manager.pausesLocationUpdatesAutomatically = false
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = true
+        manager.startMonitoringVisits()
         manager.startUpdatingLocation()
         isRecording = true
         statusText = accuracyAuthorization == .fullAccuracy
@@ -919,6 +963,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     private func stopLocationUpdates() {
         manager.stopUpdatingLocation()
+        manager.stopMonitoringVisits()
         manager.allowsBackgroundLocationUpdates = false
         manager.showsBackgroundLocationIndicator = false
         isRecording = false
@@ -943,7 +988,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
                 speedMetersPerSecond: location.speed >= 0 ? location.speed : nil
             )
         )
-        updateStopDetection(with: location, dayIndex: index)
+        updateStopDetection(with: location, previous: previous, dayIndex: index)
         if let stop = days[index].stops.last(where: { $0.departure == nil }) {
             let state = stop.accountID == nil ? "Stop detected" : "On site"
             statusText = "\(state) • \(days[index].stopDuration(for: stop).fireVaultDuration)"
@@ -993,7 +1038,11 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             .map(\.location)
     }
 
-    private func updateStopDetection(with location: CLLocation, dayIndex: Int) {
+    private func updateStopDetection(
+        with location: CLLocation,
+        previous: CLLocation?,
+        dayIndex: Int
+    ) {
         if suppressesDisregardedStop(at: location) {
             return
         }
@@ -1014,7 +1063,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             }
         }
 
-        guard isReliableStopSample(location) else {
+        guard isReliableStopSample(location, previous: previous) else {
             collectMovingDepartureEvidence(location, dayIndex: dayIndex)
             return
         }
@@ -1064,16 +1113,67 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         activeStopID = nil
     }
 
-    private func isReliableStopSample(_ location: CLLocation) -> Bool {
+    private func isReliableStopSample(
+        _ location: CLLocation,
+        previous: CLLocation?
+    ) -> Bool {
         let account = FireVaultBreadcrumbRules.closestAccount(to: location.coordinate, accounts: accounts)
         let accuracyLimit = account == nil && gpsPreferences.rejectsPoorAccuracyStops
             ? FireVaultBreadcrumbRules.maximumUnrecognizedAccuracy
             : FireVaultBreadcrumbRules.maximumHorizontalAccuracy
-        let speedIsStationary = location.speed < 0
-            || location.speed <= FireVaultBreadcrumbRules.maximumStationarySpeed
         return location.horizontalAccuracy >= 0
             && location.horizontalAccuracy <= accuracyLimit
-            && speedIsStationary
+            && FireVaultBreadcrumbRules.isStationary(location, comparedTo: previous)
+    }
+
+    private func recoverCompletedVisit(_ visit: CLVisit) {
+        guard let dayIndex = activeDayIndex,
+              !days[dayIndex].isPaused,
+              visit.arrivalDate != .distantPast,
+              visit.departureDate != .distantFuture,
+              visit.departureDate >= visit.arrivalDate,
+              CLLocationCoordinate2DIsValid(visit.coordinate) else { return }
+
+        let account = FireVaultBreadcrumbRules.closestAccount(
+            to: visit.coordinate,
+            accounts: accounts
+        )
+        guard FireVaultBreadcrumbRules.confirmsStopDwell(
+            arrival: visit.arrivalDate,
+            departure: visit.departureDate,
+            isKnownAccount: account != nil,
+            minimumUnknownStopMinutes: gpsPreferences.resolvedTripLogMinimumUnknownStopMinutes
+        ) else { return }
+
+        let visitLocation = CLLocation(
+            latitude: visit.coordinate.latitude,
+            longitude: visit.coordinate.longitude
+        )
+        let alreadyRecorded = days[dayIndex].stops.contains { stop in
+            let stopLocation = CLLocation(
+                latitude: stop.latitude,
+                longitude: stop.longitude
+            )
+            let overlaps = stop.arrival <= visit.departureDate
+                && (stop.departure ?? Date.distantFuture) >= visit.arrivalDate
+            return overlaps
+                && stopLocation.distance(from: visitLocation)
+                    <= FireVaultBreadcrumbRules.duplicateStopRadius
+        }
+        guard !alreadyRecorded else { return }
+
+        beginConfirmedStop(
+            dayIndex: dayIndex,
+            arrival: visit.arrivalDate,
+            coordinate: visit.coordinate,
+            account: account
+        )
+        closeActiveStopIfNeeded(dayIndex: dayIndex, departure: visit.departureDate)
+        activeStopID = nil
+        candidateLocations.removeAll()
+        departureCandidateLocations.removeAll()
+        persist()
+        synchronizeLiveActivity(status: .recording)
     }
 
     private func collectMovingDepartureEvidence(_ location: CLLocation, dayIndex: Int) {
@@ -1255,17 +1355,20 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
            let stopIndex = days[dayIndex].stops.firstIndex(where: { $0.id == activeStopID }) {
             days[dayIndex].stops[stopIndex].departure = max(
                 days[dayIndex].stops[stopIndex].arrival,
-                candidateLocations.last?.timestamp ?? end
+                end
             )
             return
         }
 
-        guard candidateCanBeConfirmed,
-              let first = candidateLocations.first else {
-            return
-        }
+        guard let first = candidateLocations.first else { return }
         let coordinate = candidateCoordinate
         let account = FireVaultBreadcrumbRules.closestAccount(to: coordinate, accounts: accounts)
+        guard candidateCanBeConfirmed || FireVaultBreadcrumbRules.confirmsStopDwell(
+            arrival: first.timestamp,
+            departure: end,
+            isKnownAccount: account != nil,
+            minimumUnknownStopMinutes: gpsPreferences.resolvedTripLogMinimumUnknownStopMinutes
+        ) else { return }
         beginConfirmedStop(
             dayIndex: dayIndex,
             arrival: first.timestamp,
@@ -1274,7 +1377,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         )
         closeActiveStopIfNeeded(
             dayIndex: dayIndex,
-            departure: candidateLocations.last?.timestamp ?? end
+            departure: end
         )
     }
 

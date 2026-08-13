@@ -635,6 +635,15 @@ struct FireVaultEditAccountSheet: View {
                     accountEditField("Account Name", symbol: "building.2.fill", text: $name)
                     accountEditField("Street Address", symbol: "mappin.and.ellipse", text: $address, lineLimit: 3)
                     accountEditField("Category", symbol: "tag.fill", text: $category)
+                    if !category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button("Remove Category", systemImage: "xmark.circle", role: .destructive) {
+                            category = ""
+                        }
+                        .accessibilityHint("Clears this account category and prevents category rules from immediately restoring it")
+                    } else {
+                        Label("No category assigned", systemImage: "tag.slash")
+                            .foregroundStyle(.secondary)
+                    }
                     accountEditField("Account ID", symbol: "number", text: $accountId)
                 }
 

@@ -35,6 +35,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>FireVault Pro uses the camera to photograph and scan fire alarm equipment and site documents.</string>
 	<key>NSFaceIDUsageDescription</key>

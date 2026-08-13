@@ -67,20 +67,17 @@ struct FireVaultEndTripLogIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "End Trip Log"
     static let description = IntentDescription("Finish and save the active FireVault Trip Log.")
     static let isDiscoverable = false
+    static var openAppWhenRun = true
 
+    @MainActor
     func perform() async throws -> some IntentResult {
-        try await requestConfirmation(
-            conditions: [],
-            actionName: .custom(
-                acceptLabel: "End Trip Log",
-                acceptAlternatives: ["End"],
-                denyLabel: "Keep Recording",
-                denyAlternatives: ["Cancel"],
-                destructive: true
-            ),
-            dialog: "End and save today’s Trip Log?"
-        )
         FireVaultTripLogControlMailbox.send(.end)
+        var snapshot = FireVaultWidgetSharedStore.load()
+        let now = Date()
+        snapshot.elapsedSeconds = snapshot.elapsedTime(at: now)
+        snapshot.updatedAt = now
+        snapshot.tripState = .complete
+        FireVaultWidgetSharedStore.save(snapshot)
         return .result()
     }
 }

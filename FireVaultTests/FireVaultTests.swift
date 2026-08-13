@@ -961,6 +961,51 @@ final class FireVaultTests: XCTestCase {
         )
     }
 
+    func testBreadcrumbStationaryEvidenceOverridesFrozenDrivingSpeed() {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let first = testLocation(latitude: 43.615, longitude: -116.202, timestamp: timestamp, speed: 15)
+        let barelyMoved = testLocation(
+            latitude: 43.61501,
+            longitude: -116.202,
+            timestamp: timestamp.addingTimeInterval(30),
+            speed: 15
+        )
+
+        XCTAssertTrue(FireVaultBreadcrumbRules.isStationary(barelyMoved, comparedTo: first))
+    }
+
+    func testBreadcrumbMovingCoordinatesDoNotOverrideDrivingSpeed() {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let first = testLocation(latitude: 43.615, longitude: -116.202, timestamp: timestamp, speed: 15)
+        let moved = testLocation(
+            latitude: 43.620,
+            longitude: -116.202,
+            timestamp: timestamp.addingTimeInterval(30),
+            speed: 15
+        )
+
+        XCTAssertFalse(FireVaultBreadcrumbRules.isStationary(moved, comparedTo: first))
+    }
+
+    func testCarPlaySpeedFallsToZeroWhenMovementEvidenceIsStale() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let location = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: now,
+            speed: 15
+        )
+        let speed = try XCTUnwrap(
+            FireVaultBreadcrumbRules.resolvedLiveSpeed(
+                location: location,
+                lastMeaningfulMovementAt: now.addingTimeInterval(-9),
+                now: now
+            )
+        )
+
+        XCTAssertEqual(speed, 0)
+    }
+
     func testBreadcrumbDepartureRequiresConsistentEvidence() {
         let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
         let origin = CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)
@@ -2124,6 +2169,64 @@ final class FireVaultTests: XCTestCase {
         store.requestNearbyReset()
 
         XCTAssertNotEqual(store.nearbyResetRequestID, initialResetID)
+    }
+
+    func testClearedCategoryStaysClearedWhenRulesRunAgain() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        store.exitDemoMode()
+        let account = store.addAccount()
+        let rule = FireVaultCategoryRule(
+            field: .accountName,
+            condition: .contains,
+            value: "New Account",
+            categoryTag: "Commercial"
+        )
+
+        store.configureCategoryRules([rule])
+        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.category, "Commercial")
+
+        XCTAssertTrue(store.updateAccount(
+            id: account.id,
+            name: account.name,
+            address: account.address,
+            category: "",
+            accountId: account.accountId,
+            phone: account.phone
+        ))
+        store.configureCategoryRules([rule])
+
+        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.category, "")
+        XCTAssertFalse(store.accounts.first(where: { $0.id == account.id })?.tags.contains("Commercial") == true)
+    }
+
+    func testAssigningCategoryAgainReenablesCategoryRules() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        store.exitDemoMode()
+        let account = store.addAccount()
+        let rule = FireVaultCategoryRule(
+            field: .accountName,
+            condition: .contains,
+            value: "New Account",
+            categoryTag: "Commercial"
+        )
+
+        XCTAssertTrue(store.updateAccount(
+            id: account.id,
+            name: account.name,
+            address: account.address,
+            category: "Healthcare",
+            accountId: account.accountId,
+            phone: account.phone
+        ))
+        store.configureCategoryRules([rule])
+
+        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.category, "Commercial")
     }
 
     func testEverySettingsCatalogRowHasANativeDestinationIdentifier() {
