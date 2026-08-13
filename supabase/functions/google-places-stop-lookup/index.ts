@@ -31,6 +31,9 @@ Deno.serve(async (request) => {
     if (!authorization?.toLowerCase().startsWith("bearer ")) {
       return json({ error: "Unauthorized" }, 401);
     }
+    if (!await isAuthenticatedUser(authorization)) {
+      return json({ error: "Unauthorized" }, 401);
+    }
 
     const apiKey = Deno.env.get("GOOGLE_PLACES_API_KEY") ?? Deno.env.get("GOOGLE_MAPS_API_KEY");
     if (!apiKey) {
@@ -114,6 +117,23 @@ Deno.serve(async (request) => {
 
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+async function isAuthenticatedUser(authorization: string): Promise<boolean> {
+  const supabaseURL = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  if (!supabaseURL || !anonKey) {
+    console.error("Supabase authentication environment is unavailable");
+    return false;
+  }
+
+  const response = await fetch(`${supabaseURL}/auth/v1/user`, {
+    headers: {
+      Authorization: authorization,
+      apikey: anonKey,
+    },
+  });
+  return response.ok;
 }
 
 function distanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
