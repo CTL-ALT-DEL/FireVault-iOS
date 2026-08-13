@@ -446,7 +446,7 @@ struct NativeCategoriesSettingsView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .onDelete { draft.categories.remove(atOffsets: $0) }
+                .onDelete(perform: deleteCategories)
             }
             Section("Add Category") {
                 TextField("Category tag", text: $newCategory).focused($focused)
@@ -565,8 +565,57 @@ struct NativeCategoriesSettingsView: View {
     }
 
     private func save() {
-        settings.save(draft)
-        store.configureCategoryRules(draft.categoryRules ?? [])
+        var cleanedDraft = draft
+        let configuredCategories = cleanedDraft.categories
+        let isConfigured: (String) -> Bool = { candidate in
+            configuredCategories.contains {
+                $0.caseInsensitiveCompare(candidate) == .orderedSame
+            }
+        }
+        let removedFromList = settings.preferences.categories.filter { existing in
+            !draft.categories.contains {
+                $0.caseInsensitiveCompare(existing) == .orderedSame
+            }
+        }
+        let retiredRuleCategories = (cleanedDraft.categoryRules ?? [])
+            .map(\.categoryTag)
+            .filter { !isConfigured($0) }
+        let retiredStyleCategories = (cleanedDraft.categoryStyles ?? [])
+            .map(\.category)
+            .filter { !isConfigured($0) }
+        let removedCategories = removedFromList + retiredRuleCategories + retiredStyleCategories
+
+        cleanedDraft.categoryRules = (cleanedDraft.categoryRules ?? []).filter {
+            isConfigured($0.categoryTag)
+        }
+        cleanedDraft.categoryStyles = (cleanedDraft.categoryStyles ?? []).filter {
+            isConfigured($0.category)
+        }
+        if !removedCategories.isEmpty {
+            store.removeCategories(removedCategories)
+        }
+        draft = cleanedDraft
+        settings.save(cleanedDraft)
+        store.configureCategoryRules(cleanedDraft.categoryRules ?? [])
+    }
+
+    private func deleteCategories(at offsets: IndexSet) {
+        let removed = offsets.compactMap { index in
+            draft.categories.indices.contains(index) ? draft.categories[index] : nil
+        }
+        guard !removed.isEmpty else { return }
+
+        draft.categories.remove(atOffsets: offsets)
+        draft.categoryRules = (draft.categoryRules ?? []).filter { rule in
+            !removed.contains {
+                $0.caseInsensitiveCompare(rule.categoryTag) == .orderedSame
+            }
+        }
+        draft.categoryStyles = (draft.categoryStyles ?? []).filter { style in
+            !removed.contains {
+                $0.caseInsensitiveCompare(style.category) == .orderedSame
+            }
+        }
     }
 
     private func ruleCategoryBinding(at index: Int) -> Binding<String> {

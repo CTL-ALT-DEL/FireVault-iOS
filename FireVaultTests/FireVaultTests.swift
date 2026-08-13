@@ -2202,6 +2202,38 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(store.accounts.first(where: { $0.id == account.id })?.tags.contains("Commercial") == true)
     }
 
+    func testDeletingCategoryRemovesAccountCategoryTagsAndPersistedRuleResult() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        store.exitDemoMode()
+        let account = store.addAccount()
+        let retiredCategory = "Retired Customer"
+        let rule = FireVaultCategoryRule(
+            field: .accountName,
+            condition: .contains,
+            value: "New Account",
+            categoryTag: retiredCategory
+        )
+
+        store.configureCategoryRules([rule])
+        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.category, retiredCategory)
+        XCTAssertTrue(store.accounts.first(where: { $0.id == account.id })?.tags.contains(retiredCategory) == true)
+
+        XCTAssertEqual(store.removeCategories(["  retired customer  "]), 1)
+
+        let cleaned = try XCTUnwrap(store.accounts.first(where: { $0.id == account.id }))
+        XCTAssertEqual(cleaned.category, "")
+        XCTAssertFalse(cleaned.tags.contains { $0.caseInsensitiveCompare(retiredCategory) == .orderedSame })
+
+        let reloaded = FireVaultStore(defaults: defaults)
+        reloaded.exitDemoMode()
+        let persisted = try XCTUnwrap(reloaded.accounts.first(where: { $0.id == account.id }))
+        XCTAssertEqual(persisted.category, "")
+        XCTAssertFalse(persisted.tags.contains { $0.caseInsensitiveCompare(retiredCategory) == .orderedSame })
+    }
+
     func testAssigningCategoryAgainReenablesCategoryRules() throws {
         let suite = "FireVaultTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

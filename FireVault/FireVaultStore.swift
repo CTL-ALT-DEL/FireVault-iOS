@@ -153,6 +153,45 @@ final class FireVaultStore: ObservableObject {
         persist()
     }
 
+    /// Removes retired category values from every account and prevents a
+    /// deleted automatic rule from restoring them during the same save.
+    @discardableResult
+    func removeCategories(_ categoryNames: [String]) -> Int {
+        let removedKeys = Set(categoryNames.compactMap { name -> String? in
+            let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? nil : value.lowercased()
+        })
+        guard !removedKeys.isEmpty else { return 0 }
+
+        categoryRules.removeAll {
+            removedKeys.contains($0.categoryTag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        }
+
+        var affectedAccounts = 0
+        for index in accounts.indices {
+            var changed = false
+            let categoryKey = accounts[index].category
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            if removedKeys.contains(categoryKey) {
+                accounts[index].category = ""
+                changed = true
+            }
+
+            let originalTagCount = accounts[index].tags.count
+            accounts[index].tags.removeAll { tag in
+                removedKeys.contains(tag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+            }
+            if accounts[index].tags.count != originalTagCount {
+                changed = true
+            }
+            if changed { affectedAccounts += 1 }
+        }
+
+        persistAccounts()
+        return affectedAccounts
+    }
+
     func appPayload(
         userCoordinate: CLLocationCoordinate2D?,
         liveLocationStatus: String
