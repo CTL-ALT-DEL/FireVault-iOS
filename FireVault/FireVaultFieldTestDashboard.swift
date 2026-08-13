@@ -106,6 +106,7 @@ struct FireVaultFieldTestDashboard: View {
                 Text("Runtime counters restart when FireVault is relaunched. Saved Trip Log totals remain in the local archive.")
             }
         }
+        .fireVaultThemedCollection()
         .navigationTitle("Field Test Dashboard")
         .navigationBarTitleDisplayMode(.inline)
         .contentMargins(.bottom, 96, for: .scrollContent)

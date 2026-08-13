@@ -1949,6 +1949,7 @@ struct FireVaultBreadcrumbStopEditor: View {
                 }
                 deleteSection
             }
+            .fireVaultThemedCollection()
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Review Stop")
             .navigationBarTitleDisplayMode(.inline)
@@ -2392,6 +2393,7 @@ private struct FireVaultBreadcrumbAccountPicker: View {
                     .buttonStyle(.plain)
                 }
             }
+            .fireVaultThemedCollection()
             .searchable(text: $searchText, prompt: "Name, address, ID, or category")
             .navigationTitle("Choose Account")
             .navigationBarTitleDisplayMode(.inline)

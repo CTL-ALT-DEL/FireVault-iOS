@@ -786,6 +786,7 @@ private struct NativeNearbyView: View {
                     Text("Select any combination of details to cycle. Your choices save automatically.")
                 }
             }
+            .fireVaultThemedCollection()
             .navigationTitle("Auto Rotate Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -2355,6 +2356,7 @@ private struct NativeCaptureAccountPicker: View {
                     }
                 }
             }
+            .fireVaultThemedCollection()
             .searchable(text: $search, prompt: "Name, address, or account ID")
             .navigationTitle("Choose Account")
             .navigationBarTitleDisplayMode(.inline)
@@ -3042,6 +3044,7 @@ private struct NativeGPSSettingsView: View {
                 }
             }
         }
+        .fireVaultThemedCollection()
         .navigationTitle("GPS & Maps")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaPadding(.bottom, 82)
@@ -3558,7 +3561,7 @@ private struct NativeAboutFireVaultView: View {
                     title: "Separate Workspaces",
                     detail: "Demo records remain isolated from live customer data.",
                     systemImage: "square.stack.3d.up.fill",
-                    tint: .purple
+                    tint: NativeShellPalette.purple
                 )
                 FireVaultAboutFeatureRow(
                     title: "Location Control",
@@ -3625,6 +3628,7 @@ private struct NativeAboutFireVaultView: View {
                 LabeledContent("Updated", value: updatedAtText)
             }
         }
+        .fireVaultThemedCollection()
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -3811,6 +3815,7 @@ private struct FireVaultDeveloperCenterView: View {
                 Text("A production database write test will require a dedicated diagnostic table migration. FireVault Pro does not write test records into customer or Trip Log tables.")
             }
         }
+        .fireVaultThemedCollection()
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Developer Center")
         .navigationBarTitleDisplayMode(.inline)
@@ -3847,6 +3852,7 @@ private struct FireVaultSimpleTemplateDeveloperView: View {
                 Text("Resetting enables every Simple-mode feature without deleting FireVault Pro data.")
             }
         }
+        .fireVaultThemedCollection()
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Simple Template")
         .navigationBarTitleDisplayMode(.inline)
@@ -3990,7 +3996,7 @@ extension View {
                 )
         }
         .shadow(
-            color: .black.opacity(emphasized ? 0.31 : 0.18),
+            color: emphasized ? NativeShellPalette.emphasizedShadow : NativeShellPalette.cardShadow,
             radius: emphasized ? 9 : 7,
             x: 0,
             y: emphasized ? 5 : 3
@@ -4024,16 +4030,43 @@ enum NativeShellMetrics {
 }
 
 enum NativeShellPalette {
-    static let background = adaptive(
+    static let backgroundUIColor = adaptiveUIColor(
         light: UIColor(red: 0.957, green: 0.941, blue: 0.902, alpha: 1),
         dark: UIColor(red: 0.028, green: 0.043, blue: 0.061, alpha: 1)
     )
-    static let surface = adaptive(
-        light: UIColor(red: 1.000, green: 0.992, blue: 0.965, alpha: 1),
+    static let surfaceUIColor = adaptiveUIColor(
+        light: UIColor(red: 1.000, green: 0.984, blue: 0.941, alpha: 1),
         dark: UIColor(red: 0.070, green: 0.095, blue: 0.125, alpha: 1)
     )
+    static let navigationBackgroundUIColor = adaptiveUIColor(
+        light: UIColor(red: 0.925, green: 0.894, blue: 0.835, alpha: 1),
+        dark: UIColor(red: 0.045, green: 0.061, blue: 0.082, alpha: 1)
+    )
+    static let primaryTextUIColor = adaptiveUIColor(
+        light: UIColor(red: 0.145, green: 0.137, blue: 0.122, alpha: 1),
+        dark: UIColor(white: 0.96, alpha: 1)
+    )
+    static let borderUIColor = adaptiveUIColor(
+        light: UIColor(red: 0.31, green: 0.28, blue: 0.24, alpha: 0.22),
+        dark: UIColor(white: 1, alpha: 0.14)
+    )
+
+    static let background = Color(uiColor: backgroundUIColor)
+    static let surface = Color(uiColor: surfaceUIColor)
+    static let surfaceRaised = adaptive(
+        light: UIColor(red: 0.984, green: 0.957, blue: 0.902, alpha: 1),
+        dark: UIColor(red: 0.090, green: 0.116, blue: 0.148, alpha: 1)
+    )
+    static let cardShadow = adaptive(
+        light: UIColor(white: 0.05, alpha: 0.10),
+        dark: UIColor(white: 0, alpha: 0.18)
+    )
+    static let emphasizedShadow = adaptive(
+        light: UIColor(white: 0.03, alpha: 0.17),
+        dark: UIColor(white: 0, alpha: 0.31)
+    )
     static let blue = adaptive(
-        light: UIColor(red: 0.08, green: 0.39, blue: 0.68, alpha: 1),
+        light: UIColor(red: 0.075, green: 0.278, blue: 0.420, alpha: 1),
         dark: UIColor(red: 0.24, green: 0.67, blue: 1.0, alpha: 1)
     )
     static let green = adaptive(
@@ -4049,7 +4082,7 @@ enum NativeShellPalette {
         dark: UIColor(red: 1.0, green: 0.34, blue: 0.40, alpha: 1)
     )
     static let purple = adaptive(
-        light: UIColor(red: 0.42, green: 0.23, blue: 0.68, alpha: 1),
+        light: UIColor(red: 0.16, green: 0.36, blue: 0.39, alpha: 1),
         dark: UIColor(red: 0.68, green: 0.48, blue: 1.0, alpha: 1)
     )
     static let tripLogLeading = adaptive(
@@ -4064,10 +4097,7 @@ enum NativeShellPalette {
         light: UIColor(red: 0.22, green: 0.21, blue: 0.19, alpha: 0.86),
         dark: UIColor(red: 0.72, green: 0.69, blue: 0.62, alpha: 0.72)
     )
-    static let navigationBackground = adaptive(
-        light: UIColor(red: 0.925, green: 0.894, blue: 0.835, alpha: 1),
-        dark: UIColor(red: 0.045, green: 0.061, blue: 0.082, alpha: 1)
-    )
+    static let navigationBackground = Color(uiColor: navigationBackgroundUIColor)
     static let navigationInactive = adaptive(
         light: UIColor(red: 0.36, green: 0.34, blue: 0.30, alpha: 1),
         dark: UIColor(red: 0.60, green: 0.65, blue: 0.72, alpha: 1)
@@ -4085,10 +4115,14 @@ enum NativeShellPalette {
         dark: UIColor(white: 0, alpha: 0.78)
     )
 
-    private static func adaptive(light: UIColor, dark: UIColor) -> Color {
-        Color(uiColor: UIColor { traits in
+    private static func adaptiveUIColor(light: UIColor, dark: UIColor) -> UIColor {
+        UIColor { traits in
             traits.userInterfaceStyle == .dark ? dark : light
-        })
+        }
+    }
+
+    private static func adaptive(light: UIColor, dark: UIColor) -> Color {
+        Color(uiColor: adaptiveUIColor(light: light, dark: dark))
     }
     static func tint(_ name: String) -> Color {
         switch name { case "green": green; case "amber": amber; case "red": red; case "purple": purple; default: blue }

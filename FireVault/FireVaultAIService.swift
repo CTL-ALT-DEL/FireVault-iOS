@@ -263,6 +263,6 @@ struct FireVaultAccountBriefSheet: View {
         if value.contains("recurring") { return .orange }
         if value.contains("history") { return .blue }
         if value.contains("check") { return .green }
-        return .purple
+        return NativeShellPalette.purple
     }
 }

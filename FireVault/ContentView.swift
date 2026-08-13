@@ -55,6 +55,7 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: store.selectedAccountID)
+        .tint(NativeShellPalette.blue)
         .preferredColorScheme(preferredColorScheme)
         .task {
             prepareActiveVault()
@@ -412,7 +413,7 @@ private struct FireVaultBrandHeader: View {
         .background(NativeShellPalette.background)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(.white.opacity(0.07))
+                .fill(NativeShellPalette.hairline)
                 .frame(height: 1)
         }
         .accessibilityIdentifier("firevault-brand-header")

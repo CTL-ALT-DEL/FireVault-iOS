@@ -1604,6 +1604,7 @@ struct FireVaultLocationEditorSheet: View {
                             .foregroundStyle(.secondary)
                 }
             }
+            .fireVaultThemedCollection()
             .navigationTitle(location == nil ? "New Location" : "Edit Location")
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
@@ -1909,6 +1910,7 @@ struct FireVaultNoteEditorSheet: View {
                         .focused($isTextInputFocused)
                 }
             }
+            .fireVaultThemedCollection()
             .navigationTitle(note == nil ? "New Note" : "Edit Note")
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
@@ -2374,6 +2376,7 @@ struct FireVaultEquipmentEditorSheet: View {
                     }
                 }
             }
+            .fireVaultThemedCollection()
             .navigationTitle(equipment == nil ? "New Equipment" : "Edit Equipment")
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)

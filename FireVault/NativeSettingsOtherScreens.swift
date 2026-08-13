@@ -710,6 +710,7 @@ struct NativeCategoriesSettingsView: View {
                     .foregroundStyle(categoryColor(editingCategoryColor))
                 }
             }
+            .fireVaultThemedCollection()
             .navigationTitle("Edit Category")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -925,6 +926,7 @@ struct NativeBackupRestoreView: View {
                 }
             }
         }
+        .fireVaultThemedCollection()
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Backup & Restore")
         .navigationBarTitleDisplayMode(.inline)
@@ -1297,6 +1299,7 @@ private struct NativeCSVImportReviewView: View {
                 Section { Label(errorMessage, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
             }
         }
+        .fireVaultThemedCollection()
         .navigationTitle("Review CSV Import")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -1386,6 +1389,7 @@ struct NativeDemoSettingsView: View {
                     : "Enter Demo Mode to explore the complete sample workspace. Your live FireVault records are not modified.")
             }
         }
+        .fireVaultThemedCollection()
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Demo Mode")
         .navigationBarTitleDisplayMode(.inline)
@@ -1430,6 +1434,7 @@ struct NativeManualView: View {
                 manualItem("Reset Demo Data", "Restore the sample workspace without changing live accounts or authentication.", "arrow.counterclockwise")
             }
         }
+        .fireVaultThemedCollection()
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Help & User Manual")
         .navigationBarTitleDisplayMode(.inline)

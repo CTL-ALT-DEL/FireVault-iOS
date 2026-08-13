@@ -110,6 +110,7 @@ final class FireVaultAuthentication: ObservableObject {
 
 struct FireVaultAuthGate: View {
     @StateObject private var authentication = FireVaultAuthentication()
+    @AppStorage("firevault.native.settings.appearance.v1") private var storedAppearance = FireVaultAppearanceMode.system.rawValue
 
     var body: some View {
         Group {
@@ -121,14 +122,13 @@ struct FireVaultAuthGate: View {
                         .tint(NativeShellPalette.red)
                         .foregroundStyle(.secondary)
                 }
-                .preferredColorScheme(.dark)
             case .signedOut:
                 FireVaultAuthenticationView()
-                    .preferredColorScheme(.dark)
             case .signedIn:
                 ContentView()
             }
         }
+        .preferredColorScheme(preferredColorScheme)
         .environmentObject(authentication)
         .onAppear {
             authentication.start()
@@ -137,6 +137,14 @@ struct FireVaultAuthGate: View {
             if !FireVaultWidgetDeepLinkCenter.shared.receive(url) {
                 SupabaseManager.client.auth.handle(url)
             }
+        }
+    }
+
+    private var preferredColorScheme: ColorScheme? {
+        switch FireVaultAppearanceMode(rawValue: storedAppearance) ?? .system {
+        case .dark: .dark
+        case .light: .light
+        case .system: nil
         }
     }
 }
@@ -319,10 +327,10 @@ private struct FireVaultAuthenticationView: View {
             }
         }
         .padding(20)
-        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(.white.opacity(0.08))
+                .stroke(NativeShellPalette.hairline)
         }
     }
 
@@ -332,10 +340,10 @@ private struct FireVaultAuthenticationView: View {
         HStack(spacing: 11, content: content)
             .padding(.horizontal, 14)
             .frame(minHeight: 52)
-            .background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .background(NativeShellPalette.surfaceRaised, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .stroke(.white.opacity(0.09))
+                    .stroke(NativeShellPalette.hairline)
             }
     }
 

@@ -280,6 +280,7 @@ struct NativeNotificationSettingsView: View {
             }
 #endif
         }
+        .fireVaultThemedCollection()
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaPadding(.bottom, 82)
@@ -420,6 +421,7 @@ private struct FireVaultNotificationDeveloperView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .fireVaultThemedCollection()
         .navigationTitle("Notification Lab")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaPadding(.bottom, 82)
@@ -522,6 +524,7 @@ private struct FireVaultLiveActivityDeveloperView: View {
                 }
             }
         }
+        .fireVaultThemedCollection()
         .navigationTitle("Live Activity Lab")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaPadding(.bottom, 82)

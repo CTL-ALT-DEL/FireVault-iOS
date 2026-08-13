@@ -12,6 +12,33 @@ import MapKit
 
 @MainActor
 final class FireVaultTests: XCTestCase {
+    func testWarmIvoryPaletteResolvesToCreamSurfacesInLightAppearance() {
+        let lightTraits = UITraitCollection(userInterfaceStyle: .light)
+        let darkTraits = UITraitCollection(userInterfaceStyle: .dark)
+        let lightCanvas = NativeShellPalette.backgroundUIColor.resolvedColor(with: lightTraits)
+        let lightSurface = NativeShellPalette.surfaceUIColor.resolvedColor(with: lightTraits)
+        let darkCanvas = NativeShellPalette.backgroundUIColor.resolvedColor(with: darkTraits)
+
+        let canvasComponents = rgba(lightCanvas)
+        let surfaceComponents = rgba(lightSurface)
+        let darkComponents = rgba(darkCanvas)
+
+        XCTAssertGreaterThan(canvasComponents.red, canvasComponents.blue)
+        XCTAssertGreaterThan(surfaceComponents.red, surfaceComponents.blue)
+        XCTAssertGreaterThan(surfaceComponents.red + surfaceComponents.green + surfaceComponents.blue,
+                             canvasComponents.red + canvasComponents.green + canvasComponents.blue)
+        XCTAssertLessThan(darkComponents.red + darkComponents.green + darkComponents.blue, 0.5)
+    }
+
+    private func rgba(_ color: UIColor) -> (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        XCTAssertTrue(color.getRed(&red, green: &green, blue: &blue, alpha: &alpha))
+        return (red, green, blue, alpha)
+    }
+
     func testTripLogLiveActivityTimerReferencePreservesElapsedDuration() {
         let updatedAt = Date(timeIntervalSince1970: 1_700_000_600)
         let state = FireVaultTripLogActivityAttributes.ContentState(
