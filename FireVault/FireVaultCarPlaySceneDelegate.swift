@@ -32,11 +32,15 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private var homeTemplate: CPListTemplate?
     private var liveRefreshTask: Task<Void, Never>?
     private var locationObservation: AnyCancellable?
+    private var tripLogLocationObservation: AnyCancellable?
+    private var tripLogRecordingObservation: AnyCancellable?
     private var announcedArrivalAccountID: String?
     private var speedReferenceLocation: CLLocation?
     private var lastMeaningfulMovementAt: Date?
     private var selectedNearbyAccountID: String?
     private var lastNearbyRefreshAt: Date?
+    private var followsNearbyLocation = true
+    private var ignoreNearbyRegionChangesUntil: Date?
 
     private let demoLocation = CLLocation(latitude: 43.6150, longitude: -116.2023)
     private let recentAccountIDsKey = "firevault.carplay.recentAccountIDs"
@@ -51,7 +55,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
             FireVaultDemoShowroom.installAccountsIfNeeded(into: store)
         }
         breadcrumbs.restoreActiveWorkday(accounts: store.accounts)
-        locationService.startLiveNearbyUpdates(highAccuracy: settings.gps.highAccuracy)
+        synchronizeLocationOwnership()
         observeLiveLocation()
 
         interfaceController.setRootTemplate(makeRootTemplate(), animated: false, completion: nil)
@@ -66,6 +70,10 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         liveRefreshTask = nil
         locationObservation?.cancel()
         locationObservation = nil
+        tripLogLocationObservation?.cancel()
+        tripLogLocationObservation = nil
+        tripLogRecordingObservation?.cancel()
+        tripLogRecordingObservation = nil
         locationService.stopLiveNearbyUpdates()
         nearbyTemplate = nil
         favoritesTemplate = nil
@@ -77,6 +85,8 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         lastMeaningfulMovementAt = nil
         selectedNearbyAccountID = nil
         lastNearbyRefreshAt = nil
+        followsNearbyLocation = true
+        ignoreNearbyRegionChangesUntil = nil
         self.interfaceController = nil
     }
 
@@ -197,6 +207,12 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
             selectedIndex: points.isEmpty ? NSNotFound : selectedNearbyIndex(in: points)
         )
         template.pointOfInterestDelegate = self
+        template.trailingNavigationBarButtons = [
+            CPBarButton(image: requiredCarPlayIcon("location.fill", color: .systemBlue)) { [weak self] _ in
+                self?.recenterNearbyMap()
+            }
+        ]
+        ignoreNearbyRegionChangesUntil = Date().addingTimeInterval(2)
         return template
     }
 
@@ -255,8 +271,11 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         _ pointOfInterestTemplate: CPPointOfInterestTemplate,
         didChangeMapRegion region: MKCoordinateRegion
     ) {
-        // FireVault intentionally keeps this to the nearest six accounts.
-        // The system remains free to pan and zoom without replacing the set.
+        guard Date() >= (ignoreNearbyRegionChangesUntil ?? .distantPast) else { return }
+        // A manual map gesture suspends automatic following. The location
+        // button explicitly restores it, so periodic refreshes never fight a
+        // driver who chose to inspect another area.
+        followsNearbyLocation = false
     }
 
     func pointOfInterestTemplate(
@@ -266,6 +285,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         guard let accountID = pointOfInterest.userInfo as? String,
               let account = store.accounts.first(where: { $0.id == accountID }) else { return }
         selectedNearbyAccountID = accountID
+        ignoreNearbyRegionChangesUntil = Date().addingTimeInterval(1)
         rememberRecentAccount(account)
     }
 
@@ -566,16 +586,16 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     }
 
     private func makeTripLogInformationItems() -> [CPInformationItem] {
-        let location = locationService.latestLocation
+        let location = effectiveLocation
         let day = breadcrumbs.activeDay ?? breadcrumbs.today
 
         return [
             CPInformationItem(title: "SPEED", detail: store.demoMode ? "64 mph" : currentSpeedText(location)),
-            CPInformationItem(title: "TRIP", detail: store.demoMode ? "42.6 mi" : distanceText(day)),
             CPInformationItem(title: "ELEVATION", detail: store.demoMode ? "5,284 ft" : currentElevationText(location, day: day)),
+            CPInformationItem(title: "TRIP", detail: store.demoMode ? "42.6 mi" : distanceText(day)),
             CPInformationItem(title: "STOPS", detail: store.demoMode ? "2 stops" : stopSummaryText(day)),
             CPInformationItem(title: "TIME", detail: store.demoMode ? "00:48:17" : elapsedText(day?.elapsedTime ?? 0)),
-            CPInformationItem(title: "GPS", detail: store.demoMode ? "±10 ft" : currentGPSAccuracyText(location))
+            CPInformationItem(title: "GPS ACCURACY", detail: store.demoMode ? "±10 ft" : currentGPSAccuracyText(location))
         ]
     }
 
@@ -654,6 +674,32 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
                     self?.refreshCarPlayState()
                 }
             }
+        tripLogLocationObservation?.cancel()
+        tripLogLocationObservation = breadcrumbs.$latestLocation
+            .compactMap { $0 }
+            .sink { [weak self] location in
+                Task { @MainActor [weak self] in
+                    self?.updateMotionEvidence(with: location)
+                    self?.refreshCarPlayState()
+                }
+            }
+        tripLogRecordingObservation?.cancel()
+        tripLogRecordingObservation = breadcrumbs.$isRecording
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.synchronizeLocationOwnership()
+                    self?.refreshCarPlayState()
+                }
+            }
+    }
+
+    private func synchronizeLocationOwnership() {
+        if breadcrumbs.isRecording {
+            locationService.stopLiveNearbyUpdates()
+        } else {
+            locationService.startLiveNearbyUpdates(highAccuracy: settings.gps.highAccuracy)
+        }
     }
 
     private func beginLiveRefresh() {
@@ -682,21 +728,34 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     }
 
     private func refreshNearbyMapIfNeeded() {
+        guard followsNearbyLocation else { return }
         let now = Date()
         guard lastNearbyRefreshAt == nil
                 || now.timeIntervalSince(lastNearbyRefreshAt!) >= 15 else { return }
         lastNearbyRefreshAt = now
         let points = makeNearbyPoints()
+        ignoreNearbyRegionChangesUntil = now.addingTimeInterval(2)
         nearbyTemplate?.setPointsOfInterest(
             points,
             selectedIndex: points.isEmpty ? NSNotFound : selectedNearbyIndex(in: points)
         )
     }
 
+    private func recenterNearbyMap() {
+        followsNearbyLocation = true
+        selectedNearbyAccountID = nil
+        lastNearbyRefreshAt = nil
+        ignoreNearbyRegionChangesUntil = Date().addingTimeInterval(2)
+        refreshNearbyMapIfNeeded()
+    }
+
     // MARK: - Data helpers
 
     private var effectiveLocation: CLLocation? {
-        store.demoMode ? demoLocation : locationService.latestLocation
+        if store.demoMode { return demoLocation }
+        return breadcrumbs.isRecording
+            ? (breadcrumbs.latestLocation ?? locationService.latestLocation)
+            : (locationService.latestLocation ?? breadcrumbs.latestLocation)
     }
 
     private func sortedMappedAccounts(favoritesOnly: Bool) -> [FireVaultWorkspaceAccount] {

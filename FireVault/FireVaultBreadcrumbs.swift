@@ -558,6 +558,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     @Published private(set) var lastSuccessfulSaveAt: Date?
     @Published private(set) var lastRecoveryAt: Date?
     @Published private(set) var lastPersistenceError: String?
+    @Published private(set) var latestLocation: CLLocation?
 
     private let manager: CLLocationManager
     private let archiveURL: URL
@@ -884,6 +885,8 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         for location in locations.sorted(by: { $0.timestamp < $1.timestamp }) {
+            guard location.horizontalAccuracy >= 0 else { continue }
+            latestLocation = location
             record(location)
         }
     }

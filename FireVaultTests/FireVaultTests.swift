@@ -2171,6 +2171,64 @@ final class FireVaultTests: XCTestCase {
         XCTAssertNotEqual(store.nearbyResetRequestID, initialResetID)
     }
 
+    func testClearedCategoryStaysClearedWhenRulesRunAgain() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        store.exitDemoMode()
+        let account = store.addAccount()
+        let rule = FireVaultCategoryRule(
+            field: .accountName,
+            condition: .contains,
+            value: "New Account",
+            categoryTag: "Commercial"
+        )
+
+        store.configureCategoryRules([rule])
+        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.category, "Commercial")
+
+        XCTAssertTrue(store.updateAccount(
+            id: account.id,
+            name: account.name,
+            address: account.address,
+            category: "",
+            accountId: account.accountId,
+            phone: account.phone
+        ))
+        store.configureCategoryRules([rule])
+
+        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.category, "")
+        XCTAssertFalse(store.accounts.first(where: { $0.id == account.id })?.tags.contains("Commercial") == true)
+    }
+
+    func testAssigningCategoryAgainReenablesCategoryRules() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        store.exitDemoMode()
+        let account = store.addAccount()
+        let rule = FireVaultCategoryRule(
+            field: .accountName,
+            condition: .contains,
+            value: "New Account",
+            categoryTag: "Commercial"
+        )
+
+        XCTAssertTrue(store.updateAccount(
+            id: account.id,
+            name: account.name,
+            address: account.address,
+            category: "Healthcare",
+            accountId: account.accountId,
+            phone: account.phone
+        ))
+        store.configureCategoryRules([rule])
+
+        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.category, "Commercial")
+    }
+
     func testEverySettingsCatalogRowHasANativeDestinationIdentifier() {
         let expected = Set([
             "overlay", "gps", "plusCodes", "notifications", "reports", "email", "cloudFiles",

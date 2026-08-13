@@ -68,6 +68,7 @@ final class FireVaultStore: ObservableObject {
     private let demoCoordinate = CLLocationCoordinate2D(latitude: 43.6150, longitude: -116.2023)
     private var geocodingTask: Task<Void, Never>?
     private var categoryRules: [FireVaultCategoryRule] = []
+    private var categoryRuleSuppressedAccountIDs: Set<String>
 
     private enum Key {
         static let demoMode = "firevault.native.demo-mode.v1"
@@ -75,12 +76,18 @@ final class FireVaultStore: ObservableObject {
         static let demoAccountsBackup = "firevault.native.demo-accounts.backup.v1"
         static let productionAccounts = "firevault.native.production-accounts.v1"
         static let productionAccountsBackup = "firevault.native.production-accounts.backup.v1"
+        static let demoCategoryRuleSuppressions = "firevault.native.demo-category-rule-suppressions.v1"
+        static let productionCategoryRuleSuppressions = "firevault.native.production-category-rule-suppressions.v1"
     }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let activeDemoMode = defaults.object(forKey: Key.demoMode) as? Bool ?? true
         demoMode = activeDemoMode
+        let suppressionKey = activeDemoMode
+            ? Key.demoCategoryRuleSuppressions
+            : Key.productionCategoryRuleSuppressions
+        categoryRuleSuppressedAccountIDs = Set(defaults.stringArray(forKey: suppressionKey) ?? [])
         locationStatus = activeDemoMode ? "Demo location ready" : "Location ready"
 
         if activeDemoMode {
@@ -423,9 +430,21 @@ final class FireVaultStore: ObservableObject {
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedName.isEmpty else { return false }
 
+        let previousCategory = accounts[index].category.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
         accounts[index].name = normalizedName
         accounts[index].address = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        accounts[index].category = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        accounts[index].category = normalizedCategory
+        if normalizedCategory.isEmpty {
+            categoryRuleSuppressedAccountIDs.insert(id)
+            if !previousCategory.isEmpty {
+                accounts[index].tags.removeAll {
+                    $0.caseInsensitiveCompare(previousCategory) == .orderedSame
+                }
+            }
+        } else {
+            categoryRuleSuppressedAccountIDs.remove(id)
+        }
         accounts[index].accountId = accountId.trimmingCharacters(in: .whitespacesAndNewlines)
         accounts[index].phone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
         accounts[index].latitude = latitude
@@ -849,9 +868,11 @@ final class FireVaultStore: ObservableObject {
     func resetDemo() {
         guard demoMode else { return }
         accounts = Self.demoAccounts
+        categoryRuleSuppressedAccountIDs.removeAll()
         selectedAccountID = nil
         captureAccountID = nil
         defaults.removeObject(forKey: Key.demoAccounts)
+        defaults.removeObject(forKey: Key.demoCategoryRuleSuppressions)
     }
 
     func exitDemoMode() {
@@ -861,6 +882,9 @@ final class FireVaultStore: ObservableObject {
         demoMode = false
         defaults.set(false, forKey: Key.demoMode)
         accounts = Self.savedAccounts(defaults: defaults, key: Key.productionAccounts) ?? []
+        categoryRuleSuppressedAccountIDs = Set(
+            defaults.stringArray(forKey: Key.productionCategoryRuleSuppressions) ?? []
+        )
         locationStatus = "Location ready"
     }
 
@@ -871,6 +895,9 @@ final class FireVaultStore: ObservableObject {
         demoMode = true
         defaults.set(true, forKey: Key.demoMode)
         accounts = Self.savedAccounts(defaults: defaults, key: Key.demoAccounts) ?? Self.demoAccounts
+        categoryRuleSuppressedAccountIDs = Set(
+            defaults.stringArray(forKey: Key.demoCategoryRuleSuppressions) ?? []
+        )
         locationStatus = "Demo location ready"
     }
 
@@ -1044,12 +1071,17 @@ final class FireVaultStore: ObservableObject {
             defaults.set(existing, forKey: backupKey)
         }
         defaults.set(data, forKey: key)
+        let suppressionKey = demoMode
+            ? Key.demoCategoryRuleSuppressions
+            : Key.productionCategoryRuleSuppressions
+        defaults.set(categoryRuleSuppressedAccountIDs.sorted(), forKey: suppressionKey)
     }
 
     @discardableResult
     private func applyCategoryRules() -> Int {
         var additions = 0
         for index in accounts.indices {
+            guard !categoryRuleSuppressedAccountIDs.contains(accounts[index].id) else { continue }
             for rule in categoryRules where rule.isEnabled {
                 let needle = rule.value.trimmingCharacters(in: .whitespacesAndNewlines)
                 let tag = rule.categoryTag.trimmingCharacters(in: .whitespacesAndNewlines)
