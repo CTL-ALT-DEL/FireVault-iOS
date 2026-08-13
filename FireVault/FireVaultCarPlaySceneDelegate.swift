@@ -755,10 +755,10 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
         let interval = location.timestamp.timeIntervalSince(reference.timestamp)
         guard interval > 0 else { return }
-        let distance = location.distance(from: reference)
-        let derivedSpeed = distance / interval
-        if distance >= FireVaultBreadcrumbRules.minimumPointDistance
-            && derivedSpeed > FireVaultBreadcrumbRules.maximumDerivedStationarySpeed {
+        if FireVaultBreadcrumbRules.providesLiveMovementEvidence(
+            location,
+            comparedTo: reference
+        ) {
             lastMeaningfulMovementAt = location.timestamp
             speedReferenceLocation = location
         } else if interval >= FireVaultBreadcrumbRules.maximumLiveSpeedAge {

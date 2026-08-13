@@ -1061,6 +1061,54 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(speed, 0)
     }
 
+    func testCarPlayLiveSpeedEvidenceDoesNotUseRouteArchiveSpacing() {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let first = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: timestamp,
+            speed: 8
+        )
+        // About 12 metres north: enough for the driving location manager's
+        // update cadence, but intentionally far below the 75 m archive spacing.
+        let moved = testLocation(
+            latitude: 43.615108,
+            longitude: -116.202,
+            timestamp: timestamp.addingTimeInterval(2),
+            speed: 8
+        )
+
+        XCTAssertLessThan(
+            moved.distance(from: first),
+            FireVaultBreadcrumbRules.minimumPointDistance
+        )
+        XCTAssertTrue(
+            FireVaultBreadcrumbRules.providesLiveMovementEvidence(
+                moved,
+                comparedTo: first
+            )
+        )
+    }
+
+    func testCarPlaySpeedDisplaysFreshMeasuredDrivingSpeed() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let location = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: now,
+            speed: 8
+        )
+
+        let speed = try XCTUnwrap(
+            FireVaultBreadcrumbRules.resolvedLiveSpeed(
+                location: location,
+                lastMeaningfulMovementAt: now,
+                now: now
+            )
+        )
+        XCTAssertEqual(speed, 8)
+    }
+
     func testBreadcrumbDepartureRequiresConsistentEvidence() {
         let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
         let origin = CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)

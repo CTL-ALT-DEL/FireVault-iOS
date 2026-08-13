@@ -292,6 +292,12 @@ enum FireVaultBreadcrumbRules {
     static let accountMatchRadius: CLLocationDistance = 175
     static let maximumLiveSpeedAge: TimeInterval = 8
     static let maximumDerivedStationarySpeed: CLLocationSpeed = 1.5
+    // Live CarPlay telemetry must not inherit the much wider route-archive
+    // spacing. Core Location is configured to deliver roughly 12 m updates
+    // while driving, so 8 m confirms motion without treating ordinary GPS
+    // drift as vehicle speed.
+    static let minimumLiveMovementDistance: CLLocationDistance = 8
+    static let minimumLiveMovementSpeed: CLLocationSpeed = 0.75
 
     static func normalizedVisit(
         arrival: Date,
@@ -340,6 +346,21 @@ enum FireVaultBreadcrumbRules {
             return 0
         }
         return location.speed
+    }
+
+    static func providesLiveMovementEvidence(
+        _ location: CLLocation,
+        comparedTo reference: CLLocation?
+    ) -> Bool {
+        guard location.horizontalAccuracy >= 0,
+              let reference else { return false }
+        let interval = location.timestamp.timeIntervalSince(reference.timestamp)
+        guard interval > 0 else { return false }
+        let distance = location.distance(from: reference)
+        let derivedSpeed = distance / interval
+        return distance >= minimumLiveMovementDistance
+            && (derivedSpeed >= minimumLiveMovementSpeed
+                || location.speed >= minimumLiveMovementSpeed)
     }
 
     static func closestAccount(
