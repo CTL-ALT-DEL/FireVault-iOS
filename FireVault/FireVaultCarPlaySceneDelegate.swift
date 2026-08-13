@@ -480,20 +480,10 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         let accuracy = store.demoMode ? "±10 ft" : currentGPSAccuracyText(location)
 
         return [
-            CPInformationItem(title: tripLogStatus.uppercased(), detail: tripLogStatusDetail),
             CPInformationItem(title: "SPEED  \(speed)", detail: "ELEVATION  \(elevation)"),
             CPInformationItem(title: "TRIP  \(trip)", detail: "STOPS  \(stops)"),
             CPInformationItem(title: "TIME  \(time)", detail: "GPS ACCURACY  \(accuracy)")
         ]
-    }
-
-    private var tripLogStatusDetail: String {
-        guard let day = breadcrumbs.activeDay ?? breadcrumbs.today else {
-            return "Ready to record today’s route"
-        }
-        if day.isPaused { return "Recording paused" }
-        if breadcrumbs.isRecording { return "Recording route and stops" }
-        return day.endedAt == nil ? "Ready to resume" : "Today’s Trip Log is complete"
     }
 
     private func makeTripLogActions() -> [CPTextButton] {
