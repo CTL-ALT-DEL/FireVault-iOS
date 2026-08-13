@@ -1901,25 +1901,10 @@ struct NativePhotoView: View {
     private var captureWorkspacePanel: some View {
         NativeShellCard {
             VStack(alignment: .leading, spacing: 11) {
-                HStack(spacing: 8) {
-                    Label("CAPTURE TOOLS", systemImage: "camera.aperture")
-                        .font(.caption.bold())
-                        .tracking(1.0)
-                        .foregroundStyle(.primary)
-
-                    Spacer(minLength: 6)
-
-                    Text(destinationAccount == nil ? "CHOOSE ACCOUNT" : "READY")
-                        .font(.caption2.bold())
-                        .tracking(0.5)
-                        .foregroundStyle(destinationAccount == nil ? NativeShellPalette.amber : NativeShellPalette.green)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            (destinationAccount == nil ? NativeShellPalette.amber : NativeShellPalette.green).opacity(0.12),
-                            in: Capsule()
-                        )
-                }
+                Label("CAPTURE TOOLS", systemImage: "camera.aperture")
+                    .font(.caption.bold())
+                    .tracking(1.0)
+                    .foregroundStyle(.primary)
 
                 Text("Add field media directly to the selected account.")
                     .font(.subheadline)
@@ -1951,16 +1936,6 @@ struct NativePhotoView: View {
                     intent: .photoLibrary
                 )
                 .accessibilityIdentifier("native-choose-photo")
-
-                Label(
-                    destinationAccount == nil
-                        ? "You will choose an account before capture begins."
-                        : "New media will be linked to \(destinationAccount?.name ?? "the selected account").",
-                    systemImage: destinationAccount == nil ? "building.2" : "checkmark.shield.fill"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
             }
         }
         .accessibilityIdentifier("native-capture-workspace")
