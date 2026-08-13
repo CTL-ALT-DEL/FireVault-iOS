@@ -451,7 +451,10 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
     private func makeTripLogTemplate() -> CPInformationTemplate {
         let template = CPInformationTemplate(
-            title: "Trip Log",
+            // The persistent Trip Log tab already names this screen. An empty
+            // template title recovers a full row on compact CarPlay displays
+            // so all dashboard details remain visible without scrolling.
+            title: "",
             layout: .leading,
             items: makeTripLogInformationItems(),
             actions: makeTripLogActions()
