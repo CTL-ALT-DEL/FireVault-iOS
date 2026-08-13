@@ -3340,7 +3340,7 @@ private struct FVRadiusWheelPicker: View {
         .frame(maxWidth: .infinity)
         .frame(height: 150)
         .clipped()
-        .background(.black.opacity(0.18))
+        .background(NativeShellPalette.surfaceRaised)
         .clipShape(
             RoundedRectangle(
                 cornerRadius: 18,
@@ -3352,7 +3352,7 @@ private struct FVRadiusWheelPicker: View {
                 cornerRadius: 18,
                 style: .continuous
             )
-            .stroke(.white.opacity(0.10), lineWidth: 1)
+            .stroke(NativeShellPalette.hairline, lineWidth: 1)
         }
         .sensoryFeedback(.selection, trigger: selection)
         .accessibilityLabel("Nearby radius")

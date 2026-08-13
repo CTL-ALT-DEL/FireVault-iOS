@@ -2,8 +2,8 @@
 //  FireVaultThemeAppearance.swift
 //  FireVault
 //
-//  Shared UIKit appearance for SwiftUI controls that otherwise fall back to
-//  stark system-white surfaces in Light appearance.
+//  Shared UIKit appearance for navigation and controls. List and Form rows
+//  remain under SwiftUI's control so native grouped geometry is preserved.
 //
 
 import SwiftUI
@@ -16,11 +16,6 @@ enum FireVaultThemeAppearance {
         let raised = NativeShellPalette.navigationBackgroundUIColor
         let text = NativeShellPalette.primaryTextUIColor
         let border = NativeShellPalette.borderUIColor
-
-        UITableView.appearance().backgroundColor = canvas
-        UITableViewCell.appearance().backgroundColor = surface
-        UICollectionView.appearance().backgroundColor = canvas
-        UICollectionViewCell.appearance().backgroundColor = surface
 
         let navigation = UINavigationBarAppearance()
         navigation.configureWithOpaqueBackground()
@@ -53,6 +48,7 @@ extension View {
     func fireVaultThemedCollection() -> some View {
         scrollContentBackground(.hidden)
             .background(NativeShellPalette.background)
+            .listRowBackground(NativeShellPalette.surface)
             .listRowSeparatorTint(NativeShellPalette.hairline)
             .tint(NativeShellPalette.blue)
             .toolbarBackground(NativeShellPalette.background, for: .navigationBar)
