@@ -456,7 +456,7 @@ private struct NativeNearbyView: View {
             radiusCollapseTask?.cancel()
             tripLogControlsCollapseTask?.cancel()
             guard !payload.demoMode else { return }
-            locationService.stopLiveNearbyUpdates()
+            locationService.stopLiveNearbyUpdates(consumer: .handset)
         }
         .onChange(of: store.nearbyResetRequestID) { _, _ in
             resetNearby()
@@ -507,13 +507,14 @@ private struct NativeNearbyView: View {
 
     private func synchronizeNearbyLocationOwnership() {
         if breadcrumbs.isRecording {
-            locationService.stopLiveNearbyUpdates()
+            locationService.stopLiveNearbyUpdates(consumer: .handset)
             if let location = breadcrumbs.latestLocation {
                 locationService.acceptTripLogLocation(location)
             }
         } else {
             locationService.startLiveNearbyUpdates(
-                highAccuracy: settings.gps.highAccuracy
+                highAccuracy: settings.gps.highAccuracy,
+                consumer: .handset
             )
         }
     }
@@ -810,7 +811,10 @@ private struct NativeNearbyView: View {
         } else {
             switch displayedTripLogDetail {
             case .speed:
-                guard let speed = locationService.latestLocation?.speed, speed >= 0 else { return "— mph" }
+                let speed = breadcrumbs.isRecording
+                    ? breadcrumbs.liveSpeedMetersPerSecond
+                    : locationService.liveSpeedMetersPerSecond
+                guard let speed else { return "— mph" }
                 return "\(Int((speed * 2.236_936).rounded())) mph"
             case .trip:
                 guard let day = breadcrumbs.today else { return "0.0 mi" }
@@ -3017,6 +3021,7 @@ private struct NativeGPSSettingsView: View {
                 NavigationLink {
                     FireVaultGPSDiagnosticsView(
                         locationService: locationService,
+                        breadcrumbs: FireVaultBreadcrumbStore.shared,
                         highAccuracy: draft.highAccuracy
                     )
                 } label: {
@@ -3076,10 +3081,21 @@ private struct FireVaultGPSDiagnosticSample: Identifiable {
 
 private struct FireVaultGPSDiagnosticsView: View {
     @ObservedObject var locationService: FireVaultLocationService
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     let highAccuracy: Bool
     @State private var samples: [FireVaultGPSDiagnosticSample] = []
 
-    private var location: CLLocation? { locationService.latestLocation }
+    private var location: CLLocation? {
+        breadcrumbs.isRecording
+            ? (breadcrumbs.latestLocation ?? locationService.latestLocation)
+            : locationService.latestLocation
+    }
+
+    private var liveSpeed: CLLocationSpeed? {
+        breadcrumbs.isRecording
+            ? breadcrumbs.liveSpeedMetersPerSecond
+            : locationService.liveSpeedMetersPerSecond
+    }
 
     var body: some View {
         ScrollView {
@@ -3100,22 +3116,36 @@ private struct FireVaultGPSDiagnosticsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    locationService.requestCurrentLocation(highAccuracy: true)
+                    if !breadcrumbs.isRecording {
+                        locationService.requestCurrentLocation(highAccuracy: true)
+                    }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
+                .disabled(breadcrumbs.isRecording)
                 .accessibilityLabel("Refresh GPS reading")
             }
         }
         .onAppear {
-            locationService.startDiagnosticsUpdates(highAccuracy: highAccuracy)
-            append(locationService.latestLocation)
+            synchronizeDiagnosticsOwnership()
+            append(location)
         }
         .onDisappear {
-            locationService.stopDiagnosticsUpdates()
+            locationService.stopDiagnosticsUpdates(
+                resumeNearby: !breadcrumbs.isRecording
+            )
         }
         .onReceive(locationService.$latestLocation.compactMap { $0 }) { updated in
+            guard !breadcrumbs.isRecording else { return }
             append(updated)
+        }
+        .onReceive(breadcrumbs.$latestLocation.compactMap { $0 }) { updated in
+            guard breadcrumbs.isRecording else { return }
+            append(updated)
+        }
+        .onChange(of: breadcrumbs.isRecording) { _, _ in
+            synchronizeDiagnosticsOwnership()
+            append(location)
         }
     }
 
@@ -3129,11 +3159,11 @@ private struct FireVaultGPSDiagnosticsView: View {
             }
             .frame(width: 48, height: 48)
             VStack(alignment: .leading, spacing: 3) {
-                Text(locationService.isDiagnosticsTracking ? "LIVE GPS SIGNAL" : "GPS STATUS")
+                Text(isLive ? "LIVE GPS SIGNAL" : "GPS STATUS")
                     .font(.caption.bold())
                     .tracking(1)
                     .foregroundStyle(.secondary)
-                Text(locationService.statusText)
+                Text(statusText)
                     .font(.subheadline.bold())
                     .lineLimit(2)
                 Text(highAccuracy ? "High-accuracy preference enabled" : "Balanced-accuracy preference enabled")
@@ -3155,7 +3185,7 @@ private struct FireVaultGPSDiagnosticsView: View {
                 metric("Accuracy", feet(location?.horizontalAccuracy, prefix: "±"), "scope")
                 metric("Vertical Accuracy", feet(location?.verticalAccuracy, prefix: "±"), "arrow.up.and.down")
                 metric("Altitude", feet(location?.altitude), "mountain.2")
-                metric("Speed", speed(location?.speed), "speedometer")
+                metric("Speed", speed(liveSpeed), "speedometer")
                 metric("Direction", course(location?.course), "location.north.fill")
                 metric("Reading Age", readingAge, "clock")
             }
@@ -3213,7 +3243,7 @@ private struct FireVaultGPSDiagnosticsView: View {
             time: location.timestamp,
             horizontalAccuracyFeet: location.horizontalAccuracy * 3.28084,
             altitudeFeet: location.altitude * 3.28084,
-            speedMPH: max(0, location.speed) * 2.236_936
+            speedMPH: max(0, liveSpeed ?? 0) * 2.236_936
         ))
         if samples.count > 90 { samples.removeFirst(samples.count - 90) }
     }
@@ -3266,7 +3296,17 @@ private struct FireVaultGPSDiagnosticsView: View {
     }
 
     private var statusTint: Color {
-        locationService.isDiagnosticsTracking ? NativeShellPalette.green : NativeShellPalette.amber
+        isLive ? NativeShellPalette.green : NativeShellPalette.amber
+    }
+
+    private var isLive: Bool {
+        breadcrumbs.isRecording || locationService.isDiagnosticsTracking
+    }
+
+    private var statusText: String {
+        breadcrumbs.isRecording
+            ? "Using the active Trip Log GPS recorder"
+            : locationService.statusText
     }
 
     private var authorizationText: String {
@@ -3308,6 +3348,14 @@ private struct FireVaultGPSDiagnosticsView: View {
     private func sourceText(software: Bool) -> String {
         guard let source = location?.sourceInformation else { return "Unavailable" }
         return (software ? source.isSimulatedBySoftware : source.isProducedByAccessory) ? "Yes" : "No"
+    }
+
+    private func synchronizeDiagnosticsOwnership() {
+        if breadcrumbs.isRecording {
+            locationService.stopDiagnosticsUpdates(resumeNearby: false)
+        } else {
+            locationService.startDiagnosticsUpdates(highAccuracy: highAccuracy)
+        }
     }
 }
 

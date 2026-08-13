@@ -11,7 +11,7 @@ import UIKit
 struct ContentView: View {
     @StateObject private var store = FireVaultStore()
     @StateObject private var settings = FireVaultNativeSettingsStore()
-    @StateObject private var locationService = FireVaultLocationService()
+    @StateObject private var locationService = FireVaultLocationService.shared
     @StateObject private var liveBreadcrumbs = FireVaultBreadcrumbStore.shared
     @StateObject private var quickActions = FireVaultQuickActionCenter.shared
     @StateObject private var widgetDeepLinks = FireVaultWidgetDeepLinkCenter.shared
@@ -84,7 +84,7 @@ struct ContentView: View {
                     handlePendingWidgetDeepLink()
                 }
             case .background:
-                locationService.stopLiveNearbyUpdates()
+                locationService.stopLiveNearbyUpdates(consumer: .handset)
                 updateWidgetSnapshot()
                 privacyLock.enteredBackground()
             default:
@@ -225,7 +225,8 @@ struct ContentView: View {
               store.selectedTab == .nearby,
               !activeBreadcrumbs.isRecording else { return }
         locationService.startLiveNearbyUpdates(
-            highAccuracy: settings.gps.highAccuracy
+            highAccuracy: settings.gps.highAccuracy,
+            consumer: .handset
         )
     }
 

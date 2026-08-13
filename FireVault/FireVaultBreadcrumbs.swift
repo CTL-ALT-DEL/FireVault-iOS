@@ -339,7 +339,9 @@ enum FireVaultBreadcrumbRules {
         lastMeaningfulMovementAt: Date?,
         now: Date = Date()
     ) -> CLLocationSpeed? {
-        guard let location, location.speed >= 0 else { return nil }
+        guard let location,
+              isReliableLiveTelemetry(location, now: now),
+              location.speed >= 0 else { return nil }
         guard now.timeIntervalSince(location.timestamp) <= maximumLiveSpeedAge,
               let lastMeaningfulMovementAt,
               now.timeIntervalSince(lastMeaningfulMovementAt) <= maximumLiveSpeedAge else {
@@ -348,12 +350,23 @@ enum FireVaultBreadcrumbRules {
         return location.speed
     }
 
+    static func isReliableLiveTelemetry(
+        _ location: CLLocation,
+        now: Date = Date()
+    ) -> Bool {
+        location.horizontalAccuracy >= 0
+            && location.horizontalAccuracy <= maximumHorizontalAccuracy
+            && abs(now.timeIntervalSince(location.timestamp)) <= maximumLiveSpeedAge
+    }
+
     static func providesLiveMovementEvidence(
         _ location: CLLocation,
         comparedTo reference: CLLocation?
     ) -> Bool {
-        guard location.horizontalAccuracy >= 0,
-              let reference else { return false }
+        guard isReliableLiveTelemetry(location, now: location.timestamp),
+              let reference,
+              reference.horizontalAccuracy >= 0,
+              reference.horizontalAccuracy <= maximumHorizontalAccuracy else { return false }
         let interval = location.timestamp.timeIntervalSince(reference.timestamp)
         guard interval > 0 else { return false }
         let distance = location.distance(from: reference)
@@ -491,6 +504,53 @@ enum FireVaultBreadcrumbRules {
     }
 }
 
+/// Stateful, source-agnostic live telemetry validation shared by the handset
+/// and CarPlay. Route archive sampling remains independent from this tracker.
+struct FireVaultLiveSpeedTracker {
+    private(set) var referenceLocation: CLLocation?
+    private(set) var lastMeaningfulMovementAt: Date?
+
+    mutating func ingest(
+        _ location: CLLocation,
+        now: Date = Date()
+    ) -> CLLocationSpeed? {
+        guard FireVaultBreadcrumbRules.isReliableLiveTelemetry(location, now: now) else {
+            return nil
+        }
+
+        if let referenceLocation {
+            if FireVaultBreadcrumbRules.providesLiveMovementEvidence(
+                location,
+                comparedTo: referenceLocation
+            ) {
+                lastMeaningfulMovementAt = location.timestamp
+                self.referenceLocation = location
+            } else if location.timestamp.timeIntervalSince(referenceLocation.timestamp)
+                        >= FireVaultBreadcrumbRules.maximumLiveSpeedAge {
+                // Advance the window without accepting accumulated GPS drift
+                // as proof that the vehicle is moving.
+                self.referenceLocation = location
+            }
+        } else {
+            referenceLocation = location
+            // Core Location's first fresh speed reading is usable immediately;
+            // displacement evidence will confirm or expire it within 8 seconds.
+            lastMeaningfulMovementAt = location.timestamp
+        }
+
+        return FireVaultBreadcrumbRules.resolvedLiveSpeed(
+            location: location,
+            lastMeaningfulMovementAt: lastMeaningfulMovementAt,
+            now: now
+        )
+    }
+
+    mutating func reset() {
+        referenceLocation = nil
+        lastMeaningfulMovementAt = nil
+    }
+}
+
 struct FireVaultBreadcrumbPermissionState: Equatable {
     let authorizationStatus: CLAuthorizationStatus
     let accuracyAuthorization: CLAccuracyAuthorization
@@ -582,6 +642,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     @Published private(set) var lastRecoveryAt: Date?
     @Published private(set) var lastPersistenceError: String?
     @Published private(set) var latestLocation: CLLocation?
+    @Published private(set) var liveSpeedMetersPerSecond: CLLocationSpeed?
 
     private let manager: CLLocationManager
     private let archiveURL: URL
@@ -593,6 +654,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     private var disregardedDepartureLocations: [CLLocation] = []
     private var activeStopID: UUID?
     private var previousDetectionLocation: CLLocation?
+    private var liveSpeedTracker = FireVaultLiveSpeedTracker()
     private var sessionIsPrepared = false
     private var liveActivityControlObservation: AnyCancellable?
     private var gpsPreferences: FireVaultGPSPreferences
@@ -939,6 +1001,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         for location in locations.sorted(by: { $0.timestamp < $1.timestamp }) {
             guard location.horizontalAccuracy >= 0 else { continue }
             latestLocation = location
+            liveSpeedMetersPerSecond = liveSpeedTracker.ingest(location)
             record(location)
         }
     }
@@ -1021,6 +1084,8 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         manager.stopMonitoringVisits()
         manager.allowsBackgroundLocationUpdates = false
         manager.showsBackgroundLocationIndicator = false
+        liveSpeedTracker.reset()
+        liveSpeedMetersPerSecond = nil
         isRecording = false
     }
 

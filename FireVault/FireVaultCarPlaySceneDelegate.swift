@@ -22,20 +22,19 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private lazy var breadcrumbs: FireVaultBreadcrumbStore = store.demoMode
         ? FireVaultDemoShowroom.makeBreadcrumbStore()
         : FireVaultBreadcrumbStore.shared
-    private let locationService = FireVaultLocationService()
+    private let locationService = FireVaultLocationService.shared
 
     private var nearbyTemplate: CPListTemplate?
     private var favoritesTemplate: CPListTemplate?
     private var recentsTemplate: CPListTemplate?
     private var tripLogTemplate: CPInformationTemplate?
+    private var gpsDiagnosticsTemplate: CPInformationTemplate?
     private var rootTabTemplate: CPTabBarTemplate?
     private var liveRefreshTask: Task<Void, Never>?
     private var locationObservation: AnyCancellable?
     private var tripLogLocationObservation: AnyCancellable?
     private var tripLogRecordingObservation: AnyCancellable?
     private var announcedArrivalAccountID: String?
-    private var speedReferenceLocation: CLLocation?
-    private var lastMeaningfulMovementAt: Date?
 
     private let demoLocation = CLLocation(latitude: 43.6150, longitude: -116.2023)
     private let recentAccountIDsKey = "firevault.carplay.recentAccountIDs"
@@ -69,15 +68,14 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         tripLogLocationObservation = nil
         tripLogRecordingObservation?.cancel()
         tripLogRecordingObservation = nil
-        locationService.stopLiveNearbyUpdates()
+        locationService.stopLiveNearbyUpdates(consumer: .carPlay)
         nearbyTemplate = nil
         favoritesTemplate = nil
         recentsTemplate = nil
         tripLogTemplate = nil
+        gpsDiagnosticsTemplate = nil
         rootTabTemplate = nil
         announcedArrivalAccountID = nil
-        speedReferenceLocation = nil
-        lastMeaningfulMovementAt = nil
         self.interfaceController = nil
     }
 
@@ -472,7 +470,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         let location = effectiveLocation
         let day = breadcrumbs.activeDay ?? breadcrumbs.today
 
-        let speed = store.demoMode ? "64 mph" : currentSpeedText(location)
+        let speed = store.demoMode ? "64 mph" : currentSpeedText
         let elevation = store.demoMode ? "5,284 ft" : currentElevationText(location, day: day)
         let trip = store.demoMode ? "42.6 mi" : distanceText(day)
         let stops = store.demoMode ? "2 stops" : stopSummaryText(day)
@@ -527,6 +525,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
             items: makeGPSDiagnosticItems(),
             actions: []
         )
+        gpsDiagnosticsTemplate = template
         interfaceController?.pushTemplate(template, animated: true, completion: nil)
     }
 
@@ -605,7 +604,6 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
             .compactMap { $0 }
             .sink { [weak self] location in
                 Task { @MainActor [weak self] in
-                    self?.updateMotionEvidence(with: location)
                     self?.refreshCarPlayState()
                 }
             }
@@ -614,7 +612,6 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
             .compactMap { $0 }
             .sink { [weak self] location in
                 Task { @MainActor [weak self] in
-                    self?.updateMotionEvidence(with: location)
                     self?.refreshCarPlayState()
                 }
             }
@@ -631,9 +628,12 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
     private func synchronizeLocationOwnership() {
         if breadcrumbs.isRecording {
-            locationService.stopLiveNearbyUpdates()
+            locationService.stopLiveNearbyUpdates(consumer: .carPlay)
         } else {
-            locationService.startLiveNearbyUpdates(highAccuracy: settings.gps.highAccuracy)
+            locationService.startLiveNearbyUpdates(
+                highAccuracy: settings.gps.highAccuracy,
+                consumer: .carPlay
+            )
         }
     }
 
@@ -657,6 +657,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         recentsTemplate?.updateSections(makeRecentSections())
         tripLogTemplate?.items = makeTripLogInformationItems()
         tripLogTemplate?.actions = makeTripLogActions()
+        gpsDiagnosticsTemplate?.items = makeGPSDiagnosticItems()
         tripLogTemplate?.tabImage = requiredCarPlayIcon(
             breadcrumbs.isRecording ? "record.circle.fill" : "gauge.with.dots.needle.50percent",
             color: breadcrumbs.isRecording ? .systemRed : .systemTeal
@@ -738,34 +739,12 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         recentsTemplate?.updateSections(makeRecentSections())
     }
 
-    private func currentSpeedText(_ location: CLLocation?) -> String {
-        guard let speed = FireVaultBreadcrumbRules.resolvedLiveSpeed(
-            location: location,
-            lastMeaningfulMovementAt: lastMeaningfulMovementAt
-        ) else { return "— mph" }
+    private var currentSpeedText: String {
+        let speed = breadcrumbs.isRecording
+            ? breadcrumbs.liveSpeedMetersPerSecond
+            : locationService.liveSpeedMetersPerSecond
+        guard let speed else { return "— mph" }
         return "\(Int((speed * 2.236_936).rounded())) mph"
-    }
-
-    private func updateMotionEvidence(with location: CLLocation) {
-        guard let reference = speedReferenceLocation else {
-            speedReferenceLocation = location
-            lastMeaningfulMovementAt = location.timestamp
-            return
-        }
-
-        let interval = location.timestamp.timeIntervalSince(reference.timestamp)
-        guard interval > 0 else { return }
-        if FireVaultBreadcrumbRules.providesLiveMovementEvidence(
-            location,
-            comparedTo: reference
-        ) {
-            lastMeaningfulMovementAt = location.timestamp
-            speedReferenceLocation = location
-        } else if interval >= FireVaultBreadcrumbRules.maximumLiveSpeedAge {
-            // Advance the comparison window without claiming movement. This
-            // prevents accumulated GPS drift from reviving a stale MPH value.
-            speedReferenceLocation = location
-        }
     }
 
     private func currentElevationText(_ location: CLLocation?, day: FireVaultBreadcrumbDay?) -> String {

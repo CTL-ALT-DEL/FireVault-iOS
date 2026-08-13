@@ -1109,6 +1109,128 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(speed, 8)
     }
 
+    func testLiveSpeedRejectsPoorAccuracyEvenWhenCoreLocationReportsSpeed() {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let location = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: now,
+            accuracy: 180,
+            speed: 15
+        )
+
+        XCTAssertNil(
+            FireVaultBreadcrumbRules.resolvedLiveSpeed(
+                location: location,
+                lastMeaningfulMovementAt: now,
+                now: now
+            )
+        )
+    }
+
+    func testLiveSpeedRejectsCachedLocationAfterSignalLoss() {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let location = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: timestamp,
+            speed: 12
+        )
+
+        XCTAssertNil(
+            FireVaultBreadcrumbRules.resolvedLiveSpeed(
+                location: location,
+                lastMeaningfulMovementAt: timestamp,
+                now: timestamp.addingTimeInterval(9)
+            )
+        )
+    }
+
+    func testSharedLiveSpeedTrackerExpiresFrozenSpeedAtAStop() throws {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let driving = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: timestamp,
+            speed: 10
+        )
+        let stoppedButFrozen = testLocation(
+            latitude: 43.615001,
+            longitude: -116.202,
+            timestamp: timestamp.addingTimeInterval(9),
+            speed: 10
+        )
+        var tracker = FireVaultLiveSpeedTracker()
+
+        XCTAssertEqual(
+            try XCTUnwrap(tracker.ingest(driving, now: timestamp)),
+            10
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(
+                tracker.ingest(
+                    stoppedButFrozen,
+                    now: stoppedButFrozen.timestamp
+                )
+            ),
+            0
+        )
+    }
+
+    func testSharedLiveSpeedTrackerRecoversAfterFreshMovement() throws {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let first = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: timestamp,
+            speed: 0
+        )
+        let moving = testLocation(
+            latitude: 43.615108,
+            longitude: -116.202,
+            timestamp: timestamp.addingTimeInterval(2),
+            speed: 8
+        )
+        var tracker = FireVaultLiveSpeedTracker()
+
+        _ = tracker.ingest(first, now: timestamp)
+        XCTAssertEqual(
+            try XCTUnwrap(tracker.ingest(moving, now: moving.timestamp)),
+            8
+        )
+    }
+
+    func testSharedNearbyGPSRemainsOwnedWhenEitherSceneDisconnects() {
+        var requests = FireVaultLocationService.LiveRequestRegistry()
+        requests.request(.handset, highAccuracy: false)
+        requests.request(.carPlay, highAccuracy: true)
+
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests.wantsTracking)
+        XCTAssertTrue(requests.wantsHighAccuracy)
+
+        requests.release(.handset)
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertTrue(requests.wantsTracking)
+        XCTAssertTrue(requests.wantsHighAccuracy)
+
+        requests.release(.carPlay)
+        XCTAssertEqual(requests.count, 0)
+        XCTAssertFalse(requests.wantsTracking)
+        XCTAssertFalse(requests.wantsHighAccuracy)
+    }
+
+    func testSharedNearbyGPSUsesHighestRequestedAccuracy() {
+        var requests = FireVaultLocationService.LiveRequestRegistry()
+        requests.request(.handset, highAccuracy: true)
+        requests.request(.carPlay, highAccuracy: false)
+        XCTAssertTrue(requests.wantsHighAccuracy)
+
+        requests.release(.handset)
+        XCTAssertFalse(requests.wantsHighAccuracy)
+        XCTAssertTrue(requests.wantsTracking)
+    }
+
     func testBreadcrumbDepartureRequiresConsistentEvidence() {
         let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
         let origin = CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)

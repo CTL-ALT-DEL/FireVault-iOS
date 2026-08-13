@@ -240,10 +240,33 @@ struct FireVaultCensusGeocoder {
 
 @MainActor
 final class FireVaultLocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
+    enum LiveConsumer: Hashable {
+        case handset
+        case carPlay
+    }
+
+    struct LiveRequestRegistry {
+        private var requests: [LiveConsumer: Bool] = [:]
+
+        var count: Int { requests.count }
+        var wantsTracking: Bool { !requests.isEmpty }
+        var wantsHighAccuracy: Bool { requests.values.contains(true) }
+
+        mutating func request(_ consumer: LiveConsumer, highAccuracy: Bool) {
+            requests[consumer] = highAccuracy
+        }
+
+        mutating func release(_ consumer: LiveConsumer) {
+            requests.removeValue(forKey: consumer)
+        }
+    }
+
+    static let shared = FireVaultLocationService()
     static let liveNearbyDistanceFilter: CLLocationDistance = 50
 
     @Published private(set) var coordinate: CLLocationCoordinate2D?
     @Published private(set) var latestLocation: CLLocation?
+    @Published private(set) var liveSpeedMetersPerSecond: CLLocationSpeed?
     @Published private(set) var statusText = "Tap the location button to find nearby accounts"
     @Published private(set) var authorizationStatus: CLAuthorizationStatus
     @Published private(set) var isLocating = false
@@ -252,8 +275,17 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
     @Published private(set) var mapRecenterRequestID = UUID()
 
     private let manager: CLLocationManager
-    private var wantsLiveNearbyTracking = false
+    private var liveNearbyRequests = LiveRequestRegistry()
     private var wantsDiagnosticsTracking = false
+    private var liveSpeedTracker = FireVaultLiveSpeedTracker()
+
+    private var wantsLiveNearbyTracking: Bool {
+        liveNearbyRequests.wantsTracking
+    }
+
+    private var wantsHighAccuracyNearby: Bool {
+        liveNearbyRequests.wantsHighAccuracy
+    }
 
     override init() {
         let manager = CLLocationManager()
@@ -300,20 +332,20 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         guard location.horizontalAccuracy >= 0 else { return }
         if let latestLocation, latestLocation.timestamp > location.timestamp { return }
         latestLocation = location
+        liveSpeedMetersPerSecond = nil
         coordinate = location.coordinate
         FireVaultSiriLocationCache.store(location)
         isLocating = false
         statusText = "Live from Trip Log • updated \(Date().formatted(date: .omitted, time: .shortened))"
     }
 
-    func startLiveNearbyUpdates(highAccuracy: Bool) {
-        wantsLiveNearbyTracking = true
-        manager.activityType = .automotiveNavigation
-        manager.distanceFilter = Self.liveNearbyDistanceFilter
-        manager.desiredAccuracy = highAccuracy
-            ? kCLLocationAccuracyNearestTenMeters
-            : kCLLocationAccuracyHundredMeters
-        manager.pausesLocationUpdatesAutomatically = true
+    func startLiveNearbyUpdates(
+        highAccuracy: Bool,
+        consumer: LiveConsumer = .handset
+    ) {
+        liveNearbyRequests.request(consumer, highAccuracy: highAccuracy)
+        configureLiveNearbyManager()
+        guard !wantsDiagnosticsTracking else { return }
         authorizationStatus = manager.authorizationStatus
 
         switch manager.authorizationStatus {
@@ -335,12 +367,29 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         }
     }
 
-    func stopLiveNearbyUpdates() {
-        wantsLiveNearbyTracking = false
-        guard isLiveNearbyTracking else { return }
+    private func configureLiveNearbyManager() {
+        manager.activityType = .automotiveNavigation
+        manager.distanceFilter = Self.liveNearbyDistanceFilter
+        manager.desiredAccuracy = wantsHighAccuracyNearby
+            ? kCLLocationAccuracyNearestTenMeters
+            : kCLLocationAccuracyHundredMeters
+        manager.pausesLocationUpdatesAutomatically = true
+    }
+
+    func stopLiveNearbyUpdates(consumer: LiveConsumer = .handset) {
+        liveNearbyRequests.release(consumer)
+        if wantsLiveNearbyTracking {
+            guard !wantsDiagnosticsTracking else { return }
+            configureLiveNearbyManager()
+            beginLiveNearbyUpdates()
+            return
+        }
+        guard isLiveNearbyTracking, !wantsDiagnosticsTracking else { return }
         manager.stopUpdatingLocation()
         isLiveNearbyTracking = false
         isLocating = false
+        liveSpeedTracker.reset()
+        liveSpeedMetersPerSecond = nil
         statusText = coordinate == nil
             ? "Tap the location button to find nearby accounts"
             : "Nearby live updates paused"
@@ -370,14 +419,17 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         }
     }
 
-    func stopDiagnosticsUpdates() {
+    func stopDiagnosticsUpdates(resumeNearby: Bool = true) {
         wantsDiagnosticsTracking = false
         isDiagnosticsTracking = false
-        if wantsLiveNearbyTracking {
+        if resumeNearby, wantsLiveNearbyTracking {
+            configureLiveNearbyManager()
             beginLiveNearbyUpdates()
         } else {
             manager.stopUpdatingLocation()
             isLocating = false
+            liveSpeedTracker.reset()
+            liveSpeedMetersPerSecond = nil
             statusText = coordinate == nil
                 ? "Tap the location button to find nearby accounts"
                 : "GPS diagnostics stopped"
@@ -425,6 +477,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         }
 
         latestLocation = location
+        liveSpeedMetersPerSecond = liveSpeedTracker.ingest(location)
         coordinate = location.coordinate
         FireVaultSiriLocationCache.store(location)
         isLocating = false
@@ -445,7 +498,9 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
     }
 
     private func beginLiveNearbyUpdates() {
-        guard wantsLiveNearbyTracking, !isLiveNearbyTracking else { return }
+        guard wantsLiveNearbyTracking else { return }
+        configureLiveNearbyManager()
+        guard !isLiveNearbyTracking else { return }
         isLocating = true
         isLiveNearbyTracking = true
         statusText = coordinate == nil ? "Starting live Nearby…" : "Nearby updating live"
@@ -454,6 +509,9 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
 
     private func beginDiagnosticsUpdates() {
         guard wantsDiagnosticsTracking, !isDiagnosticsTracking else { return }
+        manager.activityType = .other
+        manager.distanceFilter = kCLDistanceFilterNone
+        manager.pausesLocationUpdatesAutomatically = false
         isLocating = true
         isDiagnosticsTracking = true
         isLiveNearbyTracking = false
