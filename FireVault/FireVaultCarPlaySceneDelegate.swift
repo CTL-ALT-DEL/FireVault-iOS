@@ -237,7 +237,11 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
                 location: mapItem,
                 title: account.name,
                 subtitle: "\(identifier) • \(distance)",
-                summary: "\(identifier) • \(account.category)",
+                // Keep the Nearby list to one compact detail line. CarPlay
+                // renders both subtitle and summary beneath the title, so an
+                // additional summary duplicates the account information and
+                // creates an unwanted third line.
+                summary: nil,
                 detailTitle: account.name,
                 detailSubtitle: account.address,
                 detailSummary: "\(distance) • \(account.category)",
