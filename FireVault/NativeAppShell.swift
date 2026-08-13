@@ -523,7 +523,7 @@ private struct NativeNearbyView: View {
                         Text("TRIP LOG")
                             .font(.caption2.bold())
                             .tracking(1.05)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(NativeShellPalette.red)
                         Text(tripLogStateText)
                             .font(.subheadline.bold())
                             .foregroundStyle(tripLogStatusTint)
@@ -531,7 +531,7 @@ private struct NativeNearbyView: View {
 
                     Image(systemName: showsTripLogControls ? "chevron.up" : "chevron.down")
                         .font(.caption2.bold())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(NativeShellPalette.blue)
                 }
                 .padding(.leading, 9)
                 .padding(.trailing, 7)
@@ -549,28 +549,26 @@ private struct NativeNearbyView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(height: 44)
-        .background(NativeShellPalette.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(
+            LinearGradient(
+                colors: [NativeShellPalette.tripLogLeading, NativeShellPalette.tripLogTrailing],
+                startPoint: .leading,
+                endPoint: .trailing
+            ),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(.black.opacity(0.58), lineWidth: 3)
-                .blur(radius: 1.25)
-                .offset(y: 1.6)
-                .mask(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .stroke(
+                    LinearGradient(
+                        colors: [NativeShellPalette.red.opacity(0.52), NativeShellPalette.blue.opacity(0.42)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ),
+                    lineWidth: 1
+                )
         }
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(.black.opacity(0.24), lineWidth: 1.5)
-                .blur(radius: 2.2)
-                .padding(2)
-                .mask(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(.white.opacity(0.32), lineWidth: 1)
-                .offset(y: 1.5)
-                .mask(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .shadow(color: .white.opacity(0.18), radius: 1, y: 1)
+        .shadow(color: .black.opacity(0.18), radius: 7, y: 3)
     }
 
     private var tripLogDetailMenu: some View {
@@ -4038,6 +4036,14 @@ enum NativeShellPalette {
     static let purple = adaptive(
         light: UIColor(red: 0.42, green: 0.23, blue: 0.68, alpha: 1),
         dark: UIColor(red: 0.68, green: 0.48, blue: 1.0, alpha: 1)
+    )
+    static let tripLogLeading = adaptive(
+        light: UIColor(red: 0.985, green: 0.925, blue: 0.900, alpha: 1),
+        dark: UIColor(red: 0.130, green: 0.068, blue: 0.082, alpha: 1)
+    )
+    static let tripLogTrailing = adaptive(
+        light: UIColor(red: 0.900, green: 0.945, blue: 0.985, alpha: 1),
+        dark: UIColor(red: 0.050, green: 0.105, blue: 0.155, alpha: 1)
     )
     static let navigationBackground = adaptive(
         light: UIColor(red: 0.925, green: 0.894, blue: 0.835, alpha: 1),

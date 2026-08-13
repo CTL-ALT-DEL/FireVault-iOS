@@ -376,7 +376,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                 }
                 .frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("TRIP LOG").font(.caption2.bold()).tracking(1).foregroundStyle(.secondary)
+                    Text("TRIP LOG").font(.caption2.bold()).tracking(1).foregroundStyle(NativeShellPalette.red)
                     Text(tripLogStatusTitle).font(.subheadline.bold()).foregroundStyle(tripLogStatusTint)
                 }
                 Divider().frame(height: 30)
@@ -385,17 +385,30 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                 tripMetric("ELAPSED", value: tripElapsed, symbol: "clock")
                 Spacer(minLength: 8)
                 Image(systemName: showsTripLogControls ? "chevron.up" : "chevron.down")
-                    .font(.caption.bold()).foregroundStyle(.secondary)
+                    .font(.caption.bold()).foregroundStyle(NativeShellPalette.blue)
             }
             .padding(.horizontal, 14)
             .frame(height: 56)
-            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .background(
+                LinearGradient(
+                    colors: [NativeShellPalette.tripLogLeading, NativeShellPalette.tripLogTrailing],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                ),
+                in: RoundedRectangle(cornerRadius: 17, style: .continuous)
+            )
             .overlay {
                 RoundedRectangle(cornerRadius: 17, style: .continuous)
-                    .stroke(.black.opacity(0.34), lineWidth: 2)
-                    .blur(radius: 0.8)
-                    .mask(RoundedRectangle(cornerRadius: 17, style: .continuous))
+                    .stroke(
+                        LinearGradient(
+                            colors: [NativeShellPalette.red.opacity(0.52), NativeShellPalette.blue.opacity(0.42)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        lineWidth: 1
+                    )
             }
+            .shadow(color: .black.opacity(0.18), radius: 7, y: 3)
             .contentShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
         }
         .buttonStyle(.plain)

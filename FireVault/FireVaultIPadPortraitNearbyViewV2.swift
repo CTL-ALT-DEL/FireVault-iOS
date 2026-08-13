@@ -216,7 +216,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                     Text("TRIP LOG")
                         .font(.caption2.bold())
                         .tracking(1)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(NativeShellPalette.red)
                     Text(tripLogStatusTitle)
                         .font(.subheadline.bold())
                         .foregroundStyle(tripLogStatusTint)
@@ -230,17 +230,30 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
 
                 Image(systemName: showsTripLogControls ? "chevron.up" : "chevron.down")
                     .font(.caption.bold())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(NativeShellPalette.blue)
             }
             .padding(.horizontal, 15)
             .frame(height: 58)
-            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(
+                LinearGradient(
+                    colors: [NativeShellPalette.tripLogLeading, NativeShellPalette.tripLogTrailing],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                ),
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(.black.opacity(0.36), lineWidth: 2)
-                    .blur(radius: 0.8)
-                    .mask(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .stroke(
+                        LinearGradient(
+                            colors: [NativeShellPalette.red.opacity(0.52), NativeShellPalette.blue.opacity(0.42)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        lineWidth: 1
+                    )
             }
+            .shadow(color: .black.opacity(0.18), radius: 7, y: 3)
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
