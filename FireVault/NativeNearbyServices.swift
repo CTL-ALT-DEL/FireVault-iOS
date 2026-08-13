@@ -294,6 +294,18 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         requestCurrentLocation(highAccuracy: highAccuracy)
     }
 
+    /// Reuses a location produced by the active Trip Log recorder so Nearby
+    /// does not keep a second CLLocationManager running at the same time.
+    func acceptTripLogLocation(_ location: CLLocation) {
+        guard location.horizontalAccuracy >= 0 else { return }
+        if let latestLocation, latestLocation.timestamp > location.timestamp { return }
+        latestLocation = location
+        coordinate = location.coordinate
+        FireVaultSiriLocationCache.store(location)
+        isLocating = false
+        statusText = "Live from Trip Log • updated \(Date().formatted(date: .omitted, time: .shortened))"
+    }
+
     func startLiveNearbyUpdates(highAccuracy: Bool) {
         wantsLiveNearbyTracking = true
         manager.activityType = .automotiveNavigation
@@ -433,7 +445,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
     }
 
     private func beginLiveNearbyUpdates() {
-        guard wantsLiveNearbyTracking else { return }
+        guard wantsLiveNearbyTracking, !isLiveNearbyTracking else { return }
         isLocating = true
         isLiveNearbyTracking = true
         statusText = coordinate == nil ? "Starting live Nearby…" : "Nearby updating live"
@@ -441,7 +453,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
     }
 
     private func beginDiagnosticsUpdates() {
-        guard wantsDiagnosticsTracking else { return }
+        guard wantsDiagnosticsTracking, !isDiagnosticsTracking else { return }
         isLocating = true
         isDiagnosticsTracking = true
         isLiveNearbyTracking = false

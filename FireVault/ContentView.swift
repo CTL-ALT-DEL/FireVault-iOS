@@ -21,6 +21,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showsSplash = true
+    @State private var widgetSnapshotTask: Task<Void, Never>?
 
     init() {
         _demoBreadcrumbs = State(initialValue: FireVaultDemoShowroom.makeBreadcrumbStore())
@@ -73,6 +74,7 @@ struct ContentView: View {
             switch newPhase {
             case .active:
                 prepareActiveVault()
+                resumeNearbyLocationIfNeeded()
                 privacyLock.lockIfNeeded(settings.preferences.privacy)
                 if isPrivacyLocked {
                     privacyLock.authenticate()
@@ -81,6 +83,8 @@ struct ContentView: View {
                     handlePendingWidgetDeepLink()
                 }
             case .background:
+                locationService.stopLiveNearbyUpdates()
+                updateWidgetSnapshot()
                 privacyLock.enteredBackground()
             default:
                 break
@@ -107,16 +111,16 @@ struct ContentView: View {
         }
         .onChange(of: store.demoMode) { _, _ in
             prepareActiveVault()
-            updateWidgetSnapshot()
+            scheduleWidgetSnapshotUpdate()
         }
         .onChange(of: store.selectedAccountID) { _, _ in
-            updateWidgetSnapshot()
+            scheduleWidgetSnapshotUpdate()
         }
         .onChange(of: activeBreadcrumbs.days) { _, _ in
-            updateWidgetSnapshot()
+            scheduleWidgetSnapshotUpdate()
         }
         .onChange(of: activeBreadcrumbs.isRecording) { _, _ in
-            updateWidgetSnapshot()
+            scheduleWidgetSnapshotUpdate()
         }
         .onChange(of: store.accounts.count) { _, count in
             guard store.demoMode, count <= 4 else { return }
@@ -215,6 +219,15 @@ struct ContentView: View {
         settings.preferences.privacy.enabled && !privacyLock.isUnlocked
     }
 
+    private func resumeNearbyLocationIfNeeded() {
+        guard !store.demoMode,
+              store.selectedTab == .nearby,
+              !activeBreadcrumbs.isRecording else { return }
+        locationService.startLiveNearbyUpdates(
+            highAccuracy: settings.gps.highAccuracy
+        )
+    }
+
     private func handlePendingQuickAction() {
         guard !isPrivacyLocked, let action = quickActions.consume() else { return }
 
@@ -292,6 +305,15 @@ struct ContentView: View {
                 accountCategory: account?.category ?? existing.accountCategory
             )
         )
+    }
+
+    private func scheduleWidgetSnapshotUpdate() {
+        widgetSnapshotTask?.cancel()
+        widgetSnapshotTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            updateWidgetSnapshot()
+        }
     }
 }
 

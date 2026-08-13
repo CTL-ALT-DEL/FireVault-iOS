@@ -439,13 +439,14 @@ private struct NativeNearbyView: View {
             if payload.demoMode {
                 cameraPosition = overviewCameraPosition
             } else {
+                if let tripLocation = breadcrumbs.latestLocation {
+                    locationService.acceptTripLogLocation(tripLocation)
+                }
                 if locationService.coordinate != nil {
                     centerMapOnUser()
                     hasCenteredOnInitialLiveLocation = true
                 }
-                locationService.startLiveNearbyUpdates(
-                    highAccuracy: settings.gps.highAccuracy
-                )
+                synchronizeNearbyLocationOwnership()
             }
         }
         .task {
@@ -463,6 +464,14 @@ private struct NativeNearbyView: View {
         .onChange(of: locationService.mapRecenterRequestID) { _, _ in
             guard !payload.demoMode else { return }
             resetNearby()
+        }
+        .onChange(of: breadcrumbs.isRecording) { _, _ in
+            guard !payload.demoMode else { return }
+            synchronizeNearbyLocationOwnership()
+        }
+        .onReceive(breadcrumbs.$latestLocation.compactMap { $0 }) { location in
+            guard !payload.demoMode, breadcrumbs.isRecording else { return }
+            locationService.acceptTripLogLocation(location)
         }
         .onChange(of: locationService.coordinate?.latitude) { _, latitude in
             guard !payload.demoMode,
@@ -493,6 +502,19 @@ private struct NativeNearbyView: View {
         }
         .sheet(isPresented: $showsTripLogDetailPicker) {
             tripLogDetailPicker
+        }
+    }
+
+    private func synchronizeNearbyLocationOwnership() {
+        if breadcrumbs.isRecording {
+            locationService.stopLiveNearbyUpdates()
+            if let location = breadcrumbs.latestLocation {
+                locationService.acceptTripLogLocation(location)
+            }
+        } else {
+            locationService.startLiveNearbyUpdates(
+                highAccuracy: settings.gps.highAccuracy
+            )
         }
     }
 
