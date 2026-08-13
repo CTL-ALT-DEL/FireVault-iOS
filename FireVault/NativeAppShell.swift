@@ -1774,17 +1774,21 @@ struct NativePhotoView: View {
                 VStack(spacing: 14) {
                     destinationAccountCard
 
-                    if horizontalSizeClass == .regular {
+                    if horizontalSizeClass == .regular, selectedImage != nil {
                         HStack(alignment: .top, spacing: 18) {
                             previewColumn
                                 .frame(maxWidth: .infinity)
 
-                            ipadCapturePanel
-                                .frame(width: 340)
+                            captureWorkspacePanel
+                                .frame(width: 380)
                         }
                     } else {
-                        previewColumn
-                        captureControls
+                        if selectedImage != nil {
+                            previewColumn
+                        }
+
+                        captureWorkspacePanel
+                            .frame(maxWidth: 720)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -1890,53 +1894,76 @@ struct NativePhotoView: View {
                 }
                 .font(.caption.bold())
                 .padding(.horizontal, 4)
-            } else {
-                captureReadyCard
-                    .aspectRatio(1, contentMode: .fit)
-                    .frame(maxHeight: 650)
             }
         }
     }
 
-    private var ipadCapturePanel: some View {
+    private var captureWorkspacePanel: some View {
         NativeShellCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Label("FIELD CAPTURE", systemImage: "camera.aperture")
-                    .font(.caption.bold())
-                    .tracking(1.1)
-                    .foregroundStyle(NativeShellPalette.blue)
+            VStack(alignment: .leading, spacing: 11) {
+                HStack(spacing: 8) {
+                    Label("CAPTURE TOOLS", systemImage: "camera.aperture")
+                        .font(.caption.bold())
+                        .tracking(1.0)
+                        .foregroundStyle(.primary)
 
-                Text("Capture a field photo, scan a document, or import an existing image into the selected account.")
+                    Spacer(minLength: 6)
+
+                    Text(destinationAccount == nil ? "CHOOSE ACCOUNT" : "READY")
+                        .font(.caption2.bold())
+                        .tracking(0.5)
+                        .foregroundStyle(destinationAccount == nil ? NativeShellPalette.amber : NativeShellPalette.green)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            (destinationAccount == nil ? NativeShellPalette.amber : NativeShellPalette.green).opacity(0.12),
+                            in: Capsule()
+                        )
+                }
+
+                Text("Add field media directly to the selected account.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                Divider()
+                captureActionRow(
+                    title: "Take Photo",
+                    subtitle: "Capture a field photo with your saved overlay",
+                    symbol: "camera.fill",
+                    tint: NativeShellPalette.red,
+                    intent: .camera
+                )
+                .accessibilityIdentifier("native-take-photo")
 
-                VStack(spacing: 10) {
-                    captureButton(
-                        title: "PHOTO",
-                        subtitle: "Camera",
-                        symbol: "camera.fill",
-                        tint: NativeShellPalette.red,
-                        intent: .camera
-                    )
-                    captureButton(
-                        title: "SCAN",
-                        subtitle: "Document",
-                        symbol: "doc.viewfinder",
-                        tint: NativeShellPalette.blue,
-                        intent: .scanner
-                    )
-                    captureButton(
-                        title: "IMPORT",
-                        subtitle: "Photo Library",
-                        symbol: "photo.on.rectangle",
-                        tint: NativeShellPalette.green,
-                        intent: .photoLibrary
-                    )
-                }
+                captureActionRow(
+                    title: "Scan Document",
+                    subtitle: "Create a clean multi-page account document",
+                    symbol: "doc.viewfinder",
+                    tint: NativeShellPalette.blue,
+                    intent: .scanner
+                )
+                .accessibilityIdentifier("native-scan-document")
+
+                captureActionRow(
+                    title: "Choose Photo",
+                    subtitle: "Import an existing image from Photo Library",
+                    symbol: "photo.on.rectangle",
+                    tint: NativeShellPalette.green,
+                    intent: .photoLibrary
+                )
+                .accessibilityIdentifier("native-choose-photo")
+
+                Label(
+                    destinationAccount == nil
+                        ? "You will choose an account before capture begins."
+                        : "New media will be linked to \(destinationAccount?.name ?? "the selected account").",
+                    systemImage: destinationAccount == nil ? "building.2" : "checkmark.shield.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
             }
         }
+        .accessibilityIdentifier("native-capture-workspace")
     }
 
     private func imagePreview(_ image: UIImage) -> some View {
@@ -2044,38 +2071,7 @@ struct NativePhotoView: View {
         .accessibilityIdentifier("native-scanned-pages")
     }
 
-    private var captureControls: some View {
-        HStack(spacing: 10) {
-            captureButton(
-                title: "PHOTO",
-                subtitle: "Camera",
-                symbol: "camera.fill",
-                tint: NativeShellPalette.red,
-                intent: .camera
-            )
-            .accessibilityIdentifier("native-take-photo")
-
-            captureButton(
-                title: "SCAN",
-                subtitle: "Document",
-                symbol: "doc.viewfinder",
-                tint: NativeShellPalette.blue,
-                intent: .scanner
-            )
-            .accessibilityIdentifier("native-scan-document")
-
-            captureButton(
-                title: "IMPORT",
-                subtitle: "Library",
-                symbol: "photo.on.rectangle",
-                tint: NativeShellPalette.green,
-                intent: .photoLibrary
-            )
-            .accessibilityIdentifier("native-choose-photo")
-        }
-    }
-
-    private func captureButton(
+    private func captureActionRow(
         title: String,
         subtitle: String,
         symbol: String,
@@ -2085,82 +2081,39 @@ struct NativePhotoView: View {
         Button {
             beginCapture(intent)
         } label: {
-            VStack(spacing: 7) {
+            HStack(spacing: 12) {
                 Image(systemName: symbol)
-                    .font(.system(size: 27, weight: .bold))
-                VStack(spacing: 1) {
+                    .font(.system(size: 21, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 46, height: 46)
+                    .background(tint, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.caption.bold())
-                        .tracking(0.7)
+                        .font(.body.bold())
+                        .foregroundStyle(.primary)
                     Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.72))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
+
+                Spacer(minLength: 6)
+
+                Image(systemName: "chevron.right")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
             }
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 94)
-            .background(
-                LinearGradient(
-                    colors: [tint.opacity(0.92), tint.opacity(0.55)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-            )
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
+            .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(.white.opacity(0.16), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(tint.opacity(0.2), lineWidth: 1)
             }
         }
         .buttonStyle(.plain)
-        .shadow(color: tint.opacity(0.18), radius: 8, y: 4)
-    }
-
-    private var captureReadyCard: some View {
-        ZStack {
-            LinearGradient(
-                colors: [NativeShellPalette.blue.opacity(0.14), NativeShellPalette.surface],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(NativeShellPalette.blue.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [7, 7]))
-                .padding(16)
-
-            VStack(spacing: 14) {
-                Image(systemName: "camera.aperture")
-                    .font(.system(size: 44, weight: .semibold))
-                    .foregroundStyle(NativeShellPalette.blue)
-                    .frame(width: 82, height: 82)
-                    .background(NativeShellPalette.blue.opacity(0.12), in: Circle())
-                    .overlay {
-                        Circle().stroke(NativeShellPalette.blue.opacity(0.24), lineWidth: 1)
-                    }
-
-                VStack(spacing: 5) {
-                    Text("FIELD CAPTURE")
-                        .font(.system(size: 21, weight: .bold, design: .rounded))
-                        .tracking(1.1)
-                    Text("Photo • Scan • Import")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-
-                HStack(spacing: 8) {
-                    Label("Account linked", systemImage: "building.2.fill")
-                    Label("Overlay ready", systemImage: "camera.filters")
-                }
-                .font(.caption2.bold())
-                .foregroundStyle(.secondary)
-            }
-            .padding(28)
-        }
-        .frame(maxWidth: .infinity)
-        .nativeSurfaceCard(cornerRadius: NativeShellMetrics.mapRadius)
-        .accessibilityElement(children: .combine)
     }
 
     private func beginCapture(_ intent: CaptureIntent) {
