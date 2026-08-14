@@ -56,41 +56,10 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.2), value: store.selectedAccountID)
         .preferredColorScheme(preferredColorScheme)
         .task {
-            prepareActiveVault()
-            await settings.refreshRemoteFeatureControls()
-            reconcileSelectedTabWithFeatureControls()
-            store.configureCategoryRules(settings.preferences.categoryRules ?? [])
-            privacyLock.configure(enabled: settings.preferences.privacy.enabled)
-            handlePendingQuickAction()
-            handlePendingWidgetDeepLink()
-            updateWidgetSnapshot()
-            guard showsSplash else { return }
-            try? await Task.sleep(for: .seconds(reduceMotion ? 1.15 : 3.65))
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: reduceMotion ? 0.18 : 0.5)) {
-                showsSplash = false
-            }
+            await performInitialSetup()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            switch newPhase {
-            case .active:
-                prepareActiveVault()
-                Task {
-                    await settings.refreshRemoteFeatureControls()
-                    reconcileSelectedTabWithFeatureControls()
-                }
-                privacyLock.lockIfNeeded(settings.preferences.privacy)
-                if isPrivacyLocked {
-                    privacyLock.authenticate()
-                } else {
-                    handlePendingQuickAction()
-                    handlePendingWidgetDeepLink()
-                }
-            case .background:
-                privacyLock.enteredBackground()
-            default:
-                break
-            }
+            handleScenePhase(newPhase)
         }
         .onChange(of: privacyLock.isUnlocked) { _, unlocked in
             if unlocked {
@@ -218,6 +187,49 @@ struct ContentView: View {
             FireVaultDemoShowroom.installAccountsIfNeeded(into: store)
         }
         activeBreadcrumbs.restoreActiveWorkday(accounts: store.accounts)
+    }
+
+    private func performInitialSetup() async {
+        prepareActiveVault()
+        await refreshAndReconcileFeatureControls()
+        store.configureCategoryRules(settings.preferences.categoryRules ?? [])
+        privacyLock.configure(enabled: settings.preferences.privacy.enabled)
+        handlePendingQuickAction()
+        handlePendingWidgetDeepLink()
+        updateWidgetSnapshot()
+
+        guard showsSplash else { return }
+        let splashDelay: Duration = .seconds(reduceMotion ? 1.15 : 3.65)
+        try? await Task.sleep(for: splashDelay)
+        guard !Task.isCancelled else { return }
+        let animationDuration: Double = reduceMotion ? 0.18 : 0.5
+        withAnimation(.easeInOut(duration: animationDuration)) {
+            showsSplash = false
+        }
+    }
+
+    private func handleScenePhase(_ newPhase: ScenePhase) {
+        switch newPhase {
+        case .active:
+            prepareActiveVault()
+            Task { await refreshAndReconcileFeatureControls() }
+            privacyLock.lockIfNeeded(settings.preferences.privacy)
+            if isPrivacyLocked {
+                privacyLock.authenticate()
+            } else {
+                handlePendingQuickAction()
+                handlePendingWidgetDeepLink()
+            }
+        case .background:
+            privacyLock.enteredBackground()
+        default:
+            break
+        }
+    }
+
+    private func refreshAndReconcileFeatureControls() async {
+        await settings.refreshRemoteFeatureControls()
+        reconcileSelectedTabWithFeatureControls()
     }
 
     private func reconcileSelectedTabWithFeatureControls() {
