@@ -7,6 +7,8 @@
 
 import Foundation
 import Combine
+import Supabase
+import PostgREST
 
 enum FireVaultOverlayField: String, CaseIterable, Identifiable {
     case site, address, accountID, category, technician, timestamp
