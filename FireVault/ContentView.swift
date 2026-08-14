@@ -57,6 +57,8 @@ struct ContentView: View {
         .preferredColorScheme(preferredColorScheme)
         .task {
             prepareActiveVault()
+            await settings.refreshRemoteFeatureControls()
+            reconcileSelectedTabWithFeatureControls()
             store.configureCategoryRules(settings.preferences.categoryRules ?? [])
             privacyLock.configure(enabled: settings.preferences.privacy.enabled)
             handlePendingQuickAction()
@@ -73,6 +75,10 @@ struct ContentView: View {
             switch newPhase {
             case .active:
                 prepareActiveVault()
+                Task {
+                    await settings.refreshRemoteFeatureControls()
+                    reconcileSelectedTabWithFeatureControls()
+                }
                 privacyLock.lockIfNeeded(settings.preferences.privacy)
                 if isPrivacyLocked {
                     privacyLock.authenticate()
@@ -104,6 +110,9 @@ struct ContentView: View {
         }
         .onChange(of: settings.preferences.categoryRules) { _, rules in
             store.configureCategoryRules(rules ?? [])
+        }
+        .onChange(of: settings.remoteFeatureVisibility) { _, _ in
+            reconcileSelectedTabWithFeatureControls()
         }
         .onChange(of: store.demoMode) { _, _ in
             prepareActiveVault()
@@ -209,6 +218,20 @@ struct ContentView: View {
             FireVaultDemoShowroom.installAccountsIfNeeded(into: store)
         }
         activeBreadcrumbs.restoreActiveWorkday(accounts: store.accounts)
+    }
+
+    private func reconcileSelectedTabWithFeatureControls() {
+        let featureID: String?
+        switch store.selectedTab {
+        case .nearby: featureID = "tab.nearby"
+        case .accounts: featureID = "tab.accounts"
+        case .trip: featureID = "tab.trip"
+        case .photo: featureID = "tab.photo"
+        case .settings: featureID = nil
+        }
+        if let featureID, !settings.isFeatureVisible(featureID) {
+            store.closeAccount(to: .settings)
+        }
     }
 
     private var isPrivacyLocked: Bool {
