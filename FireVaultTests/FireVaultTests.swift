@@ -43,6 +43,8 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(components?.host, "www.google.com")
         XCTAssertEqual(components?.queryItems?.first(where: { $0.name == "api" })?.value, "1")
         XCTAssertEqual(components?.queryItems?.first(where: { $0.name == "query" })?.value, "8FVC9G8F+6X")
+        XCTAssertTrue(url?.absoluteString.contains("8FVC9G8F%2B6X") == true)
+        XCTAssertFalse(url?.absoluteString.contains("8FVC9G8F+6X") == true)
     }
 
     func testStoreRepairsLegacyStalePlusCodesWhenAccountsLoad() throws {

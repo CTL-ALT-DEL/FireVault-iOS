@@ -96,11 +96,11 @@ enum FireVaultPlusCode {
 
     static func googleMapsURL(for code: String) -> URL? {
         guard let code = normalizedFullCode(code) else { return nil }
+        // A literal "+" in a URL query is commonly decoded as a space. Google
+        // Maps requires the Plus Code separator itself, so preserve it as %2B.
         var components = URLComponents(string: "https://www.google.com/maps/search/")
-        components?.queryItems = [
-            URLQueryItem(name: "api", value: "1"),
-            URLQueryItem(name: "query", value: code)
-        ]
+        let encodedCode = code.replacingOccurrences(of: "+", with: "%2B")
+        components?.percentEncodedQuery = "api=1&query=\(encodedCode)"
         return components?.url
     }
 }
