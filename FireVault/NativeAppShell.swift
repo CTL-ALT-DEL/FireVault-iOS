@@ -344,6 +344,7 @@ private struct NativeNearbyView: View {
     @State private var radiusCollapseTask: Task<Void, Never>?
     @State private var showsSelectedAddress = false
     @State private var selectedAddressTask: Task<Void, Never>?
+    @State private var mapCameraRestoreTask: Task<Void, Never>?
     @State private var showsTripLogControls = false
     @State private var tripLogControlsCollapseTask: Task<Void, Never>?
     @State private var tripLogDetailIndex = 0
@@ -453,6 +454,7 @@ private struct NativeNearbyView: View {
             radiusCollapseTask?.cancel()
             tripLogControlsCollapseTask?.cancel()
             selectedAddressTask?.cancel()
+            mapCameraRestoreTask?.cancel()
             guard !payload.demoMode else { return }
             locationService.stopLiveNearbyUpdates(consumer: .handset)
         }
@@ -1187,7 +1189,7 @@ private struct NativeNearbyView: View {
 
     private var mapOptionsMenu: some View {
         Menu {
-            Picker("Map Layer", selection: $mapLayer) {
+            Picker("Map Layer", selection: mapLayerBinding) {
                 ForEach(FireVaultMapLayer.allCases) { layer in
                     Label(layer.title, systemImage: layer.symbol)
                         .tag(layer)
@@ -1212,6 +1214,17 @@ private struct NativeNearbyView: View {
         Binding(
             get: { settings.gps.nearbyRadiusMiles },
             set: updateNearbyRadius
+        )
+    }
+
+    private var mapLayerBinding: Binding<FireVaultMapLayer> {
+        Binding(
+            get: { mapLayer },
+            set: { layer in
+                guard layer != mapLayer else { return }
+                mapLayer = layer
+                restoreCameraAfterLayerChange()
+            }
         )
     }
 
@@ -1599,7 +1612,56 @@ private struct NativeNearbyView: View {
             withAnimation(.easeOut(duration: 0.24)) {
                 showsSelectedAddress = false
             }
+            guard let selected,
+                  let coordinate = selected.account.coordinate else { return }
+            mapLayer = .satellite
+            mapIs3D = true
+            withAnimation(.easeInOut(duration: 0.55)) {
+                cameraPosition = satelliteAccountCameraPosition(coordinate)
+            }
+            restoreCameraAfterLayerChange(
+                preferredPosition: satelliteAccountCameraPosition(coordinate)
+            )
         }
+    }
+
+    private func restoreCameraAfterLayerChange(
+        preferredPosition: MapCameraPosition? = nil
+    ) {
+        mapCameraRestoreTask?.cancel()
+        mapCameraRestoreTask = Task { @MainActor in
+            // A map-style swap rebuilds MapKit's renderer. Reapply the camera
+            // after that swap finishes instead of allowing .automatic to show
+            // the default nationwide viewport.
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.32)) {
+                if let preferredPosition {
+                    cameraPosition = preferredPosition
+                } else if let selected,
+                          let coordinate = selected.account.coordinate {
+                    cameraPosition = accountCameraPosition(coordinate)
+                } else if !payload.demoMode,
+                          let coordinate = locationService.coordinate {
+                    cameraPosition = userCameraPosition(coordinate)
+                } else {
+                    cameraPosition = overviewCameraPosition
+                }
+            }
+        }
+    }
+
+    private func satelliteAccountCameraPosition(
+        _ coordinate: CLLocationCoordinate2D
+    ) -> MapCameraPosition {
+        .camera(
+            MapCamera(
+                centerCoordinate: coordinate,
+                distance: 650,
+                heading: 0,
+                pitch: 60
+            )
+        )
     }
 }
 
