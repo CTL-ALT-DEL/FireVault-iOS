@@ -448,6 +448,11 @@ struct FireVaultDeveloperPreferences: Codable, Equatable {
     }
 }
 
+private struct FireVaultRemoteFeatureFlag: Decodable {
+    let key: String
+    let enabled: Bool
+}
+
 struct FireVaultNativePreferences: Codable, Equatable {
     var technician = FireVaultTechnicianPreferences()
     var overlay = FireVaultOverlayPreferences()
@@ -488,11 +493,15 @@ final class FireVaultNativeSettingsStore: ObservableObject {
         static let settingsView = "firevault.native.settings.view.v1"
         static let developer = "firevault.native.settings.developer.v1"
         static let appearance = "firevault.native.settings.appearance.v1"
+        static let remoteFeatures = "firevault.remote.features.v1"
+        static let remoteFeaturesUpdatedAt = "firevault.remote.features.updated-at.v1"
     }
     @Published private(set) var preferences: FireVaultNativePreferences
     @Published private(set) var settingsView: FireVaultSettingsViewPreferences
     @Published private(set) var developer: FireVaultDeveloperPreferences
     @Published private(set) var appearance: FireVaultAppearanceMode
+    @Published private(set) var remoteFeatureVisibility: [String: Bool]
+    @Published private(set) var remoteFeaturesUpdatedAt: Date?
     var gps: FireVaultGPSPreferences { preferences.gps }
     private let defaults: UserDefaults
     private let encoder = JSONEncoder()
@@ -512,6 +521,13 @@ final class FireVaultNativeSettingsStore: ObservableObject {
         } else {
             developer = FireVaultDeveloperPreferences()
         }
+        if let data = defaults.data(forKey: Key.remoteFeatures),
+           let saved = try? decoder.decode([String: Bool].self, from: data) {
+            remoteFeatureVisibility = saved
+        } else {
+            remoteFeatureVisibility = [:]
+        }
+        remoteFeaturesUpdatedAt = defaults.object(forKey: Key.remoteFeaturesUpdatedAt) as? Date
         appearance = defaults.string(forKey: Key.appearance)
             .flatMap(FireVaultAppearanceMode.init(rawValue:)) ?? .dark
         if let data = defaults.data(forKey: Key.preferences), let saved = try? decoder.decode(FireVaultNativePreferences.self, from: data) {
@@ -544,7 +560,28 @@ final class FireVaultNativeSettingsStore: ObservableObject {
     }
 
     func isFeatureVisible(_ id: String) -> Bool {
-        settingsView.mode != .simple || developer.isEnabled(id)
+        guard remoteFeatureVisibility[id] ?? true else { return false }
+        return settingsView.mode != .simple || developer.isEnabled(id)
+    }
+
+    func refreshRemoteFeatureControls() async {
+        do {
+            let response: [FireVaultRemoteFeatureFlag] = try await SupabaseManager.client
+                .from("feature_flags")
+                .select("key,enabled")
+                .execute()
+                .value
+            let knownIDs = Set(FireVaultDeveloperFeatureCatalog.features.map(\.id))
+            remoteFeatureVisibility = response.reduce(into: [:]) { result, flag in
+                guard knownIDs.contains(flag.key) else { return }
+                result[flag.key] = flag.enabled
+            }
+            remoteFeaturesUpdatedAt = Date()
+            persistRemoteFeatures()
+        } catch {
+            // Keep the last successful configuration. With no cache, every feature
+            // remains enabled so an outage cannot strand a technician in the field.
+        }
     }
 
     func setSimpleFeature(_ id: String, enabled: Bool) {
@@ -560,6 +597,12 @@ final class FireVaultNativeSettingsStore: ObservableObject {
     private func persistDeveloper() {
         guard let data = try? encoder.encode(developer) else { return }
         defaults.set(data, forKey: Key.developer)
+    }
+
+    private func persistRemoteFeatures() {
+        guard let data = try? encoder.encode(remoteFeatureVisibility) else { return }
+        defaults.set(data, forKey: Key.remoteFeatures)
+        defaults.set(remoteFeaturesUpdatedAt, forKey: Key.remoteFeaturesUpdatedAt)
     }
 
     private func persist() {
