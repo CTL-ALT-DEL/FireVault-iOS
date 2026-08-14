@@ -250,7 +250,8 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                         plusCode: draft.plusCode,
                         latitude: draft.latitude,
                         longitude: draft.longitude,
-                        pinColor: draft.pinColor.rawValue
+                        pinColor: draft.pinColor.rawValue,
+                        directionsMode: draft.directionsMode.rawValue
                     )
                 }
                 return store.addLocation(
@@ -261,7 +262,8 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     plusCode: draft.plusCode,
                     latitude: draft.latitude,
                     longitude: draft.longitude,
-                    pinColor: draft.pinColor.rawValue
+                    pinColor: draft.pinColor.rawValue,
+                    directionsMode: draft.directionsMode.rawValue
                 ) != nil
             }
         }

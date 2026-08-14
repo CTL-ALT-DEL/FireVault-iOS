@@ -133,6 +133,7 @@ struct FireVaultWorkspaceLocation: Codable, Identifiable, Equatable {
     var latitude: Double?
     var longitude: Double?
     var pinColor: String?
+    var directionsMode: String? = nil
 
     var coordinate: CLLocationCoordinate2D? {
         guard let latitude, let longitude,
@@ -142,6 +143,31 @@ struct FireVaultWorkspaceLocation: Codable, Identifiable, Equatable {
 
     var resolvedPinColor: FireVaultMapPinColor {
         FireVaultMapPinColor(rawValue: pinColor ?? "") ?? .purple
+    }
+
+    var resolvedDirectionsMode: FireVaultDirectionsMode {
+        FireVaultDirectionsMode(rawValue: directionsMode ?? "") ?? .walking
+    }
+}
+
+enum FireVaultDirectionsMode: String, Codable, CaseIterable, Identifiable {
+    case walking = "Walking"
+    case driving = "Driving"
+
+    var id: String { rawValue }
+
+    var symbol: String {
+        switch self {
+        case .walking: "figure.walk"
+        case .driving: "car.fill"
+        }
+    }
+
+    var mapKitValue: String {
+        switch self {
+        case .walking: MKLaunchOptionsDirectionsModeWalking
+        case .driving: MKLaunchOptionsDirectionsModeDriving
+        }
     }
 }
 
@@ -1005,7 +1031,8 @@ private struct MapArrivalView: View {
                         plusCode: draft.plusCode,
                         latitude: draft.latitude,
                         longitude: draft.longitude,
-                        pinColor: draft.pinColor.rawValue
+                        pinColor: draft.pinColor.rawValue,
+                        directionsMode: draft.directionsMode.rawValue
                     )
                 }
                 return store.addLocation(
@@ -1016,7 +1043,8 @@ private struct MapArrivalView: View {
                     plusCode: draft.plusCode,
                     latitude: draft.latitude,
                     longitude: draft.longitude,
-                    pinColor: draft.pinColor.rawValue
+                    pinColor: draft.pinColor.rawValue,
+                    directionsMode: draft.directionsMode.rawValue
                 ) != nil
             }
         }
@@ -1244,8 +1272,8 @@ private struct ArrivalPointDetailView: View {
                     .buttonStyle(.bordered)
                     .frame(maxWidth: .infinity)
 
-                    Button("Walk Here", systemImage: "figure.walk") {
-                        openWalkingRoute()
+                    Button(routeButtonTitle, systemImage: location.resolvedDirectionsMode.symbol) {
+                        openRoute()
                     }
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity)
@@ -1295,7 +1323,8 @@ private struct ArrivalPointDetailView: View {
                     plusCode: draft.plusCode,
                     latitude: draft.latitude,
                     longitude: draft.longitude,
-                    pinColor: draft.pinColor.rawValue
+                    pinColor: draft.pinColor.rawValue,
+                    directionsMode: draft.directionsMode.rawValue
                 )
                 guard didSave else { return false }
                 let preferences = FireVaultNativeSettingsStore().preferences.plusCodes
@@ -1312,6 +1341,7 @@ private struct ArrivalPointDetailView: View {
                 location.latitude = draft.latitude
                 location.longitude = draft.longitude
                 location.pinColor = draft.pinColor.rawValue
+                location.directionsMode = draft.directionsMode.rawValue
                 coordinate = location.coordinate
                 if let coordinate {
                     zoom(to: coordinate)
@@ -1334,7 +1364,8 @@ private struct ArrivalPointDetailView: View {
             plusCode: location.plusCode,
             latitude: coordinate.latitude,
             longitude: coordinate.longitude,
-            pinColor: location.resolvedPinColor.rawValue
+            pinColor: location.resolvedPinColor.rawValue,
+            directionsMode: location.resolvedDirectionsMode.rawValue
         )
         guard didSave else {
             positionStatus = "Pin position could not be saved"
@@ -1360,7 +1391,11 @@ private struct ArrivalPointDetailView: View {
         ))
     }
 
-    private func openWalkingRoute() {
+    private var routeButtonTitle: String {
+        location.resolvedDirectionsMode == .walking ? "Walk Here" : "Drive Here"
+    }
+
+    private func openRoute() {
         guard let coordinate else { return }
         let item = MKMapItem(
             location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude),
@@ -1368,7 +1403,7 @@ private struct ArrivalPointDetailView: View {
         )
         item.name = location.label
         item.openInMaps(launchOptions: [
-            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking,
+            MKLaunchOptionsDirectionsModeKey: location.resolvedDirectionsMode.mapKitValue,
             MKLaunchOptionsMapTypeKey: MKMapType.hybrid.rawValue
         ])
     }
@@ -1475,6 +1510,7 @@ struct FireVaultLocationDraft: Equatable {
     var latitude: Double?
     var longitude: Double?
     var pinColor: FireVaultMapPinColor
+    var directionsMode: FireVaultDirectionsMode
 }
 
 private enum FireVaultArrivalMapLayer: String, CaseIterable, Identifiable {
@@ -1508,6 +1544,7 @@ struct FireVaultLocationEditorSheet: View {
     @State private var latitudeText: String
     @State private var longitudeText: String
     @State private var pinColor: FireVaultMapPinColor
+    @State private var directionsMode: FireVaultDirectionsMode
     @State private var isShowingFullScreenPinEditor = false
     @State private var mapPosition: MapCameraPosition
     @State private var mapLayer: FireVaultArrivalMapLayer = .satellite
@@ -1533,6 +1570,7 @@ struct FireVaultLocationEditorSheet: View {
         _latitudeText = State(initialValue: location?.latitude.map { String($0) } ?? "")
         _longitudeText = State(initialValue: location?.longitude.map { String($0) } ?? "")
         _pinColor = State(initialValue: location?.resolvedPinColor ?? .purple)
+        _directionsMode = State(initialValue: location?.resolvedDirectionsMode ?? .walking)
         let initialCoordinate = location?.coordinate
             ?? accountCoordinate
             ?? CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)
@@ -1599,6 +1637,13 @@ struct FireVaultLocationEditorSheet: View {
                         }
                     }
                     .pickerStyle(.menu)
+
+                    Picker("Directions", selection: $directionsMode) {
+                        ForEach(FireVaultDirectionsMode.allCases) { mode in
+                            Label(mode.rawValue, systemImage: mode.symbol).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
                 }
                 Section("Exact Location") {
                         locationPinMap
@@ -1679,7 +1724,8 @@ struct FireVaultLocationEditorSheet: View {
                             plusCode: plusCode,
                             latitude: coordinates.0,
                             longitude: coordinates.1,
-                            pinColor: pinColor
+                            pinColor: pinColor,
+                            directionsMode: directionsMode
                         )) {
                             dismiss()
                         }

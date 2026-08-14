@@ -342,6 +342,8 @@ private struct NativeNearbyView: View {
     @State private var hasCenteredOnInitialLiveLocation = false
     @State private var radiusPickerExpanded = false
     @State private var radiusCollapseTask: Task<Void, Never>?
+    @State private var showsSelectedAddress = false
+    @State private var selectedAddressTask: Task<Void, Never>?
     @State private var showsTripLogControls = false
     @State private var tripLogControlsCollapseTask: Task<Void, Never>?
     @State private var tripLogDetailIndex = 0
@@ -365,11 +367,6 @@ private struct NativeNearbyView: View {
     private var selectedWorkspaceAccount: FireVaultWorkspaceAccount? {
         guard let selected else { return nil }
         return store.accounts.first(where: { $0.id == selected.account.id })
-    }
-
-    private var selectedHasPhone: Bool {
-        guard let selected else { return false }
-        return selected.account.phone.contains(where: \.isNumber)
     }
 
     private var canDisplayMap: Bool {
@@ -455,6 +452,7 @@ private struct NativeNearbyView: View {
         .onDisappear {
             radiusCollapseTask?.cancel()
             tripLogControlsCollapseTask?.cancel()
+            selectedAddressTask?.cancel()
             guard !payload.demoMode else { return }
             locationService.stopLiveNearbyUpdates(consumer: .handset)
         }
@@ -1077,7 +1075,7 @@ private struct NativeNearbyView: View {
                 .frame(height: 270)
                 .nativeMapFrame()
                 .overlay(alignment: .topLeading) {
-                    if let selected {
+                    if let selected, showsSelectedAddress {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(selected.account.name)
                                 .font(.subheadline.bold())
@@ -1104,35 +1102,15 @@ private struct NativeNearbyView: View {
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if let selected {
-                        FireVaultMapActionStrip {
-                            FireVaultMapControlButton(
-                                role: .note,
-                                label: "Open \(selected.account.name) details"
-                            ) {
-                                store.openAccount(selected.account.id)
-                            }
-                            .accessibilityIdentifier("nearby-map-note")
-
-                            FireVaultMapControlButton(
-                                role: .call,
-                                label: "Call \(selected.account.name)",
-                                disabled: !selectedHasPhone
-                            ) {
-                                store.call(selected.account.phone)
-                            }
-                            .accessibilityValue(selectedHasPhone ? selected.account.phone : "No phone number")
-                            .accessibilityIdentifier("nearby-map-call")
-
-                            FireVaultMapControlButton(
-                                role: .route,
-                                label: "Route to \(selected.account.name)",
-                                disabled: selectedWorkspaceAccount == nil
-                            ) {
-                                guard let account = selectedWorkspaceAccount else { return }
-                                store.openRoute(for: account)
-                            }
-                            .accessibilityIdentifier("nearby-map-route")
+                        FireVaultMapControlButton(
+                            role: .route,
+                            label: "Route to \(selected.account.name)",
+                            disabled: selectedWorkspaceAccount == nil
+                        ) {
+                            guard let account = selectedWorkspaceAccount else { return }
+                            store.openRoute(for: account)
                         }
+                        .accessibilityIdentifier("nearby-map-route")
                         .padding(10)
                     }
                 }
@@ -1361,7 +1339,11 @@ private struct NativeNearbyView: View {
         index: Int
     ) -> some View {
         return Button {
-            selectAccount(row, scrollToCard: true, haptic: true)
+            if selectedID == row.id {
+                store.openAccount(row.account.id)
+            } else {
+                selectAccount(row, scrollToCard: true, haptic: true)
+            }
         } label: {
             HStack(alignment: .top, spacing: 10) {
                 Text("\(index + 1)")
@@ -1444,7 +1426,9 @@ private struct NativeNearbyView: View {
                 row.distanceLabel
             ].joined(separator: ", ")
         )
-        .accessibilityHint("Tap to select on the map. Long press to open account details.")
+        .accessibilityHint(selectedID == row.id
+            ? "Opens account details."
+            : "Selects and zooms this account on the map. Tap again to open account details.")
         .accessibilityValue(selectedID == row.id ? "Selected" : "Not selected")
         .accessibilityAddTraits(selectedID == row.id ? .isSelected : [])
         .accessibilityAction(named: "Open Account Details") {
@@ -1493,6 +1477,7 @@ private struct NativeNearbyView: View {
         }
         guard let coordinate = row.account.coordinate else { return }
         selectedID = row.id
+        showSelectedAddressTemporarily()
         store.selectCaptureAccount(row.account.id)
         if scrollToCard {
             // Update the scroll anchor without animating through intermediate
@@ -1506,6 +1491,8 @@ private struct NativeNearbyView: View {
 
     private func centerMapOnUser() {
         guard let coordinate = locationService.coordinate else { return }
+        selectedAddressTask?.cancel()
+        showsSelectedAddress = false
         selectedID = nil
         withAnimation(.easeInOut(duration: 0.3)) {
             cameraPosition = userCameraPosition(coordinate)
@@ -1582,6 +1569,8 @@ private struct NativeNearbyView: View {
 
     private func resetNearby() {
         accountScrollWasActive = false
+        selectedAddressTask?.cancel()
+        showsSelectedAddress = false
         selectedID = nil
 
         if let closestID = nearbyRows.first?.id {
@@ -1596,6 +1585,20 @@ private struct NativeNearbyView: View {
             }
         } else {
             centerMapOnUser()
+        }
+    }
+
+    private func showSelectedAddressTemporarily() {
+        selectedAddressTask?.cancel()
+        withAnimation(.easeOut(duration: 0.18)) {
+            showsSelectedAddress = true
+        }
+        selectedAddressTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.24)) {
+                showsSelectedAddress = false
+            }
         }
     }
 }

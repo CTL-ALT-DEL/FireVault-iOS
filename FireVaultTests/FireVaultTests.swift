@@ -13,6 +13,46 @@ import SwiftUI
 
 @MainActor
 final class FireVaultTests: XCTestCase {
+    func testLegacySavedLocationDefaultsToWalkingDirections() throws {
+        let data = try XCTUnwrap(
+            """
+            {
+              "id":"legacy-pin",
+              "label":"Main Panel",
+              "subtitle":"Lobby",
+              "type":"Panel",
+              "plusCode":"85M5JR93+4C",
+              "latitude":43.615,
+              "longitude":-116.202,
+              "pinColor":"Blue"
+            }
+            """.data(using: .utf8)
+        )
+
+        let location = try JSONDecoder().decode(FireVaultWorkspaceLocation.self, from: data)
+
+        XCTAssertEqual(location.resolvedDirectionsMode, .walking)
+    }
+
+    func testLegacyTripLogDayDecodesWithoutBoundaryAddresses() throws {
+        struct LegacyDay: Codable {
+            var id = UUID()
+            var startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+            var endedAt: Date? = Date(timeIntervalSince1970: 1_700_003_600)
+            var isPaused = false
+            var points: [FireVaultBreadcrumbPoint] = []
+            var stops: [FireVaultBreadcrumbStop] = []
+        }
+
+        let data = try JSONEncoder().encode(LegacyDay())
+        let day = try JSONDecoder().decode(FireVaultBreadcrumbDay.self, from: data)
+
+        XCTAssertNil(day.startedAddress)
+        XCTAssertNil(day.endedAddress)
+        XCTAssertNil(day.startedLatitude)
+        XCTAssertNil(day.endedLatitude)
+    }
+
     func testPlusCodeMatchesOfficialZurichReferenceAtNormalAndExtraPrecision() {
         let coordinate = CLLocationCoordinate2D(latitude: 47.365590, longitude: 8.524997)
         XCTAssertEqual(FireVaultPlusCode.encode(coordinate, length: 10), "8FVC9G8F+6X")

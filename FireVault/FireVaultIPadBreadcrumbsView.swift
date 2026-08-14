@@ -94,6 +94,10 @@ struct FireVaultIPadBreadcrumbsView: View {
         .onAppear {
             selectedDayID = breadcrumbs.today?.id ?? breadcrumbs.days.first?.id
         }
+        .task(id: selectedDay?.id) {
+            guard let dayID = selectedDay?.id else { return }
+            breadcrumbs.resolveMissingBoundaryAddresses(for: dayID)
+        }
         .sheet(item: $selectedStop) { selection in
             FireVaultBreadcrumbStopEditor(
                 breadcrumbs: breadcrumbs,
@@ -393,7 +397,9 @@ struct FireVaultIPadBreadcrumbsView: View {
                 timelineRow(
                     time: day.startedAt,
                     title: "Workday Started",
-                    subtitle: "Route recording began",
+                    subtitle: day.startedAddress
+                        ?? day.points.first.map { "Near \($0.coordinate.fireVaultCoordinateLabel)" }
+                        ?? "Waiting for starting address",
                     symbol: "play.fill",
                     tint: NativeShellPalette.green
                 )
@@ -419,7 +425,9 @@ struct FireVaultIPadBreadcrumbsView: View {
                     timelineRow(
                         time: endedAt,
                         title: "Workday Ended",
-                        subtitle: miles(day.totalDistanceMeters),
+                        subtitle: [day.endedAddress, miles(day.totalDistanceMeters)]
+                            .compactMap { $0 }
+                            .joined(separator: " • "),
                         symbol: "stop.fill",
                         tint: NativeShellPalette.red
                     )

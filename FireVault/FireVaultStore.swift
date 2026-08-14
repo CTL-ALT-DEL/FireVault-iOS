@@ -887,7 +887,8 @@ final class FireVaultStore: ObservableObject {
         plusCode: String = "",
         latitude: Double? = nil,
         longitude: Double? = nil,
-        pinColor: String = "Purple"
+        pinColor: String = "Purple",
+        directionsMode: String = FireVaultDirectionsMode.walking.rawValue
     ) -> FireVaultWorkspaceLocation? {
         let plusCodePreferences = FireVaultNativeSettingsStore().preferences.plusCodes
         guard let index = accounts.firstIndex(where: { $0.id == accountID }),
@@ -912,7 +913,9 @@ final class FireVaultStore: ObservableObject {
             latitude: latitude,
             longitude: longitude,
             pinColor: FireVaultMapPinColor(rawValue: pinColor)?.rawValue
-                ?? FireVaultMapPinColor.purple.rawValue
+                ?? FireVaultMapPinColor.purple.rawValue,
+            directionsMode: FireVaultDirectionsMode(rawValue: directionsMode)?.rawValue
+                ?? FireVaultDirectionsMode.walking.rawValue
         )
         accounts[index].locations.append(location)
         persist()
@@ -929,7 +932,8 @@ final class FireVaultStore: ObservableObject {
         plusCode: String,
         latitude: Double?,
         longitude: Double?,
-        pinColor: String = "Purple"
+        pinColor: String = "Purple",
+        directionsMode: String? = nil
     ) -> Bool {
         let plusCodePreferences = FireVaultNativeSettingsStore().preferences.plusCodes
         guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
@@ -954,6 +958,11 @@ final class FireVaultStore: ObservableObject {
         accounts[accountIndex].locations[locationIndex].pinColor =
             FireVaultMapPinColor(rawValue: pinColor)?.rawValue
             ?? FireVaultMapPinColor.purple.rawValue
+        if let directionsMode {
+            accounts[accountIndex].locations[locationIndex].directionsMode =
+                FireVaultDirectionsMode(rawValue: directionsMode)?.rawValue
+                ?? FireVaultDirectionsMode.walking.rawValue
+        }
         persist()
         return true
     }

@@ -142,6 +142,12 @@ struct FireVaultBreadcrumbDay: Codable, Identifiable, Equatable {
     var isPaused = false
     var points: [FireVaultBreadcrumbPoint] = []
     var stops: [FireVaultBreadcrumbStop] = []
+    var startedAddress: String? = nil
+    var endedAddress: String? = nil
+    var startedLatitude: Double? = nil
+    var startedLongitude: Double? = nil
+    var endedLatitude: Double? = nil
+    var endedLongitude: Double? = nil
 
     var isActive: Bool { endedAt == nil }
 
@@ -794,6 +800,16 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         let end = Date()
         finalizeStopIfNeeded(in: index, at: end)
         days[index].endedAt = end
+        let boundaryLocation = latestLocation ?? days[index].points.last?.location
+        if let boundaryLocation {
+            days[index].endedLatitude = boundaryLocation.coordinate.latitude
+            days[index].endedLongitude = boundaryLocation.coordinate.longitude
+            resolveBoundaryAddress(
+                dayID: days[index].id,
+                boundary: .ended,
+                location: boundaryLocation
+            )
+        }
         days[index].isPaused = false
         stopLocationUpdates()
         candidateLocations.removeAll()
@@ -826,6 +842,37 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         guard days.first(where: { $0.id == id })?.isActive != true else { return }
         days.removeAll { $0.id == id }
         persist()
+    }
+
+    func resolveMissingBoundaryAddresses(for dayID: UUID) {
+        guard let index = days.firstIndex(where: { $0.id == dayID }) else { return }
+        var changed = false
+
+        if days[index].startedAddress == nil, let first = days[index].points.first {
+            days[index].startedLatitude = first.latitude
+            days[index].startedLongitude = first.longitude
+            changed = true
+            resolveBoundaryAddress(
+                dayID: dayID,
+                boundary: .started,
+                location: first.location
+            )
+        }
+
+        if days[index].endedAt != nil,
+           days[index].endedAddress == nil,
+           let last = days[index].points.last {
+            days[index].endedLatitude = last.latitude
+            days[index].endedLongitude = last.longitude
+            changed = true
+            resolveBoundaryAddress(
+                dayID: dayID,
+                boundary: .ended,
+                location: last.location
+            )
+        }
+
+        if changed { persist(immediate: true) }
     }
 
     @discardableResult
@@ -1101,6 +1148,16 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         }
         acceptedLocationCount += 1
 
+        if days[index].startedLatitude == nil || days[index].startedLongitude == nil {
+            days[index].startedLatitude = location.coordinate.latitude
+            days[index].startedLongitude = location.coordinate.longitude
+            resolveBoundaryAddress(
+                dayID: days[index].id,
+                boundary: .started,
+                location: location
+            )
+        }
+
         days[index].points.append(
             .init(
                 timestamp: location.timestamp,
@@ -1121,6 +1178,53 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         }
         persist()
         synchronizeLiveActivity(status: .recording)
+    }
+
+    private enum BoundaryAddress {
+        case started
+        case ended
+    }
+
+    private func resolveBoundaryAddress(
+        dayID: UUID,
+        boundary: BoundaryAddress,
+        location: CLLocation
+    ) {
+        if let account = FireVaultBreadcrumbRules.closestAccount(
+            to: location.coordinate,
+            accounts: accounts
+        ), !account.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            applyBoundaryAddress(account.address, to: dayID, boundary: boundary)
+            return
+        }
+
+        Task { [weak self] in
+            guard let request = MKReverseGeocodingRequest(location: location),
+                  let mapItems = try? await request.mapItems,
+                  let mapItem = mapItems.first else { return }
+            let rawAddress = mapItem.addressRepresentations?.fullAddress(
+                includingRegion: false,
+                singleLine: true
+            ) ?? mapItem.address?.fullAddress
+            let address = rawAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !address.isEmpty else { return }
+            self?.applyBoundaryAddress(address, to: dayID, boundary: boundary)
+        }
+    }
+
+    private func applyBoundaryAddress(
+        _ address: String,
+        to dayID: UUID,
+        boundary: BoundaryAddress
+    ) {
+        guard let index = days.firstIndex(where: { $0.id == dayID }) else { return }
+        switch boundary {
+        case .started:
+            days[index].startedAddress = address
+        case .ended:
+            days[index].endedAddress = address
+        }
+        persist(immediate: true)
     }
 
     private func restoreTrackingContext() {
@@ -1705,6 +1809,10 @@ struct FireVaultBreadcrumbsView: View {
         .onAppear {
             selectedDayID = breadcrumbs.today?.id ?? breadcrumbs.days.first?.id
         }
+        .task(id: selectedDay?.id) {
+            guard let dayID = selectedDay?.id else { return }
+            breadcrumbs.resolveMissingBoundaryAddresses(for: dayID)
+        }
         .sheet(item: $editingStop) { selection in
             FireVaultBreadcrumbStopEditor(
                 breadcrumbs: breadcrumbs,
@@ -1954,7 +2062,8 @@ struct FireVaultBreadcrumbsView: View {
                     BreadcrumbTimelineRow(
                         time: day.startedAt,
                         title: "Workday Started",
-                        subtitle: day.points.first.map { "Route began near \($0.coordinate.fireVaultCoordinateLabel)" },
+                        subtitle: day.startedAddress
+                            ?? day.points.first.map { "Near \($0.coordinate.fireVaultCoordinateLabel)" },
                         symbol: "play.fill",
                         tint: NativeShellPalette.green
                     )
@@ -1982,7 +2091,9 @@ struct FireVaultBreadcrumbsView: View {
                         BreadcrumbTimelineRow(
                             time: endedAt,
                             title: "Workday Ended",
-                            subtitle: day.totalDistanceMeters.fireVaultMiles,
+                            subtitle: [day.endedAddress, day.totalDistanceMeters.fireVaultMiles]
+                                .compactMap { $0 }
+                                .joined(separator: " • "),
                             symbol: "stop.fill",
                             tint: NativeShellPalette.red
                         )
@@ -2719,7 +2830,7 @@ private extension TimeInterval {
     }
 }
 
-private extension CLLocationCoordinate2D {
+extension CLLocationCoordinate2D {
     var fireVaultCoordinateLabel: String {
         "\(latitude.formatted(.number.precision(.fractionLength(3)))), \(longitude.formatted(.number.precision(.fractionLength(3))))"
     }
