@@ -31,6 +31,10 @@ struct ContentView: View {
     }
 
     var body: some View {
+        workspaceObservationView
+    }
+
+    private var baseContentView: some View {
         GeometryReader { geometry in
             ZStack {
                 applicationContent(availableSize: geometry.size)
@@ -55,12 +59,20 @@ struct ContentView: View {
         }
         .animation(.easeOut(duration: 0.2), value: store.selectedAccountID)
         .preferredColorScheme(preferredColorScheme)
+    }
+
+    private var lifecycleObservationView: some View {
+        baseContentView
         .task {
             await performInitialSetup()
         }
         .onChange(of: scenePhase) { _, newPhase in
             handleScenePhase(newPhase)
         }
+    }
+
+    private var actionObservationView: some View {
+        lifecycleObservationView
         .onChange(of: privacyLock.isUnlocked) { _, unlocked in
             if unlocked {
                 handlePendingQuickAction()
@@ -73,6 +85,10 @@ struct ContentView: View {
         .onChange(of: widgetDeepLinks.pendingLink) { _, _ in
             handlePendingWidgetDeepLink()
         }
+    }
+
+    private var settingsObservationView: some View {
+        actionObservationView
         .onChange(of: settings.preferences.privacy.enabled) { _, enabled in
             privacyLock.configure(enabled: enabled)
             if enabled { privacyLock.authenticate() }
@@ -83,6 +99,10 @@ struct ContentView: View {
         .onChange(of: settings.remoteFeatureVisibility) { _, _ in
             reconcileSelectedTabWithFeatureControls()
         }
+    }
+
+    private var workspaceObservationView: some View {
+        settingsObservationView
         .onChange(of: store.demoMode) { _, _ in
             prepareActiveVault()
             updateWidgetSnapshot()
