@@ -455,6 +455,37 @@ private struct FireVaultRemoteFeatureFlag: Decodable {
     let enabled: Bool
 }
 
+private enum FireVaultRemoteFeatureDependencies {
+    static let parents: [String: [String]] = [
+        "tab.nearby": ["nearby_accounts"],
+        "nearby.map": ["nearby_accounts"],
+        "nearby.list": ["nearby_accounts"],
+        "tab.accounts": ["accounts"],
+        "tab.trip": ["trip_log"],
+        "tab.photo": ["camera_scan"],
+        "account.brief": ["accounts", "account_details"],
+        "account.map": ["accounts", "account_details"],
+        "account.notes": ["accounts", "account_details"],
+        "account.files": ["accounts", "account_details"],
+        "account.equipment": ["accounts", "account_details", "equipment_vault"],
+        "account.locations": ["accounts", "account_details"],
+        "account.action.scan": ["accounts", "account_details", "camera_scan"],
+        "account.action.note": ["accounts", "account_details"],
+        "account.action.camera": ["accounts", "account_details", "camera_scan"],
+        "account.action.route": ["accounts", "account_details"]
+    ]
+
+    static var acceptedIDs: Set<String> {
+        Set(FireVaultDeveloperFeatureCatalog.features.map(\.id))
+            .union(parents.values.flatMap { $0 })
+    }
+
+    static func isEnabled(_ id: String, in values: [String: Bool]) -> Bool {
+        guard values[id] ?? true else { return false }
+        return (parents[id] ?? []).allSatisfy { values[$0] ?? true }
+    }
+}
+
 struct FireVaultNativePreferences: Codable, Equatable {
     var technician = FireVaultTechnicianPreferences()
     var overlay = FireVaultOverlayPreferences()
@@ -562,7 +593,7 @@ final class FireVaultNativeSettingsStore: ObservableObject {
     }
 
     func isFeatureVisible(_ id: String) -> Bool {
-        guard remoteFeatureVisibility[id] ?? true else { return false }
+        guard FireVaultRemoteFeatureDependencies.isEnabled(id, in: remoteFeatureVisibility) else { return false }
         return settingsView.mode != .simple || developer.isEnabled(id)
     }
 
@@ -573,7 +604,7 @@ final class FireVaultNativeSettingsStore: ObservableObject {
                 .select("key,enabled")
                 .execute()
                 .value
-            let knownIDs = Set(FireVaultDeveloperFeatureCatalog.features.map(\.id))
+            let knownIDs = FireVaultRemoteFeatureDependencies.acceptedIDs
             remoteFeatureVisibility = response.reduce(into: [:]) { result, flag in
                 guard knownIDs.contains(flag.key) else { return }
                 result[flag.key] = flag.enabled
