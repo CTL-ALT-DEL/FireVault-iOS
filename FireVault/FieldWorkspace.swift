@@ -1547,7 +1547,7 @@ struct FireVaultLocationEditorSheet: View {
     @State private var directionsMode: FireVaultDirectionsMode
     @State private var isShowingFullScreenPinEditor = false
     @State private var mapPosition: MapCameraPosition
-    @State private var mapLayer: FireVaultArrivalMapLayer = .satellite
+    @State private var mapLayer: FireVaultArrivalMapLayer = .standard
     @FocusState private var isTextInputFocused: Bool
     private let plusCodePreferences = FireVaultNativeSettingsStore().preferences.plusCodes
 
@@ -2624,8 +2624,8 @@ private struct FireVaultComponentTypePickerSheet: View {
 private struct FireVaultFullScreenPinEditor: View {
     private enum MapLayer: String, CaseIterable, Identifiable {
         case standard = "Standard"
-        case hybrid = "Hybrid"
         case imagery = "Satellite"
+        case hybrid = "Hybrid"
 
         var id: String { rawValue }
 

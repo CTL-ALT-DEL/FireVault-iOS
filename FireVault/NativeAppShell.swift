@@ -338,13 +338,14 @@ private struct NativeNearbyView: View {
     @State private var scrollAccountID: String?
     @State private var accountScrollWasActive = false
     @State private var mapLayer: FireVaultMapLayer = .standard
-    @State private var mapIs3D = false
+    @State private var mapIs3D = true
     @State private var hasCenteredOnInitialLiveLocation = false
     @State private var radiusPickerExpanded = false
     @State private var radiusCollapseTask: Task<Void, Never>?
     @State private var showsSelectedAddress = false
     @State private var selectedAddressTask: Task<Void, Never>?
     @State private var mapCameraRestoreTask: Task<Void, Never>?
+    @State private var selectedAccountIsCloseZoom = false
     @State private var showsTripLogControls = false
     @State private var tripLogControlsCollapseTask: Task<Void, Never>?
     @State private var tripLogDetailIndex = 0
@@ -1490,6 +1491,7 @@ private struct NativeNearbyView: View {
         }
         guard let coordinate = row.account.coordinate else { return }
         selectedID = row.id
+        selectedAccountIsCloseZoom = false
         showSelectedAddressTemporarily()
         store.selectCaptureAccount(row.account.id)
         if scrollToCard {
@@ -1506,6 +1508,7 @@ private struct NativeNearbyView: View {
         guard let coordinate = locationService.coordinate else { return }
         selectedAddressTask?.cancel()
         showsSelectedAddress = false
+        selectedAccountIsCloseZoom = false
         selectedID = nil
         withAnimation(.easeInOut(duration: 0.3)) {
             cameraPosition = userCameraPosition(coordinate)
@@ -1570,7 +1573,9 @@ private struct NativeNearbyView: View {
         withAnimation(.easeInOut(duration: 0.35)) {
             if let selected,
                let coordinate = selected.account.coordinate {
-                cameraPosition = accountCameraPosition(coordinate)
+                cameraPosition = selectedAccountIsCloseZoom
+                    ? closeAccountCameraPosition(coordinate)
+                    : accountCameraPosition(coordinate)
             } else if !payload.demoMode,
                       let coordinate = locationService.coordinate {
                 cameraPosition = userCameraPosition(coordinate)
@@ -1584,6 +1589,7 @@ private struct NativeNearbyView: View {
         accountScrollWasActive = false
         selectedAddressTask?.cancel()
         showsSelectedAddress = false
+        selectedAccountIsCloseZoom = false
         selectedID = nil
 
         if let closestID = nearbyRows.first?.id {
@@ -1614,13 +1620,13 @@ private struct NativeNearbyView: View {
             }
             guard let selected,
                   let coordinate = selected.account.coordinate else { return }
-            mapLayer = .satellite
-            mapIs3D = true
+            selectedAccountIsCloseZoom = true
+            let closePosition = closeAccountCameraPosition(coordinate)
             withAnimation(.easeInOut(duration: 0.55)) {
-                cameraPosition = satelliteAccountCameraPosition(coordinate)
+                cameraPosition = closePosition
             }
             restoreCameraAfterLayerChange(
-                preferredPosition: satelliteAccountCameraPosition(coordinate)
+                preferredPosition: closePosition
             )
         }
     }
@@ -1640,7 +1646,9 @@ private struct NativeNearbyView: View {
                     cameraPosition = preferredPosition
                 } else if let selected,
                           let coordinate = selected.account.coordinate {
-                    cameraPosition = accountCameraPosition(coordinate)
+                    cameraPosition = selectedAccountIsCloseZoom
+                        ? closeAccountCameraPosition(coordinate)
+                        : accountCameraPosition(coordinate)
                 } else if !payload.demoMode,
                           let coordinate = locationService.coordinate {
                     cameraPosition = userCameraPosition(coordinate)
@@ -1651,10 +1659,18 @@ private struct NativeNearbyView: View {
         }
     }
 
-    private func satelliteAccountCameraPosition(
+    private func closeAccountCameraPosition(
         _ coordinate: CLLocationCoordinate2D
     ) -> MapCameraPosition {
-        .camera(
+        guard mapIs3D else {
+            return .region(
+                .init(
+                    center: coordinate,
+                    span: .init(latitudeDelta: 0.0035, longitudeDelta: 0.0035)
+                )
+            )
+        }
+        return .camera(
             MapCamera(
                 centerCoordinate: coordinate,
                 distance: 650,
@@ -2952,6 +2968,7 @@ private struct NativeGPSSettingsView: View {
                     Label("Satellite", systemImage: "globe.americas.fill").tag("satellite")
                     Label("Hybrid", systemImage: "square.3.layers.3d").tag("hybrid")
                 }
+                .pickerStyle(.menu)
 
                 Toggle("High-accuracy GPS", isOn: $draft.highAccuracy)
 
@@ -2973,7 +2990,7 @@ private struct NativeGPSSettingsView: View {
             } header: {
                 Text("Map Preferences")
             } footer: {
-                Text("This distance controls the accounts displayed on the Nearby map and list.")
+                Text("Choose Standard, Satellite, or Hybrid as the opening layer. Nearby opens in 3D. The distance controls the accounts displayed on its map and list.")
             }
 
             Section("GPS Tools") {

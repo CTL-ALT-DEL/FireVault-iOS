@@ -37,8 +37,8 @@ private enum FireVaultAccountDetailSection: String, CaseIterable, Identifiable {
 
 private enum FireVaultAccountMapLayer: String, CaseIterable, Identifiable {
     case standard = "Standard"
-    case hybrid = "Hybrid"
     case imagery = "Satellite"
+    case hybrid = "Hybrid"
 
     var id: String { rawValue }
 

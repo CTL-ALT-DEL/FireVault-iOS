@@ -10,8 +10,8 @@ import SwiftUI
 
 private enum FireVaultIPadNearbyMapLayer: String, CaseIterable, Identifiable {
     case standard
-    case hybrid
     case imagery
+    case hybrid
 
     var id: String { rawValue }
 

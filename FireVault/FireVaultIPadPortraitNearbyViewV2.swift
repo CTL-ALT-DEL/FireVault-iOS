@@ -11,8 +11,8 @@ import UIKit
 
 private enum FireVaultNearbyMapLayer: String, CaseIterable, Identifiable {
     case standard = "Standard"
-    case hybrid = "Hybrid"
     case imagery = "Satellite"
+    case hybrid = "Hybrid"
 
     var id: String { rawValue }
 
