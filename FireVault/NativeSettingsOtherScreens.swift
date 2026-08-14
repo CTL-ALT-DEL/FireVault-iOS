@@ -212,40 +212,78 @@ struct NativeStorageSettingsView: View {
     var body: some View {
         Form {
             Section {
-                storageDestinationPicker("Photo destination", selection: $draft.storage.photoProvider)
-                TextField("Photo folder", text: $draft.storage.photoFolder)
-                    .textInputAutocapitalization(.never)
-                    .focused($focused)
-                Picker("Photo quality", selection: optionalString(\.photoQuality, default: "original")) {
-                    Text("Original quality").tag("original")
-                    Text("Storage optimized").tag("optimized")
-                    Text("Small file").tag("compact")
-                }
+                storagePlanOverview
+            }
+            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 8, trailing: 16))
+            .listRowBackground(Color.clear)
+
+            Section {
+                destinationRow(
+                    title: "Photos",
+                    detail: "Field photos and imported images",
+                    symbol: "photo.on.rectangle.angled",
+                    selection: $draft.storage.photoProvider
+                )
+                folderField("Photo folder", text: $draft.storage.photoFolder)
             } header: {
-                Label("Photos", systemImage: "photo.fill")
+                Text("Photo Storage")
             } footer: {
                 providerDescription(draft.storage.photoProvider)
             }
 
             Section {
-                storageDestinationPicker("Document destination", selection: $draft.storage.documentProvider)
-                TextField("Document folder", text: $draft.storage.documentFolder)
-                    .textInputAutocapitalization(.never)
-                    .focused($focused)
+                destinationRow(
+                    title: "Files & Scans",
+                    detail: "Documents, reports, and scanned pages",
+                    symbol: "doc.on.doc.fill",
+                    selection: $draft.storage.documentProvider
+                )
+                folderField("Document folder", text: $draft.storage.documentFolder)
+            } header: {
+                Text("Document Storage")
+            } footer: {
+                providerDescription(draft.storage.documentProvider)
+            }
+
+            Section {
+                Picker("Photo quality", selection: optionalString(\.photoQuality, default: "original")) {
+                    Text("Original quality").tag("original")
+                    Text("Storage optimized").tag("optimized")
+                    Text("Small file").tag("compact")
+                }
                 Picker("Scanned document format", selection: optionalString(\.scanFormat, default: "pdf")) {
                     Text("Searchable PDF").tag("pdf")
                     Text("Individual images").tag("images")
                 }
             } header: {
-                Label("Documents & Scans", systemImage: "doc.text.fill")
+                Label("File Quality & Format", systemImage: "slider.horizontal.3")
             } footer: {
-                providerDescription(draft.storage.documentProvider)
+                Text("Original photos preserve maximum detail. Searchable PDF keeps a multi-page scan together as one document.")
             }
 
-            Section("Organization") {
-                Toggle("Create a folder for each account", isOn: optionalBool(\.useAccountFolders, default: true))
-                Toggle("Keep originals on this device", isOn: optionalBool(\.preserveOriginals, default: true))
-                Toggle("Upload using Wi-Fi only", isOn: optionalBool(\.wifiOnlyUploads, default: false))
+            Section {
+                settingsToggle(
+                    "Account folders",
+                    detail: "Keep each customer's files together",
+                    symbol: "folder.badge.person.crop",
+                    isOn: optionalBool(\.useAccountFolders, default: true)
+                )
+                settingsToggle(
+                    "Keep device originals",
+                    detail: "Retain a local copy after upload",
+                    symbol: "iphone",
+                    isOn: optionalBool(\.preserveOriginals, default: true)
+                )
+                settingsToggle(
+                    "Wi-Fi uploads only",
+                    detail: "Avoid using cellular data for files",
+                    symbol: "wifi",
+                    isOn: optionalBool(\.wifiOnlyUploads, default: false)
+                )
+            } header: {
+                Text("Organization & Uploads")
+            } footer: {
+                Text(uploadSummary)
             }
 
             Section {
@@ -270,16 +308,102 @@ struct NativeStorageSettingsView: View {
                 storageConnectionRow("iCloud Drive", symbol: "icloud.fill", configured: true)
                 storageConnectionRow("FireVault Cloud", symbol: "shield.lefthalf.filled", configured: false)
             } header: {
-                Text("Storage Connections")
+                Text("Connected Services")
             } footer: {
-                Text("FireVault Cloud storage requires a Pro subscription. External services must be configured before they can receive uploads.")
+                Text("Set up a service here before selecting it as a save destination. FireVault Cloud requires a Pro subscription.")
             }
         }
         .nativeSettingsForm(title: "File Storage", focused: $focused) { settings.save(draft) }
     }
 
-    private func storageDestinationPicker(_ title: String, selection: Binding<String>) -> some View {
-        Picker(title, selection: selection) {
+    private var storagePlanOverview: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "externaldrive.fill.badge.checkmark")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(NativeShellPalette.blue)
+                    .frame(width: 44, height: 44)
+                    .background(NativeShellPalette.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Storage Plan")
+                        .font(.headline)
+                    Text("Choose where field records are saved and how files are prepared.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            HStack(spacing: 10) {
+                destinationSummary(
+                    title: "PHOTOS",
+                    provider: draft.storage.photoProvider,
+                    symbol: "photo.fill"
+                )
+                destinationSummary(
+                    title: "FILES & SCANS",
+                    provider: draft.storage.documentProvider,
+                    symbol: "doc.fill"
+                )
+            }
+        }
+        .padding(16)
+        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(NativeShellPalette.blue.opacity(0.18), lineWidth: 1)
+        }
+        .shadow(color: NativeShellPalette.cardShadow, radius: 10, y: 4)
+    }
+
+    private func destinationSummary(title: String, provider: String, symbol: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .foregroundStyle(NativeShellPalette.blue)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                Text(providerName(provider))
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(NativeShellPalette.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func destinationRow(title: String, detail: String, symbol: String, selection: Binding<String>) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(NativeShellPalette.blue)
+                .frame(width: 32, height: 32)
+                .background(NativeShellPalette.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            storageDestinationPicker(selection: selection)
+        }
+        .padding(.vertical, 3)
+    }
+
+    private func storageDestinationPicker(selection: Binding<String>) -> some View {
+        Picker("Destination", selection: selection) {
             Text("On this iPhone or iPad").tag("local")
             Text("FireVault Cloud").tag("firevault")
             Text("iCloud Drive").tag("icloud")
@@ -287,6 +411,39 @@ struct NativeStorageSettingsView: View {
             Text("Microsoft SharePoint").tag("sharepoint")
             Text("WebDAV Server").tag("webdav")
         }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .font(.subheadline.weight(.semibold))
+    }
+
+    private func folderField(_ title: String, text: Binding<String>) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "folder.fill")
+                .foregroundStyle(NativeShellPalette.amber)
+                .frame(width: 24)
+            TextField(title, text: text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($focused)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func settingsToggle(_ title: String, detail: String, symbol: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            HStack(spacing: 11) {
+                Image(systemName: symbol)
+                    .foregroundStyle(NativeShellPalette.blue)
+                    .frame(width: 25)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     private func providerDescription(_ provider: String) -> Text {
@@ -317,14 +474,46 @@ struct NativeStorageSettingsView: View {
         HStack(spacing: 11) {
             Image(systemName: symbol)
                 .foregroundStyle(configured ? NativeShellPalette.green : NativeShellPalette.blue)
-                .frame(width: 24)
-            Text(title)
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
+                .frame(width: 32, height: 32)
+                .background(
+                    (configured ? NativeShellPalette.green : NativeShellPalette.blue).opacity(0.10),
+                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                Text(configured ? "Available as a destination" : "Connection required")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
             Text(configured ? "Ready" : "Setup")
                 .font(.caption.bold())
                 .foregroundStyle(configured ? NativeShellPalette.green : .secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    (configured ? NativeShellPalette.green : Color.secondary).opacity(0.10),
+                    in: Capsule()
+                )
+        }
+    }
+
+    private var uploadSummary: String {
+        let connection = (draft.storage.wifiOnlyUploads ?? false) ? "Uploads wait for Wi-Fi." : "Uploads may use Wi-Fi or cellular data."
+        let originals = (draft.storage.preserveOriginals ?? true) ? "Device originals are retained." : "Device originals may be removed after upload."
+        return "\(connection) \(originals)"
+    }
+
+    private func providerName(_ provider: String) -> String {
+        switch provider {
+        case "firevault": "FireVault Cloud"
+        case "icloud": "iCloud Drive"
+        case "onedrive", "microsoft": "OneDrive"
+        case "sharepoint": "SharePoint"
+        case "webdav": "WebDAV"
+        default: "This Device"
         }
     }
 }
