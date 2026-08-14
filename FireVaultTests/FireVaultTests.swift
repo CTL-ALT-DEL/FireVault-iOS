@@ -13,6 +13,18 @@ import SwiftUI
 
 @MainActor
 final class FireVaultTests: XCTestCase {
+    func testHelpCenterCoversEverySectionWithFourUniqueTopics() {
+        XCTAssertEqual(FireVaultHelpSection.allCases.count, 5)
+        XCTAssertEqual(FireVaultHelpTopic.allCases.count, 20)
+        XCTAssertEqual(Set(FireVaultHelpTopic.allCases.map(\.id)).count, 20)
+
+        for section in FireVaultHelpSection.allCases {
+            let topics = FireVaultHelpTopic.topics(in: section)
+            XCTAssertEqual(topics.count, 4, "Unexpected Help topic count for \(section.rawValue)")
+            XCTAssertTrue(topics.allSatisfy { !$0.steps.isEmpty })
+        }
+    }
+
     func testWarmIvoryPaletteResolvesToCreamSurfacesInLightAppearance() {
         let lightTraits = UITraitCollection(userInterfaceStyle: .light)
         let darkTraits = UITraitCollection(userInterfaceStyle: .dark)

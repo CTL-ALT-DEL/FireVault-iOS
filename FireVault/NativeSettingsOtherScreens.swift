@@ -1456,39 +1456,28 @@ struct NativeDemoSettingsView: View {
 struct NativeManualView: View {
     var body: some View {
         List {
-            Section("Getting Around") {
-                manualItem("Nearby", "Review mapped accounts, select a site, call it, open its details, or begin a route.", "location.fill")
-                manualItem("Accounts", "Search the vault by name, address, account ID, category, or saved information. Pull down to refresh.", "magnifyingglass")
-                manualItem("Trip Log", "Record a workday, review detected stops, and create daily or weekly PDF reports.", "truck.box.fill")
-                manualItem("Photo", "Capture field images with optional live account information and logo overlays.", "camera.fill")
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Illustrated Help", systemImage: "sparkles.rectangle.stack.fill")
+                        .font(.headline)
+                        .foregroundStyle(NativeShellPalette.blue)
+                    Text("Choose any topic for a short animated walkthrough. Every presentation can be replayed and respects Reduce Motion.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 6)
             }
 
-            Section("Accounts & Arrival Maps") {
-                manualItem("Account workspace", "Keep service notes, files and scans, equipment records, and arrival locations together.", "building.2")
-                manualItem("Arrival Map", "Review parking and entrance points, edit saved locations, or start walking directions to a selected point.", "figure.walk")
-                manualItem("Category rules", "Create IF/THEN rules, run them immediately, and automatically apply category labels to matching accounts.", "tag.fill")
-                manualItem("CSV import", "Import account records, review the results, and map usable addresses before adding them to the vault.", "tablecells")
-            }
-
-            Section("Trip Log & Reports") {
-                manualItem("Record", "Start at the beginning of the workday. Pause when tracking should stop temporarily and finish the session when the day is complete.", "record.circle")
-                manualItem("Live details", "Choose Speed, Trip, Direction, Elevation, or GPS. Auto Rotate can cycle through any selected combination.", "gauge.with.dots.needle.50percent")
-                manualItem("History", "Open a saved day to review route geometry, account visits, detected stops, and recorded times.", "clock.arrow.circlepath")
-                manualItem("Reports", "Export clean daily or weekly PDFs with route maps, stop summaries, mileage, elapsed time, and elevation information.", "doc.richtext")
-            }
-
-            Section("Photos, Maps & Location") {
-                manualItem("Photo overlays", "Resize and position the account-information overlay inside the 4:3 capture area. Configure the FireVault logo separately.", "camera.filters")
-                manualItem("Map layers", "Choose Standard, Satellite, or Hybrid as the default layer under GPS & Maps.", "square.3.layers.3d")
-                manualItem("GPS Diagnostics", "Inspect live coordinates, accuracy, elevation, speed, direction, source data, and rolling charts.", "waveform.path.ecg.rectangle")
-                manualItem("Plus Codes", "Generate compact location codes from GPS coordinates for accounts and saved arrival points.", "plus.square.dashed")
-            }
-
-            Section("Storage, Privacy & Demonstration") {
-                manualItem("File Storage", "Choose photo and document destinations, quality, folder organization, scan format, and upload behavior.", "folder.fill")
-                manualItem("Privacy", "Configure application locking, background behavior, and app-switcher protection.", "lock.shield.fill")
-                manualItem("Demo Mode", "Explore fictional accounts and seven days of sample history in a workspace isolated from live data.", "theatermasks.fill")
-                manualItem("Reset Demo Data", "Restore the sample workspace without changing live accounts or authentication.", "arrow.counterclockwise")
+            ForEach(FireVaultHelpSection.allCases) { helpSection in
+                Section(helpSection.rawValue) {
+                    ForEach(FireVaultHelpTopic.topics(in: helpSection)) { topic in
+                        NavigationLink {
+                            FireVaultHelpPresentationView(topic: topic)
+                        } label: {
+                            manualItem(topic)
+                        }
+                    }
+                }
             }
         }
         .fireVaultThemedCollection()
@@ -1497,15 +1486,15 @@ struct NativeManualView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func manualItem(_ title: String, _ detail: String, _ symbol: String) -> some View {
+    private func manualItem(_ topic: FireVaultHelpTopic) -> some View {
         Label {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.bold())
-                Text(detail).font(.caption).foregroundStyle(.secondary)
+                Text(topic.title).font(.subheadline.bold())
+                Text(topic.summary).font(.caption).foregroundStyle(.secondary)
             }
             .padding(.vertical, 2)
         } icon: {
-            Image(systemName: symbol).foregroundStyle(NativeShellPalette.blue)
+            Image(systemName: topic.symbol).foregroundStyle(NativeShellPalette.blue)
         }
     }
 }
