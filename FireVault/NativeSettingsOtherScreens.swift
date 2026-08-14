@@ -26,12 +26,10 @@ struct NativePlusCodeSettingsView: View {
                 Toggle("Show Plus Code tools", isOn: $draft.plusCodes.enabled)
                 Toggle("Generate automatically from GPS", isOn: $draft.plusCodes.autoGenerate)
                 Toggle("Allow account search", isOn: $draft.plusCodes.searchable)
-                Toggle("Include in reports", isOn: $draft.plusCodes.includeInReports)
             }
             Section("Precision") {
                 Picker("Account precision", selection: $draft.plusCodes.accountLength) { Text("10 digits").tag(10); Text("11 digits").tag(11) }
                 Picker("Location precision", selection: $draft.plusCodes.locationLength) { Text("10 digits").tag(10); Text("11 digits").tag(11) }
-                Picker("Reverify", selection: $draft.plusCodes.verifyAfterDays) { Text("90 days").tag(90); Text("180 days").tag(180); Text("1 year").tag(365) }
             }
             Section {
                 LabeledContent("CURRENT LOCATION") {
@@ -46,7 +44,7 @@ struct NativePlusCodeSettingsView: View {
                     Label("Refresh Current Location", systemImage: "location.fill")
                 }
             } footer: {
-                Text("The full Plus Code is generated locally from the current GPS coordinate. No address lookup is required.")
+                Text("Full Plus Codes are generated locally from GPS coordinates. No address lookup, Google API key, or paid Google request is required.")
             }
         }
         .nativeSettingsForm(title: "Plus Codes") { settings.save(draft) }
@@ -54,46 +52,7 @@ struct NativePlusCodeSettingsView: View {
 
     private var currentPlusCode: String {
         guard let coordinate = locationService.coordinate else { return "Waiting for GPS…" }
-        return FireVaultPlusCodeEncoder.encode(coordinate, length: draft.plusCodes.accountLength)
-    }
-}
-
-private enum FireVaultPlusCodeEncoder {
-    private static let alphabet = Array("23456789CFGHJMPQRVWX")
-    private static let pairResolutions = [20.0, 1.0, 0.05, 0.0025, 0.000125]
-
-    static func encode(_ coordinate: CLLocationCoordinate2D, length: Int = 10) -> String {
-        var latitude = min(90, max(-90, coordinate.latitude))
-        if latitude == 90 { latitude -= 0.000000001 }
-        var longitude = coordinate.longitude
-        while longitude < -180 { longitude += 360 }
-        while longitude >= 180 { longitude -= 360 }
-        latitude += 90
-        longitude += 180
-
-        var code = ""
-        for resolution in pairResolutions {
-            let latitudeDigit = min(19, Int(latitude / resolution))
-            let longitudeDigit = min(19, Int(longitude / resolution))
-            code.append(alphabet[latitudeDigit])
-            code.append(alphabet[longitudeDigit])
-            latitude -= Double(latitudeDigit) * resolution
-            longitude -= Double(longitudeDigit) * resolution
-        }
-
-        if length > 10 {
-            let latitudeDigit = min(4, Int(latitude / (0.000125 / 5)))
-            let longitudeDigit = min(3, Int(longitude / (0.000125 / 4)))
-            code.append(alphabet[latitudeDigit * 4 + longitudeDigit])
-        }
-
-        code.insert("+", at: code.index(code.startIndex, offsetBy: 8))
-        let requested = min(11, max(8, length))
-        let charactersWithoutSeparator = code.filter { $0 != "+" }
-        let end = charactersWithoutSeparator.index(charactersWithoutSeparator.startIndex, offsetBy: requested)
-        let trimmed = String(charactersWithoutSeparator[..<end])
-        let separator = trimmed.index(trimmed.startIndex, offsetBy: 8)
-        return String(trimmed[..<separator]) + "+" + String(trimmed[separator...])
+        return FireVaultPlusCode.encode(coordinate, length: draft.plusCodes.accountLength)
     }
 }
 

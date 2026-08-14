@@ -573,13 +573,17 @@ private struct FireVaultIPadAccountsWorkspace: View {
 
     @State private var searchText = ""
     @State private var sort: FireVaultIPadAccountSort = .alphabetic
+    private let plusCodeSearchIsEnabled = FireVaultNativeSettingsStore().preferences.plusCodes.searchable
 
     private var accounts: [FireVaultNativeAccount] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let filtered = query.isEmpty
             ? payload.accounts
-            : payload.accounts.filter {
-                [$0.name, $0.address, $0.accountId, $0.category]
+            : payload.accounts.filter { account in
+                let locationCodes = plusCodeSearchIsEnabled
+                    ? store.accounts.first(where: { $0.id == account.id })?.locations.map(\.plusCode).joined(separator: " ") ?? ""
+                    : ""
+                return [account.name, account.address, account.accountId, account.category, locationCodes]
                     .joined(separator: " ")
                     .localizedCaseInsensitiveContains(query)
             }

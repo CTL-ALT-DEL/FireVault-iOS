@@ -2493,6 +2493,7 @@ private struct FireVaultBreadcrumbAccountPicker: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
+    private let plusCodeSearchIsEnabled = FireVaultNativeSettingsStore().preferences.plusCodes.searchable
 
     private var filteredAccounts: [FireVaultWorkspaceAccount] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2505,7 +2506,8 @@ private struct FireVaultBreadcrumbAccountPicker: View {
                     account.name,
                     account.address,
                     account.accountId,
-                    account.category
+                    account.category,
+                    plusCodeSearchIsEnabled ? account.locations.map(\.plusCode).joined(separator: " ") : ""
                 ]
                 .contains { $0.localizedCaseInsensitiveContains(query) }
             }

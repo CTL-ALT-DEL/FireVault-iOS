@@ -111,11 +111,20 @@ final class FireVaultStore: ObservableObject {
         categoryRuleSuppressedAccountIDs = Set(defaults.stringArray(forKey: suppressionKey) ?? [])
         locationStatus = activeDemoMode ? "Demo location ready" : "Location ready"
 
-        let migratedAccounts = activeDemoMode
+        var migratedAccounts = activeDemoMode
             ? Self.savedAccounts(defaults: defaults, key: Key.demoAccounts) ?? Self.demoAccounts
             : Self.savedAccounts(defaults: defaults, key: Key.productionAccounts) ?? []
+        let plusCodePreferences = FireVaultNativeSettingsStore().preferences.plusCodes
+        let repairedLegacyPlusCodes = Self.repairPlusCodes(
+            in: &migratedAccounts,
+            preferences: plusCodePreferences
+        )
         accounts = initialArchiveURL.flatMap(FireVaultAccountArchive.load(from:))
             ?? migratedAccounts
+        let repairedArchivePlusCodes = Self.repairPlusCodes(
+            in: &accounts,
+            preferences: plusCodePreferences
+        )
         if let archiveURL = initialArchiveURL,
            !FileManager.default.fileExists(atPath: archiveURL.path),
            let migrationData = try? JSONEncoder().encode(accounts) {
@@ -127,6 +136,9 @@ final class FireVaultStore: ObservableObject {
                     immediate: true
                 )
             }
+        }
+        if repairedLegacyPlusCodes || repairedArchivePlusCodes {
+            persistAccounts()
         }
     }
 
@@ -158,11 +170,17 @@ final class FireVaultStore: ObservableObject {
         let key = demoMode ? Key.demoAccounts : Key.productionAccounts
         guard let refreshed = accountArchiveURL.flatMap(FireVaultAccountArchive.load(from:))
             ?? Self.savedAccounts(defaults: defaults, key: key) else { return }
-        accounts = refreshed
+        var repairedAccounts = refreshed
+        let didRepairPlusCodes = Self.repairPlusCodes(
+            in: &repairedAccounts,
+            preferences: FireVaultNativeSettingsStore().preferences.plusCodes
+        )
+        accounts = repairedAccounts
         if let selectedAccountID, !accounts.contains(where: { $0.id == selectedAccountID }) {
             self.selectedAccountID = nil
         }
         applyCategoryRules()
+        if didRepairPlusCodes { persistAccounts() }
     }
 
     @discardableResult
@@ -871,8 +889,16 @@ final class FireVaultStore: ObservableObject {
         longitude: Double? = nil,
         pinColor: String = "Purple"
     ) -> FireVaultWorkspaceLocation? {
+        let plusCodePreferences = FireVaultNativeSettingsStore().preferences.plusCodes
         guard let index = accounts.firstIndex(where: { $0.id == accountID }),
-              Self.isValidCoordinatePair(latitude: latitude, longitude: longitude) else { return nil }
+              Self.isValidCoordinatePair(latitude: latitude, longitude: longitude),
+              let storedPlusCode = FireVaultPlusCode.codeForStorage(
+                  enteredCode: plusCode,
+                  latitude: latitude,
+                  longitude: longitude,
+                  length: plusCodePreferences.locationLength,
+                  autoGenerate: plusCodePreferences.autoGenerate
+              ) else { return nil }
         let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedLabel.isEmpty else { return nil }
         let location = FireVaultWorkspaceLocation(
@@ -882,7 +908,7 @@ final class FireVaultStore: ObservableObject {
             type: type.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "Other"
                 : type.trimmingCharacters(in: .whitespacesAndNewlines),
-            plusCode: plusCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+            plusCode: storedPlusCode,
             latitude: latitude,
             longitude: longitude,
             pinColor: FireVaultMapPinColor(rawValue: pinColor)?.rawValue
@@ -905,16 +931,24 @@ final class FireVaultStore: ObservableObject {
         longitude: Double?,
         pinColor: String = "Purple"
     ) -> Bool {
+        let plusCodePreferences = FireVaultNativeSettingsStore().preferences.plusCodes
         guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
               let locationIndex = accounts[accountIndex].locations.firstIndex(where: { $0.id == locationID }),
-              Self.isValidCoordinatePair(latitude: latitude, longitude: longitude) else { return false }
+              Self.isValidCoordinatePair(latitude: latitude, longitude: longitude),
+              let storedPlusCode = FireVaultPlusCode.codeForStorage(
+                  enteredCode: plusCode,
+                  latitude: latitude,
+                  longitude: longitude,
+                  length: plusCodePreferences.locationLength,
+                  autoGenerate: plusCodePreferences.autoGenerate
+              ) else { return false }
         let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedLabel.isEmpty else { return false }
         accounts[accountIndex].locations[locationIndex].label = trimmedLabel
         accounts[accountIndex].locations[locationIndex].subtitle = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedType = type.trimmingCharacters(in: .whitespacesAndNewlines)
         accounts[accountIndex].locations[locationIndex].type = trimmedType.isEmpty ? "Other" : trimmedType
-        accounts[accountIndex].locations[locationIndex].plusCode = plusCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        accounts[accountIndex].locations[locationIndex].plusCode = storedPlusCode
         accounts[accountIndex].locations[locationIndex].latitude = latitude
         accounts[accountIndex].locations[locationIndex].longitude = longitude
         accounts[accountIndex].locations[locationIndex].pinColor =
@@ -1356,6 +1390,27 @@ final class FireVaultStore: ObservableObject {
             longitude: account.longitude,
             recentText: account.recent.first?.date ?? ""
         )
+    }
+
+    /// Repairs pre-integrity-build data without changing coordinates or any
+    /// unrelated account fields. Re-running this migration is a no-op.
+    @discardableResult
+    private static func repairPlusCodes(
+        in accounts: inout [FireVaultWorkspaceAccount],
+        preferences: FireVaultPlusCodePreferences
+    ) -> Bool {
+        guard preferences.autoGenerate else { return false }
+        var changed = false
+        for accountIndex in accounts.indices {
+            for locationIndex in accounts[accountIndex].locations.indices {
+                guard let coordinate = accounts[accountIndex].locations[locationIndex].coordinate else { continue }
+                let expected = FireVaultPlusCode.encode(coordinate, length: preferences.locationLength)
+                guard accounts[accountIndex].locations[locationIndex].plusCode != expected else { continue }
+                accounts[accountIndex].locations[locationIndex].plusCode = expected
+                changed = true
+            }
+        }
+        return changed
     }
 
     private static func distanceLabel(_ meters: Double) -> String {

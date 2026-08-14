@@ -9,6 +9,7 @@ import SwiftUI
 import Combine
 import MapKit
 import UniformTypeIdentifiers
+import UIKit
 
 struct FireVaultWorkspaceAccount: Codable, Identifiable, Equatable {
     var id: String
@@ -1158,6 +1159,7 @@ private struct ArrivalPointDetailView: View {
     @State private var mapPosition: MapCameraPosition
     @State private var isShowingEditor = false
     @State private var positionStatus = "Drag on the map to move this pin"
+    @Environment(\.openURL) private var openURL
 
     init(
         account: FireVaultWorkspaceAccount,
@@ -1249,6 +1251,24 @@ private struct ArrivalPointDetailView: View {
                     .frame(maxWidth: .infinity)
                     .disabled(coordinate == nil)
                 }
+
+                if !location.plusCode.isEmpty {
+                    HStack(spacing: 10) {
+                        Button("Copy Code", systemImage: "doc.on.doc") {
+                            UIPasteboard.general.string = location.plusCode
+                            positionStatus = "Plus Code copied"
+                        }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+
+                        Button("Google Maps", systemImage: "map.fill") {
+                            guard let url = FireVaultPlusCode.googleMapsURL(for: location.plusCode) else { return }
+                            openURL(url)
+                        }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+                    }
+                }
             }
             .padding(14)
             .background(FieldWorkspacePalette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -1278,10 +1298,17 @@ private struct ArrivalPointDetailView: View {
                     pinColor: draft.pinColor.rawValue
                 )
                 guard didSave else { return false }
+                let preferences = FireVaultNativeSettingsStore().preferences.plusCodes
                 location.label = draft.label
                 location.subtitle = draft.subtitle
                 location.type = draft.type
-                location.plusCode = draft.plusCode
+                location.plusCode = FireVaultPlusCode.codeForStorage(
+                    enteredCode: draft.plusCode,
+                    latitude: draft.latitude,
+                    longitude: draft.longitude,
+                    length: preferences.locationLength,
+                    autoGenerate: preferences.autoGenerate
+                ) ?? draft.plusCode
                 location.latitude = draft.latitude
                 location.longitude = draft.longitude
                 location.pinColor = draft.pinColor.rawValue
@@ -1297,6 +1324,7 @@ private struct ArrivalPointDetailView: View {
 
     private func savePinPosition() {
         guard let coordinate else { return }
+        let preferences = FireVaultNativeSettingsStore().preferences.plusCodes
         let didSave = store.updateLocation(
             accountID: account.id,
             locationID: location.id,
@@ -1314,6 +1342,13 @@ private struct ArrivalPointDetailView: View {
         }
         location.latitude = coordinate.latitude
         location.longitude = coordinate.longitude
+        location.plusCode = FireVaultPlusCode.codeForStorage(
+            enteredCode: location.plusCode,
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            length: preferences.locationLength,
+            autoGenerate: preferences.autoGenerate
+        ) ?? location.plusCode
         positionStatus = "Pin position saved"
         UISelectionFeedbackGenerator().selectionChanged()
     }
@@ -1477,6 +1512,7 @@ struct FireVaultLocationEditorSheet: View {
     @State private var mapPosition: MapCameraPosition
     @State private var mapLayer: FireVaultArrivalMapLayer = .satellite
     @FocusState private var isTextInputFocused: Bool
+    private let plusCodePreferences = FireVaultNativeSettingsStore().preferences.plusCodes
 
     init(
         accountName: String,
@@ -1516,7 +1552,15 @@ struct FireVaultLocationEditorSheet: View {
     }
 
     private var canSave: Bool {
-        !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && parsedCoordinates != nil
+        !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && parsedCoordinates != nil
+            && plusCodeEntryIsValid
+    }
+
+    private var plusCodeEntryIsValid: Bool {
+        if locationCoordinate != nil && plusCodePreferences.autoGenerate { return true }
+        let trimmed = plusCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || FireVaultPlusCode.normalizedFullCode(trimmed) != nil
     }
 
     var body: some View {
@@ -1535,6 +1579,19 @@ struct FireVaultLocationEditorSheet: View {
                     TextField("Plus Code", text: $plusCode)
                         .textInputAutocapitalization(.characters)
                         .focused($isTextInputFocused)
+                    if let locationCoordinate, plusCodePreferences.autoGenerate {
+                        LabeledContent("Generated from pin") {
+                            Text(FireVaultPlusCode.encode(locationCoordinate, length: plusCodePreferences.locationLength))
+                                .font(.caption.monospaced().bold())
+                                .foregroundStyle(FieldWorkspacePalette.blue)
+                                .textSelection(.enabled)
+                        }
+                    } else if !plusCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                              FireVaultPlusCode.normalizedFullCode(plusCode) == nil {
+                        Text("Enter a full Plus Code, such as 85M5JR93+4C. Short codes need nearby city context and are not saved by FireVault.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
 
                     Picker("Pin Color", selection: $pinColor) {
                         ForEach(FireVaultMapPinColor.allCases) { option in
@@ -1657,6 +1714,9 @@ struct FireVaultLocationEditorSheet: View {
     private func apply(_ coordinate: CLLocationCoordinate2D) {
         latitudeText = String(format: "%.6f", coordinate.latitude)
         longitudeText = String(format: "%.6f", coordinate.longitude)
+        if plusCodePreferences.autoGenerate {
+            plusCode = FireVaultPlusCode.encode(coordinate, length: plusCodePreferences.locationLength)
+        }
         mapPosition = .region(.init(
             center: coordinate,
             span: .init(latitudeDelta: 0.0005, longitudeDelta: 0.0005)

@@ -13,6 +13,82 @@ import SwiftUI
 
 @MainActor
 final class FireVaultTests: XCTestCase {
+    func testPlusCodeMatchesOfficialZurichReferenceAtNormalAndExtraPrecision() {
+        let coordinate = CLLocationCoordinate2D(latitude: 47.365590, longitude: 8.524997)
+        XCTAssertEqual(FireVaultPlusCode.encode(coordinate, length: 10), "8FVC9G8F+6X")
+        XCTAssertEqual(FireVaultPlusCode.encode(coordinate, length: 11), "8FVC9G8F+6XQ")
+    }
+
+    func testPlusCodeValidationNormalizesFullCodesAndRejectsAmbiguousShortCodes() {
+        XCTAssertEqual(FireVaultPlusCode.normalizedFullCode(" 8fvc9g8f+6xq "), "8FVC9G8F+6XQ")
+        XCTAssertNil(FireVaultPlusCode.normalizedFullCode("9G8F+6X"))
+        XCTAssertNil(FireVaultPlusCode.normalizedFullCode("8FVC9G8F+1X"))
+    }
+
+    func testPlusCodeStorageRegeneratesFromAuthoritativePinCoordinates() {
+        let code = FireVaultPlusCode.codeForStorage(
+            enteredCode: "8FVC9G8F+6X",
+            latitude: 43.615,
+            longitude: -116.202,
+            length: 11,
+            autoGenerate: true
+        )
+        XCTAssertEqual(code, FireVaultPlusCode.encode(.init(latitude: 43.615, longitude: -116.202), length: 11))
+        XCTAssertNotEqual(code, "8FVC9G8F+6X")
+    }
+
+    func testPlusCodeGoogleMapsURLUsesFreeMapsSearchURL() {
+        let url = FireVaultPlusCode.googleMapsURL(for: "8FVC9G8F+6X")
+        let components = url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+        XCTAssertEqual(components?.host, "www.google.com")
+        XCTAssertEqual(components?.queryItems?.first(where: { $0.name == "api" })?.value, "1")
+        XCTAssertEqual(components?.queryItems?.first(where: { $0.name == "query" })?.value, "8FVC9G8F+6X")
+    }
+
+    func testStoreRepairsLegacyStalePlusCodesWhenAccountsLoad() throws {
+        let suite = "FireVaultTests.PlusCodeMigration.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let coordinate = CLLocationCoordinate2D(latitude: 43.6177, longitude: -116.1968)
+        let account = FireVaultWorkspaceAccount(
+            id: "legacy-account",
+            name: "Legacy Site",
+            address: "Boise, ID",
+            category: "Commercial",
+            accountId: "LEGACY-1",
+            phone: "",
+            favorite: false,
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            tags: [],
+            notes: [],
+            documents: [],
+            equipment: [],
+            locations: [
+                .init(
+                    id: "legacy-location",
+                    label: "Main Panel",
+                    subtitle: "Lobby",
+                    type: "Panel",
+                    plusCode: "JRM3+4C",
+                    latitude: coordinate.latitude,
+                    longitude: coordinate.longitude,
+                    pinColor: "Red"
+                )
+            ],
+            recent: []
+        )
+        defaults.set(
+            try JSONEncoder().encode([account]),
+            forKey: "firevault.native.production-accounts.v1"
+        )
+
+        let store = FireVaultStore(defaults: defaults)
+        let repaired = try XCTUnwrap(store.accounts.first?.locations.first?.plusCode)
+        XCTAssertEqual(repaired, FireVaultPlusCode.encode(coordinate, length: 11))
+    }
+
     func testWarmIvoryPaletteResolvesToCreamSurfacesInLightAppearance() {
         let lightTraits = UITraitCollection(userInterfaceStyle: .light)
         let darkTraits = UITraitCollection(userInterfaceStyle: .dark)
@@ -615,7 +691,10 @@ final class FireVaultTests: XCTestCase {
             )
         )
         XCTAssertEqual(location.label, "Main Entrance")
-        XCTAssertEqual(location.plusCode, "85M5JR93+4C")
+        XCTAssertEqual(
+            location.plusCode,
+            FireVaultPlusCode.encode(.init(latitude: 43.6177, longitude: -116.1968), length: 11)
+        )
 
         XCTAssertTrue(
             store.updateLocation(
@@ -635,7 +714,10 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(updatedLocation.label, "Fire Panel")
         XCTAssertEqual(updatedLocation.subtitle, "Electrical room")
         XCTAssertEqual(updatedLocation.type, "Panel")
-        XCTAssertEqual(updatedLocation.plusCode, "85M5JR94+5D")
+        XCTAssertEqual(
+            updatedLocation.plusCode,
+            FireVaultPlusCode.encode(.init(latitude: 43.618, longitude: -116.197), length: 11)
+        )
         XCTAssertEqual(updatedLocation.latitude, 43.618)
         XCTAssertEqual(updatedLocation.longitude, -116.197)
         XCTAssertTrue(updatedAccount.favorite)

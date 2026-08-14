@@ -1618,8 +1618,14 @@ private struct NativeAccountsView: View {
 
     private var accounts: [FireVaultNativeAccount] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let filtered = query.isEmpty ? payload.accounts : payload.accounts.filter {
-            [$0.name, $0.address, $0.accountId, $0.category].joined(separator: " ").lowercased().contains(query)
+        let filtered = query.isEmpty ? payload.accounts : payload.accounts.filter { account in
+            let locationCodes = settings.preferences.plusCodes.searchable
+                ? store.accounts.first(where: { $0.id == account.id })?.locations.map(\.plusCode).joined(separator: " ") ?? ""
+                : ""
+            return [account.name, account.address, account.accountId, account.category, locationCodes]
+                .joined(separator: " ")
+                .lowercased()
+                .contains(query)
         }
         switch sort {
         case .alphabetic: return filtered.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
