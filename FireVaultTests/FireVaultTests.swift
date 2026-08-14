@@ -37,6 +37,23 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(settings.isFeatureVisible("tab.accounts"))
     }
 
+    func testBroadNearbyModuleDisablesRelatedIOSComponents() throws {
+        let suite = "FireVaultTests.RemoteFeatures.Parent.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(
+            try JSONEncoder().encode(["nearby_accounts": false]),
+            forKey: "firevault.remote.features.v1"
+        )
+
+        let settings = FireVaultNativeSettingsStore(defaults: defaults)
+
+        XCTAssertFalse(settings.isFeatureVisible("tab.nearby"))
+        XCTAssertFalse(settings.isFeatureVisible("nearby.map"))
+        XCTAssertFalse(settings.isFeatureVisible("nearby.list"))
+        XCTAssertTrue(settings.isFeatureVisible("tab.accounts"))
+    }
+
     func testTripLogLiveActivityTimerReferencePreservesElapsedDuration() {
         let updatedAt = Date(timeIntervalSince1970: 1_700_000_600)
         let state = FireVaultTripLogActivityAttributes.ContentState(
