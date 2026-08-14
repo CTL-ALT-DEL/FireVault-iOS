@@ -255,6 +255,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
     @State private var accountScrollIsActive = false
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var mapLayer: FireVaultIPadNearbyMapLayer = .standard
+    @State private var mapIs3D = true
     @State private var showsTripLogControls = false
     @State private var confirmsTripLogEnd = false
     @State private var tripLogControlsTask: Task<Void, Never>?
@@ -771,7 +772,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                     centerCoordinate: coordinate,
                     distance: 950,
                     heading: 0,
-                    pitch: 52
+                    pitch: mapIs3D ? 52 : 0
                 )
             )
         }
@@ -783,6 +784,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
         case "hybrid": .hybrid
         default: .standard
         }
+        mapIs3D = settings.gps.resolvedDefaultMapIs3D
         selectedID = nearbyRows.first?.id
         scrollingID = selectedID
         accountScrollIsActive = false
@@ -793,7 +795,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                 centerCoordinate: overviewRegion.center,
                 distance: max(1_600, max(latitudeDistance, longitudeDistance) * 1.8),
                 heading: 0,
-                pitch: 42
+                pitch: mapIs3D ? 42 : 0
             )
         )
     }

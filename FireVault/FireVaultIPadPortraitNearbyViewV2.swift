@@ -38,6 +38,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
     @State private var scrollingID: String?
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var mapLayer: FireVaultNearbyMapLayer = .standard
+    @State private var mapIs3D = true
     @State private var zoomLevel = 0.72
     @State private var showsZoomSlider = false
     @State private var zoomVisibilityToken = UUID()
@@ -879,7 +880,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                     centerCoordinate: center,
                     distance: distance,
                     heading: 0,
-                    pitch: selectedRow == nil ? 38 : 48
+                    pitch: mapIs3D ? (selectedRow == nil ? 38 : 48) : 0
                 )
             )
         }
@@ -903,6 +904,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
         case "hybrid": .hybrid
         default: .standard
         }
+        mapIs3D = settings.gps.resolvedDefaultMapIs3D
         selectedID = nearbyRows.first?.id
         scrollingID = selectedID
         zoomLevel = selectedID == nil ? 0.35 : 0.72
@@ -916,7 +918,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                     centerCoordinate: overviewRegion.center,
                     distance: max(1_600, max(latitudeDistance, longitudeDistance) * 1.8),
                     heading: 0,
-                    pitch: 38
+                    pitch: mapIs3D ? 38 : 0
                 )
             )
         } else {

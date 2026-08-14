@@ -1627,7 +1627,7 @@ struct NativeManualView: View {
 
             Section("Photos, Maps & Location") {
                 manualItem("Photo overlays", "Resize and position the account-information overlay inside the 4:3 capture area. Configure the FireVault logo separately.", "camera.filters")
-                manualItem("Map layers", "Choose Standard, Satellite, or Hybrid as the default layer under GPS & Maps.", "square.3.layers.3d")
+                manualItem("Map layers", "Choose Standard, Satellite, or Hybrid in either 2D or 3D under GPS & Maps.", "square.3.layers.3d")
                 manualItem("GPS Diagnostics", "Inspect live coordinates, accuracy, elevation, speed, direction, source data, and rolling charts.", "waveform.path.ecg.rectangle")
                 manualItem("Plus Codes", "Generate compact location codes from GPS coordinates for accounts and saved arrival points.", "plus.square.dashed")
             }

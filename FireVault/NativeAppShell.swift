@@ -434,6 +434,7 @@ private struct NativeNearbyView: View {
         .padding(.top, 4)
         .task {
             mapLayer = FireVaultMapLayer(rawValue: settings.gps.resolvedDefaultMapLayer) ?? .standard
+            mapIs3D = settings.gps.resolvedDefaultMapIs3D
             scrollAccountID = nearbyRows.first?.id
             if payload.demoMode {
                 cameraPosition = overviewCameraPosition
@@ -2960,13 +2961,13 @@ private struct NativeGPSSettingsView: View {
             Section {
                 LabeledContent("Map provider", value: "Apple Maps")
 
-                Picker("Default map layer", selection: Binding(
-                    get: { draft.defaultMapLayer ?? "standard" },
-                    set: { draft.defaultMapLayer = $0 }
-                )) {
-                    Label("Standard", systemImage: "map").tag("standard")
-                    Label("Satellite", systemImage: "globe.americas.fill").tag("satellite")
-                    Label("Hybrid", systemImage: "square.3.layers.3d").tag("hybrid")
+                Picker("Default map layer", selection: defaultMapAppearance) {
+                    Label("Standard", systemImage: "map").tag("standard-2d")
+                    Label("Standard 3D", systemImage: "view.3d").tag("standard-3d")
+                    Label("Satellite", systemImage: "globe.americas.fill").tag("satellite-2d")
+                    Label("Satellite 3D", systemImage: "view.3d").tag("satellite-3d")
+                    Label("Hybrid", systemImage: "square.3.layers.3d").tag("hybrid-2d")
+                    Label("Hybrid 3D", systemImage: "building.2.crop.circle").tag("hybrid-3d")
                 }
                 .pickerStyle(.menu)
 
@@ -2990,7 +2991,7 @@ private struct NativeGPSSettingsView: View {
             } header: {
                 Text("Map Preferences")
             } footer: {
-                Text("Choose Standard, Satellite, or Hybrid as the opening layer. Nearby opens in 3D. The distance controls the accounts displayed on its map and list.")
+                Text("Choose Standard, Satellite, or Hybrid in either 2D or 3D. This becomes the opening appearance for Nearby maps. The distance controls the accounts displayed on the map and list.")
             }
 
             Section("GPS Tools") {
@@ -3084,6 +3085,20 @@ private struct NativeGPSSettingsView: View {
     private func save() {
         settings.saveGPS(draft)
         saved = true
+    }
+
+    private var defaultMapAppearance: Binding<String> {
+        Binding(
+            get: {
+                "\(draft.resolvedDefaultMapLayer)-\(draft.resolvedDefaultMapIs3D ? "3d" : "2d")"
+            },
+            set: { selection in
+                let components = selection.split(separator: "-")
+                guard components.count == 2 else { return }
+                draft.defaultMapLayer = String(components[0])
+                draft.defaultMapIs3D = components[1] == "3d"
+            }
+        )
     }
 }
 

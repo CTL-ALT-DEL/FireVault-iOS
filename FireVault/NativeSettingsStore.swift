@@ -226,11 +226,13 @@ struct FireVaultGPSPreferences: Codable, Equatable {
     var addressAssistanceEnabled = true
     var hapticsEnabled: Bool? = true
     var defaultMapLayer: String?
+    var defaultMapIs3D: Bool?
     var tripLogMinimumUnknownStopMinutes: Int?
     var tripLogRejectPoorAccuracyStops: Bool?
     var tripLogMergeNearbyStops: Bool?
     var hapticsAreEnabled: Bool { hapticsEnabled ?? true }
     var resolvedDefaultMapLayer: String { defaultMapLayer ?? "standard" }
+    var resolvedDefaultMapIs3D: Bool { defaultMapIs3D ?? true }
     var resolvedTripLogMinimumUnknownStopMinutes: Int {
         tripLogMinimumUnknownStopMinutes ?? 5
     }
@@ -244,6 +246,7 @@ struct FireVaultGPSPreferences: Codable, Equatable {
         if !["standard", "satellite", "hybrid"].contains(copy.resolvedDefaultMapLayer) {
             copy.defaultMapLayer = "standard"
         }
+        if copy.defaultMapIs3D == nil { copy.defaultMapIs3D = true }
         if ![5, 7, 10].contains(copy.resolvedTripLogMinimumUnknownStopMinutes) {
             copy.tripLogMinimumUnknownStopMinutes = 5
         }
