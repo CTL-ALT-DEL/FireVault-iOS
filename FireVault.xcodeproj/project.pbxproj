@@ -204,8 +204,8 @@
 				A8500000000000000000000C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				DC8B01CF300F1E3700372A8B /* FireVault */,
 				A85000000000000000000006 /* FireVaultWidgetShared */,
+				DC8B01CF300F1E3700372A8B /* FireVault */,
 			);
 			name = FireVault;
 			packageProductDependencies = (
