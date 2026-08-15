@@ -21,6 +21,7 @@ struct FireVaultIPadBreadcrumbsView: View {
     @State private var selectedStop: FireVaultIPadStopSelection?
     @State private var confirmsEnd = false
     @State private var showsReport = false
+    @State private var showsHistory = false
 
     private var selectedDay: FireVaultBreadcrumbDay? {
         if let selectedDayID {
@@ -118,6 +119,15 @@ struct FireVaultIPadBreadcrumbsView: View {
                 )
             }
         }
+        .sheet(isPresented: $showsHistory) {
+            FireVaultTripLogHistoryCalendarView(
+                days: breadcrumbs.days,
+                selectedDayID: selectedDayID
+            ) { dayID in
+                selectedDayID = dayID
+                showsHistory = false
+            }
+        }
         .accessibilityIdentifier("ipad-breadcrumbs-workspace")
     }
 
@@ -199,17 +209,8 @@ struct FireVaultIPadBreadcrumbsView: View {
     }
 
     private var historyMenu: some View {
-        Menu {
-            ForEach(breadcrumbs.days) { day in
-                Button {
-                    selectedDayID = day.id
-                } label: {
-                    Label(
-                        day.startedAt.formatted(date: .abbreviated, time: .omitted),
-                        systemImage: day.isActive ? "record.circle" : "calendar"
-                    )
-                }
-            }
+        Button {
+            showsHistory = true
         } label: {
             VStack(spacing: 4) {
                 Image(systemName: "calendar.badge.clock")

@@ -22,6 +22,7 @@ struct FireVaultTripLogPortraitView: View {
     @State private var editingStop: FireVaultTripLogPortraitStopSelection?
     @State private var confirmsEnd = false
     @State private var showsReport = false
+    @State private var showsHistory = false
     @State private var waypointPulse = false
     @State private var waypointPulseTask: Task<Void, Never>?
 
@@ -117,6 +118,15 @@ struct FireVaultTripLogPortraitView: View {
                     ),
                     availableDays: breadcrumbs.days
                 )
+            }
+        }
+        .sheet(isPresented: $showsHistory) {
+            FireVaultTripLogHistoryCalendarView(
+                days: breadcrumbs.days,
+                selectedDayID: selectedDayID
+            ) { dayID in
+                selectedDayID = dayID
+                showsHistory = false
             }
         }
     }
@@ -295,17 +305,8 @@ struct FireVaultTripLogPortraitView: View {
     }
 
     private var historyMenu: some View {
-        Menu {
-            ForEach(breadcrumbs.days) { day in
-                Button {
-                    selectedDayID = day.id
-                } label: {
-                    Label(
-                        day.startedAt.formatted(date: .abbreviated, time: .omitted),
-                        systemImage: day.isActive ? "record.circle" : "calendar"
-                    )
-                }
-            }
+        Button {
+            showsHistory = true
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: "calendar.badge.clock")

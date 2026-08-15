@@ -2676,7 +2676,7 @@ struct FireVaultBreadcrumbsView: View {
     }
 }
 
-private struct FireVaultTripLogHistoryCalendarView: View {
+struct FireVaultTripLogHistoryCalendarView: View {
     let days: [FireVaultBreadcrumbDay]
     let selectedDayID: UUID?
     let onSelect: (UUID) -> Void
