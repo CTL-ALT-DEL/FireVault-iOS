@@ -402,7 +402,7 @@ struct FieldWorkspaceView: View {
                                 .foregroundStyle(FieldWorkspacePalette.blue)
                             Text(account.locations.isEmpty ? "Account location" : "\(account.locations.count) precise locations")
                                 .font(.headline)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                         }
                         Spacer()
                         Image(systemName: "chevron.right")

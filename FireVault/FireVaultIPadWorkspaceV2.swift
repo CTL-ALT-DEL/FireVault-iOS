@@ -81,7 +81,7 @@ struct FireVaultIPadWorkspaceV2: View {
                     .foregroundStyle(.secondary)
                     .padding(.leading, 10)
 
-                ForEach(FireVaultShellTab.allCases) { tab in
+                ForEach(FireVaultShellTab.allCases.filter { $0.isVisible(in: settings) }) { tab in
                     sidebarButton(tab)
                 }
             }
@@ -611,6 +611,8 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                                         )
                                         .overlay { Circle().stroke(.white.opacity(0.88), lineWidth: 2) }
                                         .shadow(radius: 5)
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Circle())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -696,7 +698,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(row.account.name)
                             .font(.subheadline.bold())
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .lineLimit(2)
 
                         Text(row.account.address)

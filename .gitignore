@@ -12,3 +12,13 @@ DerivedData-*/
 **/DerivedData-*/
 .derived-data*/
 build/
+
+# Local secrets and signing artifacts
+.env
+.env.*
+!.env.example
+*.p8
+*.p12
+*.cer
+*.pem
+*.mobileprovision

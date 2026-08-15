@@ -124,6 +124,17 @@ enum FireVaultShellTab: String, CaseIterable, Identifiable {
         case .settings: "slider.horizontal.3"
         }
     }
+
+    @MainActor
+    func isVisible(in settings: FireVaultNativeSettingsStore) -> Bool {
+        switch self {
+        case .nearby: settings.isFeatureVisible("tab.nearby")
+        case .accounts: settings.isFeatureVisible("tab.accounts")
+        case .trip: settings.isFeatureVisible("tab.trip")
+        case .photo: settings.isFeatureVisible("tab.photo")
+        case .settings: true
+        }
+    }
 }
 
 struct NativeAppShellView: View {
@@ -199,7 +210,7 @@ struct NativeAppShellView: View {
 
     private var nativeNavigation: some View {
         HStack(spacing: 0) {
-            ForEach(FireVaultShellTab.allCases.filter(isTabVisible)) { tab in
+            ForEach(FireVaultShellTab.allCases.filter { $0.isVisible(in: settings) }) { tab in
                 let isSelected = store.selectedTab == tab
                 let isTripRecording = tab == .trip && breadcrumbs.isRecording
                 Button {
@@ -269,15 +280,6 @@ struct NativeAppShellView: View {
         .accessibilityIdentifier("main-navigation")
     }
 
-    private func isTabVisible(_ tab: FireVaultShellTab) -> Bool {
-        switch tab {
-        case .nearby: settings.isFeatureVisible("tab.nearby")
-        case .accounts: settings.isFeatureVisible("tab.accounts")
-        case .trip: settings.isFeatureVisible("tab.trip")
-        case .photo: settings.isFeatureVisible("tab.photo")
-        case .settings: true
-        }
-    }
 }
 
 private enum FireVaultMapLayer: String, CaseIterable, Identifiable {
@@ -1028,7 +1030,7 @@ private struct NativeNearbyView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Label("Location Access Needed", systemImage: "location.slash.fill")
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 Text("Nearby uses this iPhone’s current location to calculate which mapped accounts are inside your selected radius.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -1046,7 +1048,7 @@ private struct NativeNearbyView: View {
                 HStack {
                     Label("Map Imported Accounts", systemImage: "mappin.and.ellipse")
                         .font(.headline)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                     Spacer()
                     if store.mappedAccountCount > 0,
                        store.geocodingProgress?.isRunning != true {

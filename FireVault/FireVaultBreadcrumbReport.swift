@@ -1606,11 +1606,13 @@ enum FireVaultTripLogPDFRenderer {
         detail: FireVaultTripLogReportDetail,
         mapImage: UIImage?
     ) -> Data {
+        let stopPages = makeDailyStopPages(report.visits, detail: detail)
+        let totalPages = stopPages.count
         let renderer = UIGraphicsPDFRenderer(bounds: pageBounds)
         return renderer.pdfData { context in
             var y: CGFloat = 0
 
-            func beginPage() {
+            func beginSummaryPage() {
                 context.beginPage()
                 y = drawHeader(
                         title: "TRIP LOG DAILY REPORT",
@@ -1620,11 +1622,12 @@ enum FireVaultTripLogPDFRenderer {
                         technician: report.technicianName,
                         company: report.companyName,
                         page: 1,
+                        totalPages: totalPages,
                         generatedAt: report.generatedAt
                     )
             }
 
-            beginPage()
+            beginSummaryPage()
             y = drawMetrics(
                 [
                     ("DISTANCE", report.distanceText),
@@ -1652,25 +1655,76 @@ enum FireVaultTripLogPDFRenderer {
             if report.visits.isEmpty {
                 y += drawText("No stops were recorded for this workday.", font: .systemFont(ofSize: 10), color: .darkGray, x: 42, y: y + 12, width: 528)
             } else {
-                let availableHeight = max(30, 742 - y)
-                let rowBudget = max(1, Int(availableHeight / 30))
-                let visits = Array(report.visits.prefix(rowBudget))
-                let rowHeight = min(48, max(30, availableHeight / CGFloat(max(1, visits.count))))
-                for visit in visits {
-                    y = drawStopRow(visit, note: "", y: y, height: rowHeight)
-                }
-                if report.visits.count > visits.count {
-                    _ = drawText(
-                        "+ \(report.visits.count - visits.count) additional stops summarized in the Trip Log archive.",
-                        font: .italicSystemFont(ofSize: 9),
-                        color: .darkGray,
-                        x: 42,
-                        y: y + 10,
-                        width: 528
+                for visit in stopPages[0] {
+                    let presentation = dailyStopPresentation(visit, detail: detail)
+                    y = drawStopRow(
+                        visit,
+                        note: presentation.note,
+                        y: y,
+                        height: presentation.height
                     )
+                }
+
+                for pageIndex in stopPages.indices.dropFirst() {
+                    context.beginPage()
+                    y = drawContinuationHeader(
+                        title: "DAILY STOP DETAILS",
+                        date: report.dateText,
+                        page: pageIndex + 1,
+                        totalPages: totalPages,
+                        generatedAt: report.generatedAt
+                    )
+                    y = drawSectionTitle("STOP DETAILS • CONTINUED", y: y)
+                    y = drawStopTableHeader(y: y)
+                    for visit in stopPages[pageIndex] {
+                        let presentation = dailyStopPresentation(visit, detail: detail)
+                        y = drawStopRow(
+                            visit,
+                            note: presentation.note,
+                            y: y,
+                            height: presentation.height
+                        )
+                    }
                 }
             }
         }
+    }
+
+    private static func makeDailyStopPages(
+        _ visits: [FireVaultBreadcrumbReport.Visit],
+        detail: FireVaultTripLogReportDetail
+    ) -> [[FireVaultBreadcrumbReport.Visit]] {
+        guard !visits.isEmpty else { return [[]] }
+
+        // The summary, route map, and performance chart leave about 216 points
+        // for rows on page one. Continuation pages use the full report body.
+        let pageBudgets: [CGFloat] = [216, 590]
+        var pages: [[FireVaultBreadcrumbReport.Visit]] = [[]]
+        var pageIndex = 0
+        var usedHeight: CGFloat = 0
+
+        for visit in visits {
+            let height = dailyStopPresentation(visit, detail: detail).height
+            let budget = pageBudgets[min(pageIndex, pageBudgets.count - 1)]
+            if !pages[pageIndex].isEmpty, usedHeight + height > budget {
+                pages.append([])
+                pageIndex += 1
+                usedHeight = 0
+            }
+            pages[pageIndex].append(visit)
+            usedHeight += height
+        }
+        return pages
+    }
+
+    private static func dailyStopPresentation(
+        _ visit: FireVaultBreadcrumbReport.Visit,
+        detail: FireVaultTripLogReportDetail
+    ) -> (note: String, height: CGFloat) {
+        let note = detail == .detailed
+            ? visit.technicianNote.trimmingCharacters(in: .whitespacesAndNewlines)
+            : ""
+        return (note, stopRowHeight(visit: visit, note: note))
     }
 
     static func weekly(
@@ -2160,11 +2214,32 @@ enum FireVaultTripLogPDFRenderer {
     }
 
     private static func stopRowHeight(visit: FireVaultBreadcrumbReport.Visit, note: String) -> CGFloat {
-        var height: CGFloat = 30
-        if !visit.addressText.isEmpty { height += 6 }
-        if !note.isEmpty { height += min(18, CGFloat(note.count / 70 + 1) * 7) }
-        if visit.coordinateText != nil { height += 6 }
-        return height
+        var locationHeight = measuredTextHeight(
+            visit.title,
+            font: .systemFont(ofSize: 10.5, weight: .semibold),
+            width: 305
+        )
+        let detailText = stopDetailText(visit)
+        if !detailText.isEmpty {
+            locationHeight += 1 + measuredTextHeight(
+                detailText,
+                font: .systemFont(ofSize: 7.5),
+                width: 305
+            )
+        }
+        if !note.isEmpty {
+            locationHeight += 1 + measuredTextHeight(
+                "Note: \(note)",
+                font: .italicSystemFont(ofSize: 7.2),
+                width: 305
+            )
+        }
+        let timeHeight = measuredTextHeight(
+            visit.reportTimeText,
+            font: .monospacedSystemFont(ofSize: 8.2, weight: .medium),
+            width: 88
+        )
+        return ceil(max(22, max(locationHeight, timeHeight)) + 12)
     }
 
     private static func drawStopRow(
@@ -2178,23 +2253,21 @@ enum FireVaultTripLogPDFRenderer {
             CGRect(x: 42, y: y, width: 528, height: height).fill()
         }
 
-        let contentTop = y + max(6, (height - 30) / 2)
+        let contentTop = y + 6
         let badge = CGRect(x: 47, y: y + (height - 20) / 2, width: 20, height: 20)
         blue.setFill()
         UIBezierPath(ovalIn: badge).fill()
         drawCenteredText("\(visit.sequence)", font: .systemFont(ofSize: 8.5, weight: .bold), color: .white, rect: badge)
 
-        drawText(visit.reportTimeText, font: .monospacedSystemFont(ofSize: height >= 40 ? 8.2 : 7.5, weight: .medium), color: .darkGray, x: 76, y: contentTop, width: 88)
+        drawText(visit.reportTimeText, font: .monospacedSystemFont(ofSize: 8.2, weight: .medium), color: .darkGray, x: 76, y: contentTop, width: 88)
         var locationY = contentTop
-        locationY += drawText(visit.title, font: .systemFont(ofSize: height >= 40 ? 10.5 : 9.5, weight: .semibold), color: navy, x: 170, y: locationY, width: 305) + 1
-        if !visit.addressText.isEmpty {
-            locationY += drawText(visit.addressText, font: .systemFont(ofSize: height >= 40 ? 8.4 : 7.5), color: .darkGray, x: 170, y: locationY, width: 305) + 1
+        locationY += drawText(visit.title, font: .systemFont(ofSize: 10.5, weight: .semibold), color: navy, x: 170, y: locationY, width: 305) + 1
+        let detailText = stopDetailText(visit)
+        if !detailText.isEmpty {
+            locationY += drawText(detailText, font: .systemFont(ofSize: 7.5), color: .darkGray, x: 170, y: locationY, width: 305) + 1
         }
         if !note.isEmpty {
             locationY += drawText("Note: \(note)", font: .italicSystemFont(ofSize: 7.2), color: .darkGray, x: 170, y: locationY, width: 305) + 1
-        }
-        if height >= 44, let coordinates = visit.coordinateText {
-            _ = drawText("GPS: \(coordinates)", font: .monospacedSystemFont(ofSize: 6.7, weight: .regular), color: .gray, x: 170, y: locationY, width: 305)
         }
         let durationRect = CGRect(x: 492, y: y + (height - 22) / 2, width: 68, height: 22)
         paleBlue.setFill()
@@ -2208,6 +2281,35 @@ enum FireVaultTripLogPDFRenderer {
         line.lineWidth = 0.6
         line.stroke()
         return y + height
+    }
+
+    private static func stopDetailText(_ visit: FireVaultBreadcrumbReport.Visit) -> String {
+        [
+            visit.addressText,
+            visit.coordinateText.map { "GPS: \($0)" } ?? ""
+        ]
+        .filter { !$0.isEmpty }
+        .joined(separator: "  •  ")
+    }
+
+    private static func measuredTextHeight(
+        _ text: String,
+        font: UIFont,
+        width: CGFloat
+    ) -> CGFloat {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 1.5
+        return ceil(
+            NSString(string: text).boundingRect(
+                with: CGSize(width: width, height: 1_000),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: [
+                    .font: font,
+                    .paragraphStyle: paragraph
+                ],
+                context: nil
+            ).height
+        )
     }
 
     private static func drawWeeklyDaySpotlight(

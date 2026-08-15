@@ -383,8 +383,17 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     }
 
     private func checkForArrival() {
-        guard let location = effectiveLocation,
-              let account = sortedMappedAccounts(favoritesOnly: false).first else {
+        // A temporarily stale or unavailable fix is not evidence that the
+        // vehicle left. Preserve the announcement latch until a fresh,
+        // navigation-quality fix proves departure so the same prompt does not
+        // repeatedly reappear while parked.
+        guard let location = proximityLocation(
+            maximumAge: 15,
+            maximumAccuracy: FireVaultBreadcrumbRules.maximumHorizontalAccuracy
+        ) else {
+            return
+        }
+        guard let account = sortedMappedAccounts(favoritesOnly: false).first else {
             announcedArrivalAccountID = nil
             return
         }
@@ -686,8 +695,26 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         return location
     }
 
+    private func proximityLocation(
+        maximumAge: TimeInterval,
+        maximumAccuracy: CLLocationAccuracy
+    ) -> CLLocation? {
+        guard let location = effectiveLocation else { return nil }
+        if store.demoMode { return location }
+        guard FireVaultBreadcrumbRules.isUsableLiveLocation(
+            location,
+            maximumAge: maximumAge
+        ), location.horizontalAccuracy <= maximumAccuracy else {
+            return nil
+        }
+        return location
+    }
+
     private func sortedMappedAccounts(favoritesOnly: Bool) -> [FireVaultWorkspaceAccount] {
-        let location = effectiveLocation
+        let location = proximityLocation(
+            maximumAge: 60,
+            maximumAccuracy: FireVaultBreadcrumbRules.maximumLiveHorizontalAccuracy
+        )
         return store.accounts
             .filter { $0.coordinate != nil && (!favoritesOnly || $0.favorite) }
             .sorted { lhs, rhs in
@@ -702,7 +729,10 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         var details: [String] = []
         let accountID = account.accountId.trimmingCharacters(in: .whitespacesAndNewlines)
         details.append(accountID.isEmpty ? account.category : "#\(accountID)")
-        if let location = effectiveLocation {
+        if let location = proximityLocation(
+            maximumAge: 60,
+            maximumAccuracy: FireVaultBreadcrumbRules.maximumLiveHorizontalAccuracy
+        ) {
             let miles = distance(from: location, to: account) / 1_609.344
             details.append(String(format: "%.1f mi", miles))
         }

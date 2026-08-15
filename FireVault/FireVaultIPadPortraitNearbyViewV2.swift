@@ -738,7 +738,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(row.account.name)
                         .font(.subheadline.bold())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                     Text(row.account.address)
                         .font(.caption)

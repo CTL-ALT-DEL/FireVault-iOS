@@ -189,6 +189,8 @@ struct FireVaultTripLogPortraitView: View {
                                         .background(stopTint(stop), in: Circle())
                                         .overlay { Circle().stroke(.white.opacity(0.9), lineWidth: 2) }
                                         .shadow(radius: 4)
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Circle())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -200,6 +202,7 @@ struct FireVaultTripLogPortraitView: View {
                         }
                     }
                     .mapStyle(.standard(elevation: .realistic))
+                    .id(day.id)
                 }
             }
             .frame(width: width, height: height)

@@ -156,6 +156,10 @@ final class FireVaultAppDelegate: NSObject, UIApplicationDelegate {
         return true
     }
 
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        FireVaultBreadcrumbStore.shared.flushPendingRoutePersistence()
+    }
+
     func application(
         _ application: UIApplication,
         configurationForConnecting connectingSceneSession: UISceneSession,

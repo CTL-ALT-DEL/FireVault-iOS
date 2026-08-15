@@ -247,6 +247,7 @@ struct ContentView: View {
                 handlePendingWidgetDeepLink()
             }
         case .background:
+            activeBreadcrumbs.flushPendingRoutePersistence()
             privacyLock.enteredBackground()
         default:
             break

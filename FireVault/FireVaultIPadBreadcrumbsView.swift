@@ -315,6 +315,8 @@ struct FireVaultIPadBreadcrumbsView: View {
                                     Circle().stroke(.white.opacity(0.9), lineWidth: 2)
                                 }
                                 .shadow(radius: 5)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -326,6 +328,7 @@ struct FireVaultIPadBreadcrumbsView: View {
                 }
             }
             .mapStyle(.hybrid(elevation: .realistic))
+            .id(day.id)
             .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
             .shadow(
                 color: colorScheme == .light ? .black.opacity(0.22) : .clear,
