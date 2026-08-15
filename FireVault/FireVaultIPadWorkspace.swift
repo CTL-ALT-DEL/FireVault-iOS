@@ -989,11 +989,15 @@ private struct FireVaultIPadAccountWorkspace: View {
             .buttonStyle(.borderedProminent)
 
             Button("Scan", systemImage: "doc.viewfinder") {
-                store.addDocument(to: account.id, scan: true)
+                store.selectCaptureAccount(account.id)
+                store.requestCapture(.scan)
+                store.closeAccount(to: .photo)
             }
             .buttonStyle(.bordered)
 
             Button("Photo", systemImage: "camera.fill") {
+                store.selectCaptureAccount(account.id)
+                store.requestCapture(.photo)
                 store.closeAccount(to: .photo)
             }
             .buttonStyle(.bordered)
@@ -1039,7 +1043,7 @@ private struct FireVaultIPadAccountWorkspace: View {
     @ViewBuilder
     private var documentsSection: some View {
         if !account.documents.isEmpty {
-            accountSection(title: "FILES & SCANS", symbol: "doc.viewfinder") {
+            accountSection(title: "PHOTOS & DOCUMENTS", symbol: "photo.on.rectangle.angled") {
                 ForEach(account.documents.prefix(6)) { document in
                     LabeledContent(document.title, value: document.subtitle)
                         .font(.subheadline)

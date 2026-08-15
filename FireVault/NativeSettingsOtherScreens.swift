@@ -1354,7 +1354,7 @@ struct NativeManualView: View {
             }
 
             Section("Accounts & Arrival Maps") {
-                manualItem("Account workspace", "Keep service notes, files and scans, equipment records, and arrival locations together.", "building.2")
+                manualItem("Account workspace", "Keep service notes, photos and documents, equipment records, and arrival locations together.", "building.2")
                 manualItem("Arrival Map", "Review parking and entrance points, edit saved locations, or start walking directions to a selected point.", "figure.walk")
                 manualItem("Category rules", "Create IF/THEN rules, run them immediately, and automatically apply category labels to matching accounts.", "tag.fill")
                 manualItem("CSV import", "Import account records, review the results, and map usable addresses before adding them to the vault.", "tablecells")

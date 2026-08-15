@@ -22,9 +22,9 @@ Do not delete the existing FireVault iPhone app before installing this build. In
 
 1. Open FireVault on the physical iPhone.
 2. Open the correct customer account.
-3. Tap **Scan** in the native Field Workspace action dock.
+3. Tap **Capture**, then choose **Scan Document**.
 4. Capture one or more pages with Apple’s scanner, review the detected edges, and tap **Done**.
-5. Enter a title, choose a document type, add optional notes, and tap **Save Scan**.
-6. Confirm FireVault returns to the same account. Open **Files & Scans** later and verify Preview, Download PDF, and Share.
+5. Confirm the Photo workspace reports that the scan was saved to the selected account.
+6. Return to **Accounts**, open that account, then open **Photos & Documents** and verify View, Share, and Delete.
 
 The Scan Document button appears only in this native iPhone app. It is intentionally hidden in the Safari/PWA version because Apple VisionKit is an iOS-native camera service.

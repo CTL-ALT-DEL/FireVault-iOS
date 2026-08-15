@@ -171,6 +171,7 @@ struct ContentView: View {
                     FireVaultAdaptiveAccountDetailsView(
                         account: account,
                         store: store,
+                        settings: settings,
                         locationService: locationService,
                         returnTab: store.selectedTab,
                         returnTitle: store.selectedTab == .nearby ? "Nearby" : "Account List"

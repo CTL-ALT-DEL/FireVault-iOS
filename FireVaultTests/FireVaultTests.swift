@@ -8,6 +8,7 @@
 import XCTest
 import CoreLocation
 import MapKit
+import UIKit
 @testable import FireVault
 
 @MainActor
@@ -366,7 +367,16 @@ final class FireVaultTests: XCTestCase {
         store.accounts[index].longitude = -116.202
         store.accounts[index].tags = ["Priority"]
         store.accounts[index].notes = [.init(id: "note-1", title: "Panel", text: "Lobby", date: "Today")]
-        store.accounts[index].documents = [.init(id: "doc-1", title: "Report", subtitle: "Annual", kind: "PDF", date: "Today")]
+        store.accounts[index].documents = [
+            .init(
+                id: "doc-1",
+                title: "Report",
+                subtitle: "Annual",
+                kind: "scan",
+                date: "Today",
+                mediaFileName: "annual-report.pdf"
+            )
+        ]
         store.accounts[index].equipment = [.init(id: "equipment-1", title: "FACP", subtitle: "Lobby", status: "Normal")]
         store.accounts[index].locations = [.init(id: "location-1", label: "Panel", subtitle: "Lobby", type: "Equipment", plusCode: "", latitude: 43.615, longitude: -116.202)]
         store.accounts[index].recent = [.init(id: "recent-1", title: "Created", subtitle: "Test", kind: "account", date: "Today")]
@@ -394,6 +404,7 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(updated.tags, ["Priority"])
         XCTAssertEqual(updated.notes.map(\.id), ["note-1"])
         XCTAssertEqual(updated.documents.map(\.id), ["doc-1"])
+        XCTAssertEqual(updated.documents.first?.mediaFileName, "annual-report.pdf")
         XCTAssertEqual(updated.equipment.map(\.id), ["equipment-1"])
         XCTAssertEqual(updated.locations.map(\.id), ["location-1"])
         XCTAssertEqual(updated.recent.map(\.id), ["recent-1"])
@@ -438,6 +449,322 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(persisted.latitude, 42.8734)
         XCTAssertEqual(persisted.longitude, -106.4431)
         XCTAssertEqual(persisted.notes.map(\.id), ["note-1"])
+    }
+
+    func testCapturedAccountPhotoCanBeReopenedAfterStoreReload() throws {
+        let suite = "FireVaultTests.AccountPhoto.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let mediaRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultAccountPhoto-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: mediaRoot)
+        }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
+        let account = store.addAccount()
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 24, height: 18)).image { context in
+            UIColor.systemRed.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 24, height: 18))
+        }
+
+        let document = try store.attachCapturedPhoto(image, to: account.id)
+        let mediaURL = try XCTUnwrap(store.mediaURL(accountID: account.id, documentID: document.id))
+
+        XCTAssertEqual(document.kind, "photo")
+        XCTAssertEqual(mediaURL.pathExtension.lowercased(), "jpg")
+        XCTAssertNotNil(UIImage(contentsOfFile: mediaURL.path))
+
+        let reloaded = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
+        let reopenedURL = try XCTUnwrap(reloaded.mediaURL(accountID: account.id, documentID: document.id))
+        XCTAssertEqual(reopenedURL, mediaURL)
+        XCTAssertNotNil(UIImage(contentsOfFile: reopenedURL.path))
+    }
+
+    func testScannedAccountDocumentProducesAReopenablePDF() throws {
+        let suite = "FireVaultTests.AccountScan.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let mediaRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultAccountScan-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: mediaRoot)
+        }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
+        let account = store.addAccount()
+        let page = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 50)).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 40, height: 50))
+        }
+
+        let document = try store.attachScannedDocument([page, page], to: account.id)
+        let mediaURL = try XCTUnwrap(store.mediaURL(accountID: account.id, documentID: document.id))
+        let data = try Data(contentsOf: mediaURL)
+
+        XCTAssertEqual(document.kind, "scan")
+        XCTAssertEqual(document.subtitle, "2 pages")
+        XCTAssertTrue(data.starts(with: Data("%PDF".utf8)))
+
+        let reloaded = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
+        XCTAssertEqual(reloaded.mediaURL(accountID: account.id, documentID: document.id), mediaURL)
+    }
+
+    func testDeletingAccountMediaRemovesItsFileAndPersistsMetadataRemoval() throws {
+        let suite = "FireVaultTests.DeleteAccountMedia.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let mediaRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultDeleteMedia-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: mediaRoot)
+        }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
+        let account = store.addAccount()
+        let accountIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        store.accounts[accountIndex].notes = [
+            .init(id: "keep-note", title: "Access", text: "Call first", date: "Today")
+        ]
+        store.accounts[accountIndex].equipment = [
+            .init(id: "keep-equipment", title: "FACP", subtitle: "Lobby", status: "Normal")
+        ]
+        store.accounts[accountIndex].locations = [
+            .init(
+                id: "keep-location",
+                label: "Panel",
+                subtitle: "Lobby",
+                type: "Panel",
+                plusCode: "",
+                latitude: 43.615,
+                longitude: -116.202,
+                pinColor: "Red"
+            )
+        ]
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 12, height: 12)).image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 12, height: 12))
+        }
+        let keep = try store.attachCapturedPhoto(image, to: account.id)
+        let remove = try store.attachCapturedPhoto(image, to: account.id)
+        let removedURL = try XCTUnwrap(store.mediaURL(accountID: account.id, documentID: remove.id))
+
+        XCTAssertTrue(try store.deleteDocument(accountID: account.id, documentID: remove.id))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: removedURL.path))
+        XCTAssertNotNil(store.mediaURL(accountID: account.id, documentID: keep.id))
+        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.documents.map(\.id), [keep.id])
+        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.recent.compactMap(\.sourceID), [keep.id])
+        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.notes.map(\.id), ["keep-note"])
+        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.equipment.map(\.id), ["keep-equipment"])
+        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.locations.map(\.id), ["keep-location"])
+
+        let reloaded = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
+        XCTAssertEqual(reloaded.accounts.first(where: { $0.id == account.id })?.documents.map(\.id), [keep.id])
+        XCTAssertEqual(reloaded.accounts.first(where: { $0.id == account.id })?.recent.compactMap(\.sourceID), [keep.id])
+    }
+
+    func testLegacyRecentActivityDecodesWithoutMediaSourceID() throws {
+        let json = """
+        {
+          "id": "recent-1",
+          "title": "Field photo",
+          "subtitle": "Saved before media links",
+          "kind": "photo",
+          "date": "Yesterday"
+        }
+        """
+
+        let recent = try JSONDecoder().decode(FireVaultWorkspaceRecent.self, from: Data(json.utf8))
+
+        XCTAssertNil(recent.sourceID)
+        XCTAssertEqual(recent.title, "Field photo")
+    }
+
+    func testLegacyMissingAccountMediaCanBeRemovedSafely() throws {
+        let suite = "FireVaultTests.LegacyAccountMedia.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let mediaRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultLegacyMedia-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: mediaRoot)
+        }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
+        let account = store.addAccount()
+        store.addDocument(to: account.id, scan: false)
+        let legacy = try XCTUnwrap(store.accounts.first(where: { $0.id == account.id })?.documents.first)
+
+        XCTAssertNil(store.mediaURL(accountID: account.id, documentID: legacy.id))
+        XCTAssertTrue(try store.deleteDocument(accountID: account.id, documentID: legacy.id))
+        XCTAssertTrue(store.accounts.first(where: { $0.id == account.id })?.documents.isEmpty == true)
+    }
+
+    func testAccountMediaPathTraversalNeverResolvesOrDeletesOutsideMediaRoot() throws {
+        let suite = "FireVaultTests.AccountMediaTraversal.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let container = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultTraversal-\(UUID().uuidString)", isDirectory: true)
+        let mediaRoot = container.appendingPathComponent("Media", isDirectory: true)
+        let outsideFile = container.appendingPathComponent("outside.jpg")
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: container)
+        }
+        try FileManager.default.createDirectory(at: mediaRoot, withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: outsideFile)
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
+        let account = store.addAccount()
+        let accountIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        let unsafe = FireVaultWorkspaceDocument(
+            id: "unsafe-document",
+            title: "Unsafe",
+            subtitle: "Legacy reference",
+            kind: "photo",
+            date: "Today",
+            mediaFileName: "../../outside.jpg"
+        )
+        store.accounts[accountIndex].documents = [unsafe]
+
+        XCTAssertNil(store.mediaURL(accountID: account.id, documentID: unsafe.id))
+        XCTAssertTrue(try store.deleteDocument(accountID: account.id, documentID: unsafe.id))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outsideFile.path))
+    }
+
+    func testDeletingDuplicateMediaReferenceKeepsFileUntilLastReferenceIsDeleted() throws {
+        let suite = "FireVaultTests.DuplicateMediaReference.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let mediaRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultDuplicateMedia-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: mediaRoot)
+        }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
+        let account = store.addAccount()
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10)).image { context in
+            UIColor.systemGreen.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 10, height: 10))
+        }
+        let original = try store.attachCapturedPhoto(image, to: account.id)
+        let originalURL = try XCTUnwrap(store.mediaURL(accountID: account.id, documentID: original.id))
+        let duplicate = FireVaultWorkspaceDocument(
+            id: "duplicate-reference",
+            title: "Duplicate reference",
+            subtitle: original.subtitle,
+            kind: original.kind,
+            date: original.date,
+            mediaFileName: original.mediaFileName
+        )
+        let accountIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        store.accounts[accountIndex].documents.append(duplicate)
+
+        XCTAssertTrue(try store.deleteDocument(accountID: account.id, documentID: duplicate.id))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: originalURL.path))
+        XCTAssertEqual(store.mediaURL(accountID: account.id, documentID: original.id), originalURL)
+
+        XCTAssertTrue(try store.deleteDocument(accountID: account.id, documentID: original.id))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: originalURL.path))
+    }
+
+    func testAccountMediaRejectsDirectoriesAndSymbolicLinks() throws {
+        let suite = "FireVaultTests.MediaNodeSafety.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let container = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultMediaNodes-\(UUID().uuidString)", isDirectory: true)
+        let mediaRoot = container.appendingPathComponent("Media", isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: container)
+        }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
+        let account = store.addAccount()
+        let accountDirectory = mediaRoot.appendingPathComponent(account.id, isDirectory: true)
+        let disguisedDirectory = accountDirectory.appendingPathComponent("archive.jpg", isDirectory: true)
+        let outsideFile = container.appendingPathComponent("outside.jpg")
+        let link = accountDirectory.appendingPathComponent("linked.jpg")
+        try FileManager.default.createDirectory(at: disguisedDirectory, withIntermediateDirectories: true)
+        try Data("private".utf8).write(to: outsideFile)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outsideFile)
+
+        let directoryDocument = FireVaultWorkspaceDocument(
+            id: "directory-document",
+            title: "Directory",
+            subtitle: "Invalid media node",
+            kind: "photo",
+            date: "Today",
+            mediaFileName: "archive.jpg"
+        )
+        let linkDocument = FireVaultWorkspaceDocument(
+            id: "link-document",
+            title: "Link",
+            subtitle: "Invalid media node",
+            kind: "photo",
+            date: "Today",
+            mediaFileName: "linked.jpg"
+        )
+        let accountIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        store.accounts[accountIndex].documents = [directoryDocument, linkDocument]
+
+        XCTAssertNil(store.mediaURL(accountID: account.id, documentID: directoryDocument.id))
+        XCTAssertNil(store.mediaURL(accountID: account.id, documentID: linkDocument.id))
+        XCTAssertTrue(try store.deleteDocument(accountID: account.id, documentID: directoryDocument.id))
+        XCTAssertTrue(try store.deleteDocument(accountID: account.id, documentID: linkDocument.id))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: disguisedDirectory.path))
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: link.path), outsideFile.path)
+        XCTAssertEqual(try Data(contentsOf: outsideFile), Data("private".utf8))
+    }
+
+    func testUnsafeAccountIDsCannotShareASanitizedMediaDirectory() throws {
+        let suite = "FireVaultTests.MediaAccountIsolation.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let container = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultMediaAccountIsolation-\(UUID().uuidString)", isDirectory: true)
+        let mediaRoot = container.appendingPathComponent("Media", isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: container)
+        }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
+        let first = store.addAccount()
+        let second = store.addAccount()
+        let firstIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == first.id }))
+        let secondIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == second.id }))
+        store.accounts[firstIndex].id = "site/a"
+        store.accounts[secondIndex].id = "site?a"
+
+        let legacyDirectory = mediaRoot.appendingPathComponent("site_a", isDirectory: true)
+        let sharedFile = legacyDirectory.appendingPathComponent("shared.jpg")
+        try FileManager.default.createDirectory(at: legacyDirectory, withIntermediateDirectories: true)
+        try Data("private".utf8).write(to: sharedFile)
+
+        let firstDocument = FireVaultWorkspaceDocument(
+            id: "first-document",
+            title: "First",
+            subtitle: "Unsafe restored reference",
+            kind: "photo",
+            date: "Today",
+            mediaFileName: "shared.jpg"
+        )
+        let secondDocument = FireVaultWorkspaceDocument(
+            id: "second-document",
+            title: "Second",
+            subtitle: "Unsafe restored reference",
+            kind: "photo",
+            date: "Today",
+            mediaFileName: "shared.jpg"
+        )
+        store.accounts[firstIndex].documents = [firstDocument]
+        store.accounts[secondIndex].documents = [secondDocument]
+
+        XCTAssertNil(store.mediaURL(accountID: "site/a", documentID: firstDocument.id))
+        XCTAssertNil(store.mediaURL(accountID: "site?a", documentID: secondDocument.id))
+        XCTAssertTrue(try store.deleteDocument(accountID: "site?a", documentID: secondDocument.id))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sharedFile.path))
     }
 
     func testAccountNoteLifecyclePersistsWithoutChangingOtherAccountData() throws {

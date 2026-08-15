@@ -30,6 +30,7 @@ enum FireVaultMediaError: LocalizedError {
     case encodingFailed
     case storageUnavailable
     case writeFailed(String)
+    case deleteFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -43,6 +44,8 @@ enum FireVaultMediaError: LocalizedError {
             "FireVault Pro media storage is unavailable on this iPhone."
         case .writeFailed(let detail):
             "The captured media could not be saved. \(detail)"
+        case .deleteFailed(let detail):
+            "The saved media could not be deleted. \(detail)"
         }
     }
 }
@@ -65,6 +68,7 @@ final class FireVaultStore: ObservableObject {
     @Published private(set) var pendingCaptureQuickAction: FireVaultCaptureQuickAction?
 
     private let defaults: UserDefaults
+    private let mediaRootURL: URL?
     private let demoCoordinate = CLLocationCoordinate2D(latitude: 43.6150, longitude: -116.2023)
     private var geocodingTask: Task<Void, Never>?
     private var categoryRules: [FireVaultCategoryRule] = []
@@ -80,8 +84,9 @@ final class FireVaultStore: ObservableObject {
         static let productionCategoryRuleSuppressions = "firevault.native.production-category-rule-suppressions.v1"
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, mediaRootURL: URL? = nil) {
         self.defaults = defaults
+        self.mediaRootURL = mediaRootURL ?? Self.defaultMediaRootURL()
         let activeDemoMode = defaults.object(forKey: Key.demoMode) as? Bool ?? true
         demoMode = activeDemoMode
         let suppressionKey = activeDemoMode
@@ -592,6 +597,69 @@ final class FireVaultStore: ObservableObject {
         persist()
     }
 
+    /// Returns a readable local URL only when the document belongs to the
+    /// requested account and its saved file still exists. This deliberately
+    /// does not create folders while browsing account media.
+    func mediaURL(accountID: String, documentID: String) -> URL? {
+        guard let account = accounts.first(where: { $0.id == accountID }),
+              let document = account.documents.first(where: { $0.id == documentID }),
+              let fileName = document.mediaFileName,
+              Self.isSafeMediaFileName(fileName),
+              let directory = mediaDirectoryURL(accountID: accountID) else {
+            return nil
+        }
+
+        let url = directory.appendingPathComponent(fileName, isDirectory: false)
+        guard Self.isSafeRegularMediaFile(at: url) else { return nil }
+        return url
+    }
+
+    /// Removes both the account record and its private local file. Legacy or
+    /// demo records without a backing file remain safely removable.
+    @discardableResult
+    func deleteDocument(accountID: String, documentID: String) throws -> Bool {
+        guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
+              let documentIndex = accounts[accountIndex].documents.firstIndex(where: { $0.id == documentID }) else {
+            return false
+        }
+
+        let document = accounts[accountIndex].documents[documentIndex]
+        if let fileName = document.mediaFileName,
+           Self.isSafeMediaFileName(fileName),
+           let directory = mediaDirectoryURL(accountID: accountID) {
+            let url = directory.appendingPathComponent(fileName, isDirectory: false)
+            let hasAnotherReference = accounts[accountIndex].documents.enumerated().contains { offset, candidate in
+                offset != documentIndex && candidate.mediaFileName == fileName
+            }
+            if !hasAnotherReference, Self.isSafeRegularMediaFile(at: url) {
+                do {
+                    try FileManager.default.removeItem(at: url)
+                } catch {
+                    throw FireVaultMediaError.deleteFailed(error.localizedDescription)
+                }
+            }
+        }
+
+        accounts[accountIndex].documents.remove(at: documentIndex)
+        let linkedRecentIndices = accounts[accountIndex].recent.indices.filter {
+            accounts[accountIndex].recent[$0].sourceID == documentID
+        }
+        if linkedRecentIndices.isEmpty {
+            if let legacyRecentIndex = accounts[accountIndex].recent.firstIndex(where: {
+                $0.sourceID == nil
+                    && $0.kind.lowercased() == document.kind.lowercased()
+                    && $0.title == document.title
+                    && $0.subtitle == document.subtitle
+            }) {
+                accounts[accountIndex].recent.remove(at: legacyRecentIndex)
+            }
+        } else {
+            accounts[accountIndex].recent.removeAll { $0.sourceID == documentID }
+        }
+        persist()
+        return true
+    }
+
     @discardableResult
     func attachCapturedPhoto(_ image: UIImage, to accountID: String) throws -> FireVaultWorkspaceDocument {
         guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
@@ -619,7 +687,8 @@ final class FireVaultStore: ObservableObject {
                 title: document.title,
                 subtitle: document.subtitle,
                 kind: "photo",
-                date: "Now"
+                date: "Now",
+                sourceID: document.id
             ),
             at: 0
         )
@@ -664,7 +733,8 @@ final class FireVaultStore: ObservableObject {
                 title: document.title,
                 subtitle: pageLabel,
                 kind: "scan",
-                date: "Now"
+                date: "Now",
+                sourceID: document.id
             ),
             at: 0
         )
@@ -743,22 +813,10 @@ final class FireVaultStore: ObservableObject {
     }
 
     private func mediaURL(accountID: String, fileName: String) throws -> URL {
-        guard let applicationSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first else {
+        guard Self.isSafeMediaFileName(fileName),
+              let directory = mediaDirectoryURL(accountID: accountID) else {
             throw FireVaultMediaError.storageUnavailable
         }
-
-        let safeAccountID = accountID.replacingOccurrences(
-            of: "[^A-Za-z0-9_-]",
-            with: "_",
-            options: .regularExpression
-        )
-        let directory = applicationSupport
-            .appendingPathComponent("FireVault", isDirectory: true)
-            .appendingPathComponent("Media", isDirectory: true)
-            .appendingPathComponent(safeAccountID, isDirectory: true)
 
         do {
             try FileManager.default.createDirectory(
@@ -769,6 +827,47 @@ final class FireVaultStore: ObservableObject {
         } catch {
             throw FireVaultMediaError.writeFailed(error.localizedDescription)
         }
+    }
+
+    private func mediaDirectoryURL(accountID: String) -> URL? {
+        guard let mediaRootURL,
+              Self.isSafeMediaAccountID(accountID) else { return nil }
+        return mediaRootURL.appendingPathComponent(accountID, isDirectory: true)
+    }
+
+    private static func defaultMediaRootURL() -> URL? {
+        FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first?
+            .appendingPathComponent("FireVault", isDirectory: true)
+            .appendingPathComponent("Media", isDirectory: true)
+    }
+
+    private static func isSafeMediaFileName(_ fileName: String) -> Bool {
+        !fileName.isEmpty
+            && fileName == URL(fileURLWithPath: fileName).lastPathComponent
+            && !fileName.contains("/")
+            && !fileName.contains("\\")
+            && fileName != "."
+            && fileName != ".."
+    }
+
+    private static func isSafeMediaAccountID(_ accountID: String) -> Bool {
+        !accountID.isEmpty
+            && accountID.range(
+                of: "^[A-Za-z0-9_-]+$",
+                options: .regularExpression
+            ) != nil
+            && accountID != "."
+            && accountID != ".."
+    }
+
+    private static func isSafeRegularMediaFile(at url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]) else {
+            return false
+        }
+        return values.isRegularFile == true && values.isSymbolicLink != true
     }
 
     @discardableResult

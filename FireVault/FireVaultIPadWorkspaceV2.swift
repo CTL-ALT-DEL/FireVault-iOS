@@ -195,6 +195,7 @@ struct FireVaultIPadWorkspaceV2: View {
                 FireVaultAdaptiveAccountDetailsView(
                     account: account,
                     store: store,
+                    settings: settings,
                     locationService: locationService,
                     returnTab: .nearby,
                     returnTitle: "Nearby"
@@ -214,6 +215,7 @@ struct FireVaultIPadWorkspaceV2: View {
                 FireVaultAdaptiveAccountDetailsView(
                     account: account,
                     store: store,
+                    settings: settings,
                     locationService: locationService,
                     returnTab: .accounts,
                     returnTitle: "Account List"

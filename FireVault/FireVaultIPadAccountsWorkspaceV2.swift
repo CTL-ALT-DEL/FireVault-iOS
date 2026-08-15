@@ -443,7 +443,7 @@ struct FireVaultIPadAccountLocationsDetailsViewV2: View {
                         detailRow("Saved Locations", value: "\(account.locations.count)")
                         detailRow("Equipment", value: "\(account.equipment.count)")
                         detailRow("Notes", value: "\(account.notes.count)")
-                        detailRow("Files & Scans", value: "\(account.documents.count)")
+                        detailRow("Photos & Documents", value: "\(account.documents.count)")
                     }
                 }
 
