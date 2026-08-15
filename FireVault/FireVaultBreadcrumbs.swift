@@ -254,6 +254,116 @@ enum FireVaultTripLogIntegrity {
             .sorted { $0.arrival < $1.arrival }
         return day
     }
+
+    /// Combines completed recordings from one calendar day without changing
+    /// the persisted schema. The earliest trip ID is retained so links to the
+    /// first recording continue to resolve after the merge.
+    static func mergedDay(
+        _ source: [FireVaultBreadcrumbDay],
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> FireVaultBreadcrumbDay? {
+        let trips = source.sorted { $0.startedAt < $1.startedAt }
+        guard trips.count >= 2,
+              trips.allSatisfy({ !$0.isActive }),
+              let first = trips.first,
+              trips.allSatisfy({ calendar.isDate($0.startedAt, inSameDayAs: first.startedAt) }) else {
+            return nil
+        }
+
+        var seenPointIDs = Set<UUID>()
+        let points = trips
+            .flatMap(\.points)
+            .filter { seenPointIDs.insert($0.id).inserted }
+            .sorted { $0.timestamp < $1.timestamp }
+
+        var seenStopIDs = Set<UUID>()
+        let closedStops = trips.flatMap { trip in
+            trip.stops.map { stop in
+                var closed = stop
+                closed.departure = trip.effectiveDeparture(for: stop, asOf: trip.endedAt ?? stop.arrival)
+                return closed
+            }
+        }
+        .filter { seenStopIDs.insert($0.id).inserted }
+        .sorted { $0.arrival < $1.arrival }
+
+        var stops: [FireVaultBreadcrumbStop] = []
+        for stop in closedStops {
+            guard var previous = stops.last,
+                  shouldCoalesce(previous, stop) else {
+                stops.append(stop)
+                continue
+            }
+            previous.arrival = min(previous.arrival, stop.arrival)
+            previous.departure = [previous.departure, stop.departure]
+                .compactMap { $0 }
+                .max()
+            previous.accountID = previous.accountID ?? stop.accountID
+            previous.accountName = previous.accountName ?? stop.accountName
+            previous.accountAddress = previous.accountAddress ?? stop.accountAddress
+            previous.customTitle = previous.customTitle ?? stop.customTitle
+            previous.reviewedAt = [previous.reviewedAt, stop.reviewedAt]
+                .compactMap { $0 }
+                .max()
+            let notes = [previous.technicianNote, stop.technicianNote]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            previous.technicianNote = Array(Set(notes)).sorted().joined(separator: " • ")
+            if previous.technicianNote?.isEmpty == true { previous.technicianNote = nil }
+            stops[stops.count - 1] = previous
+        }
+
+        let savedNames = trips
+            .compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let mergedName: String
+        if Set(savedNames).count == 1, let name = savedNames.first {
+            mergedName = name
+        } else if !savedNames.isEmpty {
+            mergedName = String(savedNames.joined(separator: " + ").prefix(80))
+        } else {
+            mergedName = "Merged Trip"
+        }
+
+        return normalizeDay(
+            .init(
+                id: first.id,
+                name: mergedName,
+                startedAt: trips.map(\.startedAt).min() ?? first.startedAt,
+                endedAt: trips.compactMap(\.endedAt).max(),
+                isPaused: false,
+                points: points,
+                stops: stops
+            )
+        )
+    }
+
+    private static func shouldCoalesce(
+        _ first: FireVaultBreadcrumbStop,
+        _ second: FireVaultBreadcrumbStop
+    ) -> Bool {
+        let distance = CLLocation(latitude: first.latitude, longitude: first.longitude)
+            .distance(from: CLLocation(latitude: second.latitude, longitude: second.longitude))
+        let firstDeparture = first.departure ?? first.arrival
+        let gap = second.arrival.timeIntervalSince(firstDeparture)
+        guard gap <= 15 * 60, distance <= FireVaultBreadcrumbRules.stopRadius else { return false }
+
+        let sameAccount = first.accountID?.isEmpty == false && first.accountID == second.accountID
+        let samePersonalStop = first.isPersonalStop && second.isPersonalStop
+        let firstLabel = (first.accountName ?? first.customTitle ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let secondLabel = (second.accountName ?? second.customTitle ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let sameNamedPlace = !firstLabel.isEmpty && firstLabel == secondLabel
+        let bothUnrecognized = firstLabel.isEmpty
+            && secondLabel.isEmpty
+            && !first.isPersonalStop
+            && !second.isPersonalStop
+            && distance <= 35
+        return sameAccount || samePersonalStop || sameNamedPlace || bothUnrecognized
+    }
 }
 
 enum FireVaultTripLogTelemetry {
@@ -1064,23 +1174,6 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         FireVaultNotificationService.shared.tripLogStarted(preferences: notificationPreferences)
     }
 
-    func pauseWorkday() {
-        guard let index = activeDayIndex else { return }
-        finalizeStopIfNeeded(in: index, at: Date())
-        stopLocationUpdates()
-        candidateLocations.removeAll()
-        departureCandidateLocations.removeAll()
-        activeStopID = nil
-        speedReferenceLocation = nil
-        lastMeaningfulMovementAt = nil
-        lastStopEvaluationLocation = nil
-        sessionIsPrepared = false
-        updateActiveDay { $0.isPaused = true }
-        statusText = "Trip Log paused"
-        FireVaultNotificationService.shared.tripLogPaused(preferences: notificationPreferences)
-        synchronizeLiveActivity(status: .paused)
-    }
-
     func resumeWorkday(accounts: [FireVaultWorkspaceAccount]) {
         guard activeDay != nil else {
             startWorkday(accounts: accounts)
@@ -1176,6 +1269,20 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         guard days.first(where: { $0.id == id })?.isActive != true else { return }
         days.removeAll { $0.id == id }
         persist()
+    }
+
+    @discardableResult
+    func mergeDays(_ ids: Set<UUID>) -> UUID? {
+        let selected = days.filter { ids.contains($0.id) }
+        guard selected.count == ids.count,
+              let merged = FireVaultTripLogIntegrity.mergedDay(selected) else {
+            return nil
+        }
+        days.removeAll { ids.contains($0.id) }
+        days.append(merged)
+        days = FireVaultTripLogIntegrity.normalized(days)
+        persist()
+        return merged.id
     }
 
     @discardableResult
@@ -2227,9 +2334,6 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     private func consumeLiveActivityControl() {
         guard let command = FireVaultTripLogControlMailbox.consume() else { return }
         switch command {
-        case .pause:
-            guard activeDay?.isPaused == false else { return }
-            pauseWorkday()
         case .resume:
             guard activeDay?.isPaused == true else { return }
             resumeWorkday(accounts: accounts)
@@ -2492,17 +2596,17 @@ struct FireVaultBreadcrumbsView: View {
                     }
                 } else {
                     HStack {
-                        if breadcrumbs.isRecording {
-                            Button("Pause", systemImage: "pause.fill") {
-                                breadcrumbs.pauseWorkday()
-                            }
-                            .buttonStyle(.bordered)
-                        } else if breadcrumbs.permissionState.isAuthorized
+                        if !breadcrumbs.isRecording,
+                           breadcrumbs.permissionState.isAuthorized
                                     || breadcrumbs.authorizationStatus == .notDetermined {
                             Button("Resume", systemImage: "play.fill") {
                                 breadcrumbs.resumeWorkday(accounts: store.accounts)
                             }
                             .buttonStyle(.borderedProminent)
+                        } else if breadcrumbs.isRecording {
+                            Label("Recording continuously", systemImage: "location.fill")
+                                .font(.caption.bold())
+                                .foregroundStyle(NativeShellPalette.green)
                         }
                         Spacer()
                         Button("End Day", systemImage: "stop.fill", role: .destructive) {
@@ -2697,6 +2801,9 @@ struct FireVaultTripLogHistoryCalendarView: View {
     @State private var renamingTripID: UUID?
     @State private var renameText = ""
     @State private var pendingDeletionID: UUID?
+    @State private var isSelectingTripsToMerge = false
+    @State private var mergeSelection = Set<UUID>()
+    @State private var confirmsMerge = false
 
     private let calendar = Calendar.autoupdatingCurrent
     private let weekdayColumns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 7)
@@ -2722,6 +2829,10 @@ struct FireVaultTripLogHistoryCalendarView: View {
             .sorted { $0.startedAt < $1.startedAt }
     }
 
+    private var mergeableTrips: [FireVaultBreadcrumbDay] {
+        selectedTrips.filter { !$0.isActive }
+    }
+
     private var days: [FireVaultBreadcrumbDay] { breadcrumbs.days }
 
     var body: some View {
@@ -2740,8 +2851,23 @@ struct FireVaultTripLogHistoryCalendarView: View {
             .navigationTitle("Trip Log History")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if mergeableTrips.count >= 2 || isSelectingTripsToMerge {
+                        Button(isSelectingTripsToMerge ? "Cancel" : "Merge") {
+                            withAnimation(.snappy(duration: 0.22)) {
+                                isSelectingTripsToMerge.toggle()
+                                mergeSelection.removeAll()
+                            }
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if isSelectingTripsToMerge {
+                    mergeActionBar
                 }
             }
         }
@@ -2778,6 +2904,20 @@ struct FireVaultTripLogHistoryCalendarView: View {
             Button("Cancel", role: .cancel) { pendingDeletionID = nil }
         } message: {
             Text("This permanently removes the trip route, stops, and associated history. Account records are not deleted.")
+        }
+        .confirmationDialog(
+            "Merge \(mergeSelection.count) Trips?",
+            isPresented: $confirmsMerge,
+            titleVisibility: .visible
+        ) {
+            Button("Merge Trips") {
+                _ = breadcrumbs.mergeDays(mergeSelection)
+                mergeSelection.removeAll()
+                isSelectingTripsToMerge = false
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("FireVault will combine the selected routes, stops, times, and names into one Trip Log. A safety copy of the current archive is retained before it is saved.")
         }
     }
 
@@ -2843,6 +2983,8 @@ struct FireVaultTripLogHistoryCalendarView: View {
 
         return Button {
             selectedDate = date
+            mergeSelection.removeAll()
+            isSelectingTripsToMerge = false
         } label: {
             VStack(spacing: 1) {
                 Text(date.formatted(.dateTime.day()))
@@ -2892,15 +3034,28 @@ struct FireVaultTripLogHistoryCalendarView: View {
                 ForEach(Array(selectedTrips.enumerated()), id: \.element.id) { index, trip in
                     HStack(spacing: 8) {
                         Button {
-                            onSelect(trip.id)
+                            if isSelectingTripsToMerge {
+                                toggleMergeSelection(trip)
+                            } else {
+                                onSelect(trip.id)
+                            }
                         } label: {
                             HStack(spacing: 12) {
-                            Image(systemName: trip.isActive ? "record.circle.fill" : "point.topleft.down.to.point.bottomright.curvepath")
+                            Image(systemName: isSelectingTripsToMerge
+                                  ? (mergeSelection.contains(trip.id) ? "checkmark.circle.fill" : "circle")
+                                  : (trip.isActive ? "record.circle.fill" : "point.topleft.down.to.point.bottomright.curvepath"))
                                 .font(.title3.bold())
-                                .foregroundStyle(trip.isActive ? NativeShellPalette.green : NativeShellPalette.red)
+                                .foregroundStyle(
+                                    isSelectingTripsToMerge
+                                        ? (mergeSelection.contains(trip.id) ? NativeShellPalette.blue : Color.secondary)
+                                        : (trip.isActive ? NativeShellPalette.green : NativeShellPalette.red)
+                                )
                                 .frame(width: 38, height: 38)
                                 .background(
-                                    (trip.isActive ? NativeShellPalette.green : NativeShellPalette.red).opacity(0.12),
+                                    (isSelectingTripsToMerge
+                                        ? NativeShellPalette.blue
+                                        : (trip.isActive ? NativeShellPalette.green : NativeShellPalette.red)
+                                    ).opacity(0.12),
                                     in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 )
 
@@ -2917,22 +3072,27 @@ struct FireVaultTripLogHistoryCalendarView: View {
                             }
 
                             Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption.bold())
-                                .foregroundStyle(.tertiary)
+                            if !isSelectingTripsToMerge {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.tertiary)
+                            }
                             }
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .disabled(isSelectingTripsToMerge && trip.isActive)
 
-                        Menu {
-                            Button("Rename Trip", systemImage: "pencil") {
-                                beginRename(trip, index: index)
+                        if !isSelectingTripsToMerge {
+                            Menu {
+                                Button("Rename Trip", systemImage: "pencil") {
+                                    beginRename(trip, index: index)
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .font(.title3)
+                                    .frame(width: 38, height: 38)
                             }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.title3)
-                                .frame(width: 38, height: 38)
                         }
                     }
                     .padding(.vertical, 4)
@@ -2944,6 +3104,7 @@ struct FireVaultTripLogHistoryCalendarView: View {
                         }
                     }
                     .accessibilityIdentifier("trip-history-entry-\(trip.id.uuidString)")
+                    .opacity(isSelectingTripsToMerge && trip.isActive ? 0.45 : 1)
                 }
             }
         } header: {
@@ -2990,6 +3151,8 @@ struct FireVaultTripLogHistoryCalendarView: View {
     private func changeMonth(by value: Int) {
         guard let next = calendar.date(byAdding: .month, value: value, to: displayedMonth) else { return }
         displayedMonth = next
+        mergeSelection.removeAll()
+        isSelectingTripsToMerge = false
         if let monthStart = calendar.dateInterval(of: .month, for: next)?.start {
             selectedDate = monthStart
         }
@@ -3010,6 +3173,40 @@ struct FireVaultTripLogHistoryCalendarView: View {
     private func beginRename(_ trip: FireVaultBreadcrumbDay, index: Int) {
         renameText = tripDisplayName(trip, index: index)
         renamingTripID = trip.id
+    }
+
+    private var mergeActionBar: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("SELECT TRIPS")
+                    .font(.caption2.bold())
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+                Text("\(mergeSelection.count) selected")
+                    .font(.subheadline.bold())
+            }
+            Spacer()
+            Button("Merge Selected", systemImage: "arrow.triangle.merge") {
+                confirmsMerge = true
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(mergeSelection.count < 2)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.regularMaterial)
+        .overlay(alignment: .top) {
+            Divider()
+        }
+    }
+
+    private func toggleMergeSelection(_ trip: FireVaultBreadcrumbDay) {
+        guard !trip.isActive else { return }
+        if mergeSelection.contains(trip.id) {
+            mergeSelection.remove(trip.id)
+        } else {
+            mergeSelection.insert(trip.id)
+        }
     }
 }
 

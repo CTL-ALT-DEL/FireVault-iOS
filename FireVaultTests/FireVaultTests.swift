@@ -2370,6 +2370,83 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(report.visits.first?.departure, end)
     }
 
+    func testTripLogMergeCombinesSplitRecordingsAndCoalescesBoundaryStop() throws {
+        let start = Date(timeIntervalSince1970: 1_785_000_000)
+        let firstStop = FireVaultBreadcrumbStop(
+            arrival: start.addingTimeInterval(20 * 60),
+            departure: start.addingTimeInterval(30 * 60),
+            latitude: 43.615,
+            longitude: -116.202,
+            accountID: "A-1",
+            accountName: "Central Library",
+            accountAddress: "100 Main Street",
+            technicianNote: "Checked panel."
+        )
+        let continuedStop = FireVaultBreadcrumbStop(
+            arrival: start.addingTimeInterval(36 * 60),
+            departure: start.addingTimeInterval(44 * 60),
+            latitude: 43.61502,
+            longitude: -116.20201,
+            accountID: "A-1",
+            accountName: "Central Library",
+            accountAddress: "100 Main Street",
+            technicianNote: "Completed testing."
+        )
+        let finalStop = FireVaultBreadcrumbStop(
+            arrival: start.addingTimeInterval(75 * 60),
+            departure: start.addingTimeInterval(82 * 60),
+            latitude: 43.625,
+            longitude: -116.212,
+            customTitle: "Supply House"
+        )
+        let firstTrip = FireVaultBreadcrumbDay(
+            name: "Morning Route",
+            startedAt: start,
+            endedAt: start.addingTimeInterval(32 * 60),
+            points: [
+                .init(timestamp: start, latitude: 43.61, longitude: -116.20, horizontalAccuracy: 8),
+                .init(timestamp: start.addingTimeInterval(30 * 60), latitude: 43.615, longitude: -116.202, horizontalAccuracy: 8)
+            ],
+            stops: [firstStop]
+        )
+        let secondTrip = FireVaultBreadcrumbDay(
+            name: "Afternoon Route",
+            startedAt: start.addingTimeInterval(35 * 60),
+            endedAt: start.addingTimeInterval(90 * 60),
+            points: [
+                .init(timestamp: start.addingTimeInterval(35 * 60), latitude: 43.615, longitude: -116.202, horizontalAccuracy: 8),
+                .init(timestamp: start.addingTimeInterval(90 * 60), latitude: 43.63, longitude: -116.22, horizontalAccuracy: 8)
+            ],
+            stops: [continuedStop, finalStop]
+        )
+
+        let merged = try XCTUnwrap(FireVaultTripLogIntegrity.mergedDay([secondTrip, firstTrip]))
+
+        XCTAssertEqual(merged.id, firstTrip.id)
+        XCTAssertEqual(merged.startedAt, firstTrip.startedAt)
+        XCTAssertEqual(merged.endedAt, secondTrip.endedAt)
+        XCTAssertEqual(merged.points.count, 4)
+        XCTAssertEqual(merged.stops.count, 2)
+        XCTAssertEqual(merged.stops.first?.arrival, firstStop.arrival)
+        XCTAssertEqual(merged.stops.first?.departure, continuedStop.departure)
+        XCTAssertTrue(try XCTUnwrap(merged.stops.first?.technicianNote).contains("Checked panel"))
+        XCTAssertTrue(try XCTUnwrap(merged.stops.first?.technicianNote).contains("Completed testing"))
+        XCTAssertEqual(merged.name, "Morning Route + Afternoon Route")
+    }
+
+    func testTripLogMergeRejectsActiveOrDifferentDayRecordings() {
+        let start = Date(timeIntervalSince1970: 1_785_000_000)
+        let active = FireVaultBreadcrumbDay(startedAt: start)
+        let completed = FireVaultBreadcrumbDay(startedAt: start, endedAt: start.addingTimeInterval(600))
+        let tomorrow = FireVaultBreadcrumbDay(
+            startedAt: start.addingTimeInterval(24 * 60 * 60),
+            endedAt: start.addingTimeInterval(25 * 60 * 60)
+        )
+
+        XCTAssertNil(FireVaultTripLogIntegrity.mergedDay([active, completed]))
+        XCTAssertNil(FireVaultTripLogIntegrity.mergedDay([completed, tomorrow]))
+    }
+
     func testMissingStopDeparturesUseNextArrivalBeforeWorkdayEnd() throws {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let first = FireVaultBreadcrumbStop(
@@ -2530,6 +2607,88 @@ final class FireVaultTests: XCTestCase {
         imageAttachment.name = "FireVault-Inline-Email-JPG"
         imageAttachment.lifetime = .keepAlways
         add(imageAttachment)
+    }
+
+    func testRedesignedWeeklyPDFUsesOverviewAndCompleteDailyPages() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let monday = try XCTUnwrap(
+            calendar.date(from: DateComponents(year: 2026, month: 8, day: 10, hour: 8))
+        )
+        var days: [FireVaultBreadcrumbDay] = []
+        for dayIndex in 0..<3 {
+            let start = try XCTUnwrap(calendar.date(byAdding: .day, value: dayIndex, to: monday))
+            var stops: [FireVaultBreadcrumbStop] = []
+            for stopIndex in 0..<3 {
+                let arrival = start.addingTimeInterval(Double((stopIndex + 1) * 75 * 60))
+                stops.append(
+                    FireVaultBreadcrumbStop(
+                        arrival: arrival,
+                        departure: arrival.addingTimeInterval(Double((stopIndex + 4) * 60)),
+                        latitude: 43.615 + Double(dayIndex) * 0.01 + Double(stopIndex) * 0.002,
+                        longitude: -116.202 - Double(dayIndex) * 0.01 - Double(stopIndex) * 0.002,
+                        accountID: "D\(dayIndex)-S\(stopIndex)",
+                        accountName: "Day \(dayIndex + 1) Account \(stopIndex + 1)",
+                        accountAddress: "\(100 + stopIndex) Main Street"
+                    )
+                )
+            }
+            days.append(
+                FireVaultBreadcrumbDay(
+                    name: ["Monday Service Route", "Tuesday Inspection Route", "Wednesday Follow-Up"][dayIndex],
+                    startedAt: start,
+                    endedAt: start.addingTimeInterval(8 * 60 * 60),
+                    points: [
+                        .init(timestamp: start, latitude: 43.61 + Double(dayIndex) * 0.01, longitude: -116.20, horizontalAccuracy: 8),
+                        .init(timestamp: start.addingTimeInterval(8 * 60 * 60), latitude: 43.63 + Double(dayIndex) * 0.01, longitude: -116.23, horizontalAccuracy: 8)
+                    ],
+                    stops: stops
+                )
+            )
+        }
+        let report = FireVaultTripLogWeeklyReport(
+            days: days,
+            anchorDate: monday,
+            technicianName: "David Bannerman",
+            companyName: "Bannerman US LLC",
+            includeCoordinates: true,
+            generatedAt: monday.addingTimeInterval(7 * 24 * 60 * 60),
+            calendar: calendar
+        )
+        let mapImage = UIGraphicsImageRenderer(size: .init(width: 528, height: 160)).image { renderer in
+            UIColor(red: 0.91, green: 0.95, blue: 0.90, alpha: 1).setFill()
+            renderer.fill(.init(x: 0, y: 0, width: 528, height: 160))
+            let route = UIBezierPath()
+            route.move(to: .init(x: 32, y: 128))
+            route.addCurve(to: .init(x: 496, y: 34), controlPoint1: .init(x: 160, y: 18), controlPoint2: .init(x: 360, y: 152))
+            UIColor.systemBlue.setStroke()
+            route.lineWidth = 5
+            route.stroke()
+        }
+        let data = FireVaultTripLogPDFRenderer.weekly(
+            report: report,
+            detail: .detailed,
+            mapImage: mapImage
+        )
+        let document = try XCTUnwrap(
+            CGPDFDocument(CGDataProvider(data: data as CFData)!)
+        )
+        let images = FireVaultTripLogImageRenderer.images(from: data)
+
+        XCTAssertEqual(report.dailyReports.count, 3)
+        XCTAssertEqual(document.numberOfPages, 3)
+        XCTAssertEqual(images.count, 3)
+
+        let pdfAttachment = XCTAttachment(data: data, uniformTypeIdentifier: "com.adobe.pdf")
+        pdfAttachment.name = "FireVault-Weekly-Overview-And-Daily-Breakdown.pdf"
+        pdfAttachment.lifetime = .keepAlways
+        add(pdfAttachment)
+        for (index, image) in images.prefix(2).enumerated() {
+            let attachment = XCTAttachment(image: image)
+            attachment.name = index == 0 ? "FireVault-Weekly-Overview" : "FireVault-Weekly-Daily-Page"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
     }
 
     func testBreadcrumbPermissionExplainsContinuousBackgroundRecording() {

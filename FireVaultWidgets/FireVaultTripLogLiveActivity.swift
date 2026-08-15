@@ -316,12 +316,7 @@ private struct FireVaultTripLogActivityControls: View {
 
     var body: some View {
         HStack(spacing: compact ? 8 : 10) {
-            if status == .recording {
-                Button(intent: FireVaultPauseTripLogIntent()) {
-                    controlLabel("Pause", symbol: "pause.fill", color: .orange)
-                }
-                .buttonStyle(.plain)
-            } else if status == .paused {
+            if status == .paused {
                 Button(intent: FireVaultResumeTripLogIntent()) {
                     controlLabel("Resume", symbol: "play.fill", color: .green)
                 }

@@ -49,17 +49,6 @@ final class FireVaultNotificationService {
         center.add(.init(identifier: Identifier.recording, content: content, trigger: trigger))
     }
 
-    func tripLogPaused(preferences: FireVaultNotificationPreferences) {
-        center.removePendingNotificationRequests(withIdentifiers: [Identifier.recording, Identifier.paused])
-        guard preferences.isEnabled, preferences.pausedReminderEnabled else { return }
-        schedule(
-            identifier: Identifier.paused,
-            title: "Trip Log is paused",
-            body: "Resume Trip Log before continuing your route.",
-            after: 15 * 60
-        )
-    }
-
     func tripLogEnded() {
         center.removePendingNotificationRequests(withIdentifiers: [Identifier.recording, Identifier.paused])
     }
@@ -183,7 +172,6 @@ struct NativeNotificationSettingsView: View {
 
             Section("Trip Log") {
                 Toggle("Still recording reminder", isOn: optionalBinding(\.tripLogStillRecording, default: true))
-                Toggle("Paused reminder", isOn: optionalBinding(\.tripLogPaused, default: true))
                 Toggle("Arrival notifications", isOn: optionalBinding(\.arrivalAlerts, default: false))
                 Toggle("Unknown stop review", isOn: optionalBinding(\.unknownStopReview, default: false))
                 Picker("End-of-day reminder", selection: optionalIntBinding(\.endOfDayHour, default: 18)) {
@@ -264,7 +252,7 @@ struct NativeNotificationSettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Live Activity Test")
                                 .font(.headline)
-                            Text("Preview recording, paused, and completed states")
+                            Text("Preview recording and completed states")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -327,7 +315,6 @@ struct NativeNotificationSettingsView: View {
 #if DEBUG
 private enum FireVaultNotificationTestTemplate: String, CaseIterable, Identifiable {
     case recording = "Trip Log Recording"
-    case paused = "Trip Log Paused"
     case inspection = "Upcoming Inspection"
     case failure = "Report/Sync Failure"
     case security = "Security Alert"
@@ -337,7 +324,6 @@ private enum FireVaultNotificationTestTemplate: String, CaseIterable, Identifiab
     var title: String {
         switch self {
         case .recording: "Trip Log is still recording"
-        case .paused: "Trip Log is paused"
         case .inspection: "Inspection coming up"
         case .failure: "FireVault needs attention"
         case .security: "New FireVault sign-in"
@@ -347,7 +333,6 @@ private enum FireVaultNotificationTestTemplate: String, CaseIterable, Identifiab
     var body: String {
         switch self {
         case .recording: "Review your active workday and end Trip Log when you are finished."
-        case .paused: "Resume Trip Log before continuing your route."
         case .inspection: "An upcoming inspection is ready for review."
         case .failure: "A report, sync, or backup operation could not be completed."
         case .security: "Review recent account activity in FireVault Pro."
@@ -487,11 +472,6 @@ private struct FireVaultLiveActivityDeveloperView: View {
                     show(.recording)
                 }
                 .tint(.red)
-
-                Button("Show Paused", systemImage: "pause.circle.fill") {
-                    show(.paused)
-                }
-                .tint(.orange)
 
                 Button("Show Completed", systemImage: "checkmark.circle.fill") {
                     sampleDay.endedAt = Date()

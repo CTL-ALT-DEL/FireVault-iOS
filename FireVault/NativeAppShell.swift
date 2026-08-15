@@ -561,7 +561,7 @@ private struct NativeNearbyView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Trip Log, \(tripLogStateText)")
-            .accessibilityHint("Shows start, pause, resume, and stop controls")
+            .accessibilityHint("Shows start, resume, and stop controls")
 
             Divider()
                 .frame(height: 28)
@@ -981,9 +981,6 @@ private struct NativeNearbyView: View {
                     breadcrumbs.endWorkday()
                 }
             } else {
-                tripLogControl(title: "Pause", symbol: "pause.fill", tint: NativeShellPalette.amber) {
-                    breadcrumbs.pauseWorkday()
-                }
                 tripLogControl(title: "Stop", symbol: "stop.fill", tint: NativeShellPalette.red) {
                     breadcrumbs.endWorkday()
                 }

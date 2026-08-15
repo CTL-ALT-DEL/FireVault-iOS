@@ -9,7 +9,6 @@ import AppIntents
 import Foundation
 
 enum FireVaultTripLogControlCommand: String, Codable, Equatable {
-    case pause
     case resume
     case end
 }
@@ -38,17 +37,6 @@ enum FireVaultTripLogControlMailbox {
         }
         defaults.removeObject(forKey: commandKey)
         return FireVaultTripLogControlCommand(rawValue: rawValue)
-    }
-}
-
-struct FireVaultPauseTripLogIntent: LiveActivityIntent {
-    static let title: LocalizedStringResource = "Pause Trip Log"
-    static let description = IntentDescription("Pause the active FireVault Trip Log.")
-    static let isDiscoverable = false
-
-    func perform() async throws -> some IntentResult {
-        FireVaultTripLogControlMailbox.send(.pause)
-        return .result()
     }
 }
 

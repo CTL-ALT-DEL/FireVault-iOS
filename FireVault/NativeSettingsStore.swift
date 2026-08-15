@@ -279,7 +279,6 @@ struct FireVaultNotificationPreferences: Codable, Equatable {
     var liveActivitiesAreEnabled: Bool { liveActivitiesEnabled ?? true }
     var showsLiveActivityMetrics: Bool { liveActivityMetricsVisible ?? true }
     var recordingReminderEnabled: Bool { tripLogStillRecording ?? true }
-    var pausedReminderEnabled: Bool { tripLogPaused ?? true }
     var hidesSensitiveDetails: Bool { hideSensitiveDetails ?? true }
     var usesQuietHours: Bool { quietHoursEnabled ?? true }
     var resolvedQuietStart: Int { min(23, max(0, quietHoursStart ?? 20)) }

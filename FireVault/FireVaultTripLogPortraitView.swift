@@ -367,9 +367,6 @@ struct FireVaultTripLogPortraitView: View {
                     selectedDayID = breadcrumbs.activeDay?.id
                 }
             } else if breadcrumbs.isRecording {
-                Button("Pause Recording", systemImage: "pause.fill") {
-                    breadcrumbs.pauseWorkday()
-                }
                 Button("Stop Trip Log", systemImage: "stop.fill", role: .destructive) {
                     confirmsEnd = true
                 }
@@ -591,7 +588,7 @@ struct FireVaultTripLogPortraitView: View {
                     Label("Trip Log Features", systemImage: "truck.box.fill")
                         .font(.headline)
                         .foregroundStyle(.primary)
-                    Label("Pause and resume route recording during the workday.", systemImage: "pause.circle")
+                    Label("Recording continues until you end the Trip Log.", systemImage: "location.fill")
                     Label("Review detected account stops and daily history.", systemImage: "calendar.badge.clock")
                     Label("Preview and export completed Trip Log reports.", systemImage: "doc.text")
                 }

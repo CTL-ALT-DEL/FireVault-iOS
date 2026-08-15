@@ -248,9 +248,6 @@ struct FireVaultIPadBreadcrumbsView: View {
                     selectedDayID = breadcrumbs.activeDay?.id
                 }
             } else if breadcrumbs.isRecording {
-                Button("Pause Recording", systemImage: "pause.fill") {
-                    breadcrumbs.pauseWorkday()
-                }
                 Button("Stop Trip Log", systemImage: "stop.fill", role: .destructive) {
                     confirmsEnd = true
                 }

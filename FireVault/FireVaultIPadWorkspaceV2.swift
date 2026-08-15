@@ -412,11 +412,6 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                 }
                 .buttonStyle(.borderedProminent)
             } else if breadcrumbs.isRecording {
-                Button("Pause", systemImage: "pause.fill") {
-                    breadcrumbs.pauseWorkday()
-                    closeTripLogControls()
-                }
-                .buttonStyle(.bordered)
                 Button("Stop", systemImage: "stop.fill", role: .destructive) {
                     confirmsTripLogEnd = true
                 }

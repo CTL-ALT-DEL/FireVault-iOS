@@ -511,11 +511,6 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         }
 
         return [
-            CPTextButton(title: "Pause", textStyle: .normal) { [weak self] _ in
-                guard let self else { return }
-                breadcrumbs.pauseWorkday()
-                refreshCarPlayState()
-            },
             CPTextButton(title: "End", textStyle: .cancel) { [weak self] _ in
                 self?.confirmEndTripLog()
             }

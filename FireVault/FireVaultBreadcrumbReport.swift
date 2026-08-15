@@ -711,7 +711,7 @@ struct FireVaultBreadcrumbReportView: View {
                 Text(
                     scope == .daily
                         ? "Daily shows the selected workday, route, metrics, and stop details."
-                        : "Weekly combines all Trip Log workdays in the selected calendar week."
+                        : "Weekly creates a visual overview followed by a complete page for each recorded workday."
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -729,7 +729,8 @@ struct FireVaultBreadcrumbReportView: View {
                 routeMap(
                     routeSets: [report.routePoints],
                     stops: report.mapStops,
-                    region: report.mapRegion
+                    region: report.mapRegion,
+                    aspectRatio: 1
                 )
                 routePerformanceProfile(
                     elevationSets: [report.elevationProfileFeet],
@@ -746,13 +747,8 @@ struct FireVaultBreadcrumbReportView: View {
                 routeMap(
                     routeSets: weeklyReport.routeSets,
                     stops: detail == .detailed ? weeklyReport.mapStops : [],
-                    region: weeklyReport.mapRegion
-                )
-                routePerformanceProfile(
-                    elevationSets: weeklyReport.elevationSetsFeet,
-                    speedSets: weeklyReport.speedSetsMPH,
-                    stopFractions: [],
-                    averageSpeed: weeklyReport.averageSpeedMPH
+                    region: weeklyReport.mapRegion,
+                    aspectRatio: 1.9
                 )
                 weeklyDaySummary
                 if detail == .detailed {
@@ -944,7 +940,8 @@ struct FireVaultBreadcrumbReportView: View {
     private func routeMap(
         routeSets: [[FireVaultTripLogRoutePoint]],
         stops: [FireVaultTripLogMapStop],
-        region: MKCoordinateRegion
+        region: MKCoordinateRegion,
+        aspectRatio: CGFloat
     ) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text("ROUTE MAP")
@@ -959,7 +956,7 @@ struct FireVaultBreadcrumbReportView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                .aspectRatio(1, contentMode: .fit)
+                .aspectRatio(aspectRatio, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             } else {
                 Map(initialPosition: .region(region), interactionModes: []) {
@@ -982,7 +979,7 @@ struct FireVaultBreadcrumbReportView: View {
                     }
                 }
                 .mapStyle(.standard(elevation: .flat))
-                .aspectRatio(1, contentMode: .fit)
+                .aspectRatio(aspectRatio, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -1392,7 +1389,7 @@ struct FireVaultBreadcrumbReportView: View {
                 routeSets: weeklyReport.routeSets,
                 stops: detail == .detailed ? weeklyReport.mapStops : [],
                 region: weeklyReport.mapRegion,
-                size: .init(width: 528, height: 148)
+                size: .init(width: 528, height: 160)
             )
             let data = FireVaultTripLogPDFRenderer.weekly(
                 report: weeklyReport,
@@ -1428,7 +1425,7 @@ struct FireVaultBreadcrumbReportView: View {
                 routeSets: weeklyReport.routeSets,
                 stops: detail == .detailed ? weeklyReport.mapStops : [],
                 region: weeklyReport.mapRegion,
-                size: .init(width: 528, height: 148)
+                size: .init(width: 528, height: 160)
             )
             pdfData = FireVaultTripLogPDFRenderer.weekly(
                 report: weeklyReport,
@@ -1583,6 +1580,13 @@ enum FireVaultTripLogPDFRenderer {
     private static let lightLine = UIColor(white: 0.87, alpha: 1)
     private static let paper = UIColor(red: 0.985, green: 0.988, blue: 0.992, alpha: 1)
 
+    private struct WeeklyDetailPage {
+        let day: FireVaultBreadcrumbReport
+        let visits: [FireVaultBreadcrumbReport.Visit]
+        let part: Int
+        let partCount: Int
+    }
+
     static func daily(
         report: FireVaultBreadcrumbReport,
         detail: FireVaultTripLogReportDetail,
@@ -1660,66 +1664,132 @@ enum FireVaultTripLogPDFRenderer {
         detail: FireVaultTripLogReportDetail,
         mapImage: UIImage?
     ) -> Data {
+        let detailSections = detail == .detailed ? makeWeeklyDetailPages(report.dailyReports) : []
+        let detailPages = packWeeklyDetailPages(detailSections)
+        let totalPages = 1 + detailPages.count
         let renderer = UIGraphicsPDFRenderer(bounds: pageBounds)
         return renderer.pdfData { context in
-            var y: CGFloat = 0
-
-            func beginPage() {
-                context.beginPage()
-                y = drawHeader(
-                        title: "TRIP LOG WEEKLY REPORT",
-                        dateTitle: "WEEK OF",
-                        dateMain: report.weekStart.formatted(.dateTime.month(.abbreviated).day()),
-                        dateFooter: report.weekEnd.formatted(.dateTime.month(.abbreviated).day().year()),
-                        technician: report.technicianName,
-                        company: report.companyName,
-                        page: 1,
-                        generatedAt: report.generatedAt
-                    )
-            }
-
-            beginPage()
+            context.beginPage()
+            var y = drawHeader(
+                title: "TRIP LOG WEEKLY REPORT",
+                dateTitle: "WEEK OF",
+                dateMain: report.weekStart.formatted(.dateTime.month(.abbreviated).day()),
+                dateFooter: report.weekEnd.formatted(.dateTime.month(.abbreviated).day().year()),
+                technician: report.technicianName,
+                company: report.companyName,
+                page: 1,
+                totalPages: totalPages,
+                generatedAt: report.generatedAt
+            )
             y = drawMetrics(
                 [
                     ("DISTANCE", report.distanceText),
-                    ("TIME", report.elapsedText),
+                    ("ON DUTY", report.elapsedText),
                     ("STOPS", "\(report.totalStopCount)"),
                     ("WORKDAYS", "\(report.dailyReports.count)"),
-                    ("VISITS", "\(report.accountVisitCount)")
+                    ("ACCOUNT VISITS", "\(report.accountVisitCount)")
                 ],
                 y: y
             )
             y += 8
-            y = drawMap(mapImage, y: y, size: .init(width: 528, height: 148))
-            y += 8
-            y = drawRoutePerformance(
-                elevationSets: report.elevationSetsFeet,
-                speedSets: report.speedSetsMPH,
-                stopFractions: [],
-                averageSpeed: report.averageSpeedMPH,
-                y: y
-            )
-            y += 8
-            y = drawSectionTitle("WEEKLY SUMMARY", y: y)
+            y = drawMap(mapImage, y: y, size: .init(width: 528, height: 160))
+            y += 10
+            y = drawSectionTitle("WEEK AT A GLANCE", y: y)
             y = drawWeeklyHeader(y: y)
-
-            let visibleDays = Array(report.dailyReports.prefix(max(1, Int((742 - y) / 34))))
-            for day in visibleDays {
+            for day in report.dailyReports {
                 y = drawWeeklyRow(day, y: y)
             }
-
             if report.dailyReports.isEmpty {
                 y += drawText("No Trip Log workdays were recorded in this week.", font: .systemFont(ofSize: 10), color: .darkGray, x: 42, y: y + 12, width: 528)
+            } else if y < 650 {
+                y += 12
+                y = drawWeeklyInsights(report, y: y)
             }
 
-            if report.dailyReports.count > visibleDays.count {
-                _ = drawText(
-                    "+ \(report.dailyReports.count - visibleDays.count) additional workdays retained in FireVault.",
-                    font: .italicSystemFont(ofSize: 8), color: .darkGray,
-                    x: 42, y: min(y + 8, 740), width: 528
+            for (index, pageSections) in detailPages.enumerated() {
+                let pageNumber = index + 2
+                context.beginPage()
+                y = drawContinuationHeader(
+                    title: "WEEKLY DAILY BREAKDOWN",
+                    date: report.dateRangeText,
+                    page: pageNumber,
+                    totalPages: totalPages,
+                    generatedAt: report.generatedAt
+                )
+                for (sectionIndex, detailPage) in pageSections.enumerated() {
+                    if sectionIndex > 0 { y += 16 }
+                    y = drawWeeklyDaySpotlight(detailPage, y: y)
+                    y += 10
+                    y = drawSectionTitle(
+                        detailPage.partCount > 1
+                            ? "STOP DETAILS • PART \(detailPage.part) OF \(detailPage.partCount)"
+                            : "STOP DETAILS",
+                        y: y
+                    )
+                    y = drawStopTableHeader(y: y)
+
+                    if detailPage.visits.isEmpty {
+                        y += drawText(
+                            "No stops were recorded for this workday.",
+                            font: .systemFont(ofSize: 11, weight: .medium),
+                            color: .darkGray,
+                            x: 48,
+                            y: y + 18,
+                            width: 516
+                        ) + 30
+                    } else {
+                        for visit in detailPage.visits {
+                            y = drawStopRow(visit, note: visit.technicianNote, y: y, height: 38)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static func makeWeeklyDetailPages(
+        _ reports: [FireVaultBreadcrumbReport]
+    ) -> [WeeklyDetailPage] {
+        let rowsPerPage = 13
+        return reports.flatMap { day in
+            guard !day.visits.isEmpty else {
+                return [WeeklyDetailPage(day: day, visits: [], part: 1, partCount: 1)]
+            }
+            let partCount = Int(ceil(Double(day.visits.count) / Double(rowsPerPage)))
+            return stride(from: 0, to: day.visits.count, by: rowsPerPage).enumerated().map { partIndex, start in
+                let end = min(day.visits.count, start + rowsPerPage)
+                return WeeklyDetailPage(
+                    day: day,
+                    visits: Array(day.visits[start..<end]),
+                    part: partIndex + 1,
+                    partCount: partCount
                 )
             }
         }
+    }
+
+    private static func packWeeklyDetailPages(
+        _ sections: [WeeklyDetailPage]
+    ) -> [[WeeklyDetailPage]] {
+        let availableHeight: CGFloat = 742 - 97
+        var pages: [[WeeklyDetailPage]] = []
+        var current: [WeeklyDetailPage] = []
+        var usedHeight: CGFloat = 0
+
+        for section in sections {
+            let rowsHeight = section.visits.isEmpty ? 48 : CGFloat(section.visits.count) * 38
+            let sectionHeight: CGFloat = 78 + 10 + 22 + 24 + rowsHeight
+            let spacing: CGFloat = current.isEmpty ? 0 : 16
+            if !current.isEmpty, usedHeight + spacing + sectionHeight > availableHeight {
+                pages.append(current)
+                current = []
+                usedHeight = 0
+            }
+            current.append(section)
+            usedHeight += (current.count == 1 ? 0 : spacing) + sectionHeight
+        }
+        if !current.isEmpty { pages.append(current) }
+        return pages
     }
 
     private static func drawHeader(
@@ -1730,6 +1800,7 @@ enum FireVaultTripLogPDFRenderer {
         technician: String,
         company: String,
         page: Int,
+        totalPages: Int = 1,
         generatedAt: Date
     ) -> CGFloat {
         paper.setFill()
@@ -1764,11 +1835,17 @@ enum FireVaultTripLogPDFRenderer {
 
         red.setFill()
         CGRect(x: masthead.minX + 18, y: masthead.maxY - 3, width: 88, height: 3).fill()
-        drawFooter(page: page, generatedAt: generatedAt)
+        drawFooter(page: page, totalPages: totalPages, generatedAt: generatedAt)
         return 139
     }
 
-    private static func drawContinuationHeader(title: String, date: String, page: Int) -> CGFloat {
+    private static func drawContinuationHeader(
+        title: String,
+        date: String,
+        page: Int,
+        totalPages: Int,
+        generatedAt: Date
+    ) -> CGFloat {
         paper.setFill()
         pageBounds.fill()
         let bar = CGRect(x: 24, y: 22, width: 564, height: 58)
@@ -1777,7 +1854,7 @@ enum FireVaultTripLogPDFRenderer {
         drawFireVaultProWordmark(x: 38, y: 33, fontSize: 16)
         drawText(title, font: .systemFont(ofSize: 8.5, weight: .bold), color: UIColor.white.withAlphaComponent(0.78), x: 38, y: 55, width: 274)
         drawText(date, font: .systemFont(ofSize: 8.5, weight: .semibold), color: .white, x: 352, y: 45, width: 214, alignment: .right)
-        drawFooter(page: page)
+        drawFooter(page: page, totalPages: totalPages, generatedAt: generatedAt)
         return 97
     }
 
@@ -1993,7 +2070,11 @@ enum FireVaultTripLogPDFRenderer {
         return rect.maxY
     }
 
-    private static func drawFooter(page: Int, generatedAt: Date = Date()) {
+    private static func drawFooter(
+        page: Int,
+        totalPages: Int = 1,
+        generatedAt: Date = Date()
+    ) {
         lightLine.setStroke()
         let line = UIBezierPath()
         line.move(to: .init(x: 42, y: 758))
@@ -2002,7 +2083,7 @@ enum FireVaultTripLogPDFRenderer {
         line.stroke()
         drawText("FIREVAULT PRO  •  BANNERMAN US LLC", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 42, y: 766, width: 245)
         drawText("Generated \(generatedAt.formatted(date: .abbreviated, time: .shortened))", font: .systemFont(ofSize: 6.7, weight: .medium), color: .gray, x: 235, y: 766, width: 220, alignment: .center)
-        drawText("PAGE \(page) OF 1", font: .monospacedSystemFont(ofSize: 7, weight: .semibold), color: .gray, x: 470, y: 766, width: 100, alignment: .right)
+        drawText("PAGE \(page) OF \(totalPages)", font: .monospacedSystemFont(ofSize: 7, weight: .semibold), color: .gray, x: 470, y: 766, width: 100, alignment: .right)
     }
 
     private static func drawFireVaultProWordmark(x: CGFloat, y: CGFloat, fontSize: CGFloat) {
@@ -2078,23 +2159,174 @@ enum FireVaultTripLogPDFRenderer {
         return y + height
     }
 
-    private static func drawWeeklyHeader(y: CGFloat) -> CGFloat {
-        let rect = CGRect(x: 42, y: y, width: 528, height: 24)
+    private static func drawWeeklyDaySpotlight(
+        _ page: WeeklyDetailPage,
+        y: CGFloat
+    ) -> CGFloat {
+        let rect = CGRect(x: 42, y: y, width: 528, height: 78)
         paleBlue.setFill()
+        UIBezierPath(roundedRect: rect, cornerRadius: 14).fill()
+        lightLine.setStroke()
+        let outline = UIBezierPath(roundedRect: rect, cornerRadius: 14)
+        outline.lineWidth = 0.8
+        outline.stroke()
+
+        red.setFill()
+        UIBezierPath(
+            roundedRect: CGRect(x: rect.minX, y: rect.minY, width: 6, height: rect.height),
+            byRoundingCorners: [.topLeft, .bottomLeft],
+            cornerRadii: .init(width: 14, height: 14)
+        ).fill()
+
+        let day = page.day
+        drawText(
+            day.startedAt.formatted(.dateTime.weekday(.wide)).uppercased(),
+            font: .systemFont(ofSize: 15, weight: .black),
+            color: navy,
+            x: 58,
+            y: y + 10,
+            width: 222
+        )
+        let savedName = day.sourceDay.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        drawText(
+            savedName.isEmpty ? day.startedAt.formatted(date: .long, time: .omitted) : savedName,
+            font: .systemFont(ofSize: 9.5, weight: .semibold),
+            color: blue,
+            x: 58,
+            y: y + 33,
+            width: 222
+        )
+        drawText(
+            "\(day.startTimeText) – \(day.endTimeText)",
+            font: .monospacedSystemFont(ofSize: 8.5, weight: .medium),
+            color: .darkGray,
+            x: 58,
+            y: y + 51,
+            width: 222
+        )
+        if page.partCount > 1 {
+            drawText(
+                "PAGE SECTION \(page.part) OF \(page.partCount)",
+                font: .systemFont(ofSize: 6.8, weight: .bold),
+                color: red,
+                x: 176,
+                y: y + 53,
+                width: 104,
+                alignment: .right
+            )
+        }
+
+        let metrics = [
+            ("DISTANCE", day.distanceText),
+            ("ON DUTY", day.elapsedText),
+            ("STOPS", "\(day.visits.count)")
+        ]
+        let metricStartX: CGFloat = 302
+        let metricWidth: CGFloat = 84
+        for (index, metric) in metrics.enumerated() {
+            let x = metricStartX + CGFloat(index) * metricWidth
+            drawCenteredText(
+                metric.1,
+                font: .systemFont(ofSize: 11.5, weight: .bold),
+                color: navy,
+                rect: CGRect(x: x, y: y + 20, width: metricWidth, height: 20)
+            )
+            drawCenteredText(
+                metric.0,
+                font: .systemFont(ofSize: 6.8, weight: .bold),
+                color: .darkGray,
+                rect: CGRect(x: x, y: y + 43, width: metricWidth, height: 14)
+            )
+            if index > 0 {
+                lightLine.setStroke()
+                let line = UIBezierPath()
+                line.move(to: .init(x: x, y: y + 17))
+                line.addLine(to: .init(x: x, y: y + 61))
+                line.lineWidth = 0.7
+                line.stroke()
+            }
+        }
+        return rect.maxY
+    }
+
+    private static func drawWeeklyInsights(
+        _ report: FireVaultTripLogWeeklyReport,
+        y: CGFloat
+    ) -> CGFloat {
+        var cursor = drawSectionTitle("WEEKLY INSIGHTS", y: y)
+        let rect = CGRect(x: 42, y: cursor, width: 528, height: 62)
+        paleBlue.setFill()
+        UIBezierPath(roundedRect: rect, cornerRadius: 12).fill()
+        lightLine.setStroke()
+        let outline = UIBezierPath(roundedRect: rect, cornerRadius: 12)
+        outline.lineWidth = 0.8
+        outline.stroke()
+
+        let longestDay = report.dailyReports.max { $0.totalDistanceMeters < $1.totalDistanceMeters }
+        let averageDistance = report.dailyReports.isEmpty
+            ? 0
+            : report.totalDistanceMeters / Double(report.dailyReports.count)
+        let insights: [(String, String, String)] = [
+            (
+                "LONGEST ROUTE",
+                longestDay?.startedAt.formatted(.dateTime.weekday(.wide)) ?? "—",
+                longestDay?.distanceText ?? "No route"
+            ),
+            (
+                "AVERAGE / WORKDAY",
+                FireVaultBreadcrumbReport.distanceText(averageDistance),
+                "Across \(report.dailyReports.count) recorded day\(report.dailyReports.count == 1 ? "" : "s")"
+            ),
+            (
+                "NEEDS REVIEW",
+                "\(report.unassignedVisitCount)",
+                report.unassignedVisitCount == 0 ? "All stops identified" : "Unrecognized stops"
+            )
+        ]
+        let width = rect.width / CGFloat(insights.count)
+        for (index, insight) in insights.enumerated() {
+            let item = CGRect(x: rect.minX + CGFloat(index) * width, y: rect.minY, width: width, height: rect.height)
+            drawCenteredText(insight.0, font: .systemFont(ofSize: 6.8, weight: .bold), color: .darkGray, rect: CGRect(x: item.minX + 6, y: item.minY + 8, width: item.width - 12, height: 12))
+            drawCenteredText(insight.1, font: .systemFont(ofSize: 11, weight: .bold), color: navy, rect: CGRect(x: item.minX + 6, y: item.minY + 23, width: item.width - 12, height: 17))
+            drawCenteredText(insight.2, font: .systemFont(ofSize: 6.8, weight: .medium), color: .gray, rect: CGRect(x: item.minX + 6, y: item.minY + 42, width: item.width - 12, height: 12))
+            if index > 0 {
+                lightLine.setStroke()
+                let line = UIBezierPath()
+                line.move(to: .init(x: item.minX, y: item.minY + 9))
+                line.addLine(to: .init(x: item.minX, y: item.maxY - 9))
+                line.lineWidth = 0.7
+                line.stroke()
+            }
+        }
+        cursor = rect.maxY
+        return cursor
+    }
+
+    private static func drawWeeklyHeader(y: CGFloat) -> CGFloat {
+        let rect = CGRect(x: 42, y: y, width: 528, height: 26)
+        navy.setFill()
         rect.fill()
-        drawText("DAY", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 48, y: y + 7, width: 250)
-        drawText("MILES", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 320, y: y + 7, width: 60)
-        drawText("TIME", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 400, y: y + 7, width: 70)
-        drawText("STOPS", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 505, y: y + 7, width: 55)
+        drawText("WORKDAY / ROUTE WINDOW", font: .systemFont(ofSize: 7.5, weight: .bold), color: .white, x: 48, y: y + 8, width: 252)
+        drawText("DISTANCE", font: .systemFont(ofSize: 7.5, weight: .bold), color: .white, x: 315, y: y + 8, width: 70, alignment: .right)
+        drawText("ON DUTY", font: .systemFont(ofSize: 7.5, weight: .bold), color: .white, x: 405, y: y + 8, width: 75, alignment: .right)
+        drawText("STOPS", font: .systemFont(ofSize: 7.5, weight: .bold), color: .white, x: 520, y: y + 8, width: 40, alignment: .right)
         return rect.maxY
     }
 
     private static func drawWeeklyRow(_ day: FireVaultBreadcrumbReport, y: CGFloat) -> CGFloat {
-        let rowHeight: CGFloat = 34
-        drawText(day.startedAt.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()), font: .systemFont(ofSize: 9, weight: .semibold), color: navy, x: 48, y: y + 9, width: 250)
-        drawText(day.distanceText, font: .monospacedSystemFont(ofSize: 8, weight: .regular), color: .darkGray, x: 320, y: y + 9, width: 60)
-        drawText(day.elapsedText, font: .monospacedSystemFont(ofSize: 8, weight: .regular), color: .darkGray, x: 400, y: y + 9, width: 70)
-        drawText("\(day.visits.count)", font: .monospacedSystemFont(ofSize: 8, weight: .regular), color: .darkGray, x: 520, y: y + 9, width: 40)
+        let rowHeight: CGFloat = 40
+        drawText(day.startedAt.formatted(.dateTime.weekday(.wide)), font: .systemFont(ofSize: 10, weight: .bold), color: navy, x: 48, y: y + 6, width: 252)
+        drawText(
+            "\(day.startedAt.formatted(.dateTime.month(.abbreviated).day())) • \(day.startTimeText)–\(day.endTimeText)",
+            font: .monospacedSystemFont(ofSize: 7.2, weight: .medium),
+            color: .darkGray,
+            x: 48,
+            y: y + 22,
+            width: 252
+        )
+        drawText(day.distanceText, font: .monospacedSystemFont(ofSize: 8.5, weight: .semibold), color: navy, x: 315, y: y + 13, width: 70, alignment: .right)
+        drawText(day.elapsedText, font: .monospacedSystemFont(ofSize: 8.5, weight: .semibold), color: navy, x: 405, y: y + 13, width: 75, alignment: .right)
+        drawText("\(day.visits.count)", font: .monospacedSystemFont(ofSize: 8.5, weight: .semibold), color: navy, x: 520, y: y + 13, width: 40, alignment: .right)
         lightLine.setStroke()
         let line = UIBezierPath()
         line.move(to: .init(x: 42, y: y + rowHeight))
