@@ -420,16 +420,15 @@ struct FieldWorkspaceView: View {
     private var destinations: some View {
         VStack(alignment: .leading, spacing: 9) {
             WorkspaceSectionTitle(title: "ACCOUNT CONTENT", subtitle: "Saved field information")
-            LazyVGrid(columns: columns, spacing: 9) {
-                NavigationLink {
-                    FireVaultAccountMediaLibraryView(accountID: account.id, store: store)
-                } label: {
-                    WorkspaceMediaDestinationCard(account: account, store: store)
-                }
-                .gridCellColumns(2)
-                .accessibilityIdentifier("account-media-tile")
+            NavigationLink {
+                FireVaultAccountMediaLibraryView(accountID: account.id, store: store)
+            } label: {
+                WorkspaceMediaDestinationCard(account: account, store: store)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("account-media-tile")
 
-                if settings.isFeatureVisible("account.notes") {
+            LazyVGrid(columns: columns, spacing: 9) {
                     NavigationLink {
                         NotesWorkspaceView(account: account, store: store)
                     } label: {
@@ -438,9 +437,7 @@ struct FieldWorkspaceView: View {
                             symbol: "note.text", color: FieldWorkspacePalette.amber
                         )
                     }
-                }
 
-                if settings.isFeatureVisible("account.equipment") {
                     NavigationLink {
                         EquipmentWorkspaceView(
                             account: account,
@@ -453,8 +450,6 @@ struct FieldWorkspaceView: View {
                             symbol: "wrench.and.screwdriver", color: FieldWorkspacePalette.green
                         )
                     }
-                }
-
             }
             .buttonStyle(.plain)
         }
@@ -2814,9 +2809,9 @@ private struct WorkspaceMediaDestinationCard: View {
                let url {
                 FireVaultMediaThumbnailView(url: url)
             } else {
-                Image(systemName: url == nil ? "exclamationmark.triangle.fill" : (document.kind.lowercased() == "scan" ? "doc.viewfinder.fill" : "doc.fill"))
+                Image(systemName: document.kind.lowercased() == "photo" ? "photo.fill" : (document.kind.lowercased() == "scan" ? "doc.viewfinder.fill" : "doc.fill"))
                     .font(.title3.bold())
-                    .foregroundStyle(url == nil ? FieldWorkspacePalette.amber : FieldWorkspacePalette.blue)
+                    .foregroundStyle(FieldWorkspacePalette.blue)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(FieldWorkspacePalette.blue.opacity(0.08))
             }
