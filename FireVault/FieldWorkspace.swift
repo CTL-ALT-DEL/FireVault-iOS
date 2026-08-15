@@ -421,15 +421,13 @@ struct FieldWorkspaceView: View {
         VStack(alignment: .leading, spacing: 9) {
             WorkspaceSectionTitle(title: "ACCOUNT CONTENT", subtitle: "Saved field information")
             LazyVGrid(columns: columns, spacing: 9) {
-                if settings.isFeatureVisible("account.files") {
-                    NavigationLink {
-                        FireVaultAccountMediaLibraryView(accountID: account.id, store: store)
-                    } label: {
-                        WorkspaceMediaDestinationCard(account: account, store: store)
-                    }
-                    .gridCellColumns(2)
-                    .accessibilityIdentifier("account-media-tile")
+                NavigationLink {
+                    FireVaultAccountMediaLibraryView(accountID: account.id, store: store)
+                } label: {
+                    WorkspaceMediaDestinationCard(account: account, store: store)
                 }
+                .gridCellColumns(2)
+                .accessibilityIdentifier("account-media-tile")
 
                 if settings.isFeatureVisible("account.notes") {
                     NavigationLink {

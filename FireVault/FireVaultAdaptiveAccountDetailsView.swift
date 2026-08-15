@@ -92,7 +92,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
             case .notes:
                 settings.isFeatureVisible("account.notes")
             case .documents:
-                settings.isFeatureVisible("account.files")
+                true
             case .equipment:
                 settings.isFeatureVisible("account.equipment")
             case .locations:
