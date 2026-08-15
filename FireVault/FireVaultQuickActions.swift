@@ -130,6 +130,7 @@ final class FireVaultWidgetDeepLinkCenter: ObservableObject {
     }
 }
 
+@MainActor
 final class FireVaultAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
@@ -142,8 +143,15 @@ final class FireVaultAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        Task { @MainActor in
-            FireVaultQuickActionCenter.shared.installShortcutItems(on: application)
+        FireVaultQuickActionCenter.shared.installShortcutItems(on: application)
+        let tripLog = FireVaultBreadcrumbStore.shared
+        if tripLog.activeDay?.isPaused == false {
+            // Recreate the Core Location and background activity sessions
+            // before loading the account repository. Apple requires an active
+            // session to be reinstated immediately after a background relaunch.
+            tripLog.restoreActiveReceiver()
+            let store = FireVaultStore()
+            tripLog.attachAccountsToActiveReceiver(store.accounts)
         }
         return true
     }
