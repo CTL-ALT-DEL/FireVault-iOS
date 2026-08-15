@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import CoreLocation
 
 struct ContentView: View {
     @StateObject private var store = FireVaultStore()
@@ -143,8 +144,12 @@ struct ContentView: View {
             && !isLandscapeWindow
             && store.selectedAccount == nil
         let payload = store.appPayload(
-            userCoordinate: locationService.coordinate,
-            liveLocationStatus: locationService.statusText
+            userCoordinate: activeBreadcrumbs.isRecording
+                ? activeBreadcrumbs.latestLocation?.coordinate
+                : locationService.coordinate,
+            liveLocationStatus: activeBreadcrumbs.isRecording
+                ? activeBreadcrumbs.statusText
+                : locationService.statusText
         )
 
         return VStack(spacing: 0) {

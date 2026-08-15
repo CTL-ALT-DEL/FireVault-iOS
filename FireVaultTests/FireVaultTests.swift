@@ -1029,7 +1029,7 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(FireVaultBreadcrumbRules.isStationary(moved, comparedTo: first))
     }
 
-    func testCarPlaySpeedFallsToZeroWhenMovementEvidenceIsStale() throws {
+    func testFreshCoreLocationSpeedIsNotBlockedByMovementEvidence() throws {
         let now = Date(timeIntervalSince1970: 1_700_000_100)
         let location = testLocation(
             latitude: 43.615,
@@ -1040,12 +1040,864 @@ final class FireVaultTests: XCTestCase {
         let speed = try XCTUnwrap(
             FireVaultBreadcrumbRules.resolvedLiveSpeed(
                 location: location,
-                lastMeaningfulMovementAt: now.addingTimeInterval(-9),
                 now: now
             )
         )
 
+        XCTAssertEqual(speed, 15)
+    }
+
+    func testTripLogDoesNotTreatSingleFastLocationAsMovementEvidence() {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let location = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: now,
+            speed: 13.9
+        )
+
+        XCTAssertNil(
+            FireVaultBreadcrumbRules.updatedMeaningfulMovementDate(
+                for: location,
+                reference: nil,
+                previousMeaningfulMovementAt: nil,
+                now: now
+            )
+        )
+    }
+
+    func testTripLogUsesDisplacementForMeaningfulMovementEvidence() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        let reference = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: start,
+            speed: 0
+        )
+        let moved = testLocation(
+            latitude: 43.6158,
+            longitude: -116.202,
+            timestamp: start.addingTimeInterval(20),
+            speed: 13.9
+        )
+
+        let movementAt = try XCTUnwrap(
+            FireVaultBreadcrumbRules.updatedMeaningfulMovementDate(
+                for: moved,
+                reference: reference,
+                previousMeaningfulMovementAt: nil,
+                now: moved.timestamp
+            )
+        )
+
+        XCTAssertEqual(movementAt, moved.timestamp)
+    }
+
+    func testTripLogShowsFirstFreshMovingSpeedImmediately() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let location = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: now,
+            speed: 13.9
+        )
+
+        let speed = try XCTUnwrap(
+            FireVaultBreadcrumbRules.resolvedLiveSpeed(
+                location: location,
+                now: now
+            )
+        )
+
+        XCTAssertEqual(speed, 13.9, accuracy: 0.001)
+    }
+
+    func testTripLogSpeedRecoversImmediatelyAfterAStop() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        let sequence: [(offset: TimeInterval, speed: CLLocationSpeed)] = [
+            (0, 0),       // Trip starts while parked.
+            (2, 8.5),     // First moving fix must display immediately.
+            (15, 0),      // Stop sign.
+            (18, 0),
+            (20, 6.25)    // First fresh departure fix must display again.
+        ]
+
+        let resolved = try sequence.map { sample in
+            let timestamp = start.addingTimeInterval(sample.offset)
+            let location = testLocation(
+                latitude: 43.615 + sample.offset / 100_000,
+                longitude: -116.202,
+                timestamp: timestamp,
+                accuracy: 180,
+                speed: sample.speed
+            )
+            return try XCTUnwrap(
+                FireVaultBreadcrumbRules.resolvedLiveSpeed(
+                    location: location,
+                    now: timestamp
+                )
+            )
+        }
+
+        XCTAssertEqual(resolved, sequence.map(\.speed))
+    }
+
+    func testInvalidCoreLocationSpeedRemainsUnavailable() {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let location = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: now,
+            speed: -1
+        )
+
+        XCTAssertNil(
+            FireVaultBreadcrumbRules.resolvedLiveSpeed(
+                location: location,
+                now: now
+            )
+        )
+    }
+
+    func testLiveSpeedReducerShowsFirstPositiveFixImmediately() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        var reducer = FireVaultLiveSpeedReducer()
+        let snapshot = reducer.ingest(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: now,
+                accuracy: 180,
+                speed: 12.5
+            ),
+            receivedAt: now
+        )
+
+        XCTAssertEqual(try XCTUnwrap(snapshot.metersPerSecond), 12.5, accuracy: 0.001)
+        XCTAssertEqual(snapshot.source, .coreLocation)
+    }
+
+    func testLiveSpeedReducerDerivesMovementWhenRawSpeedIsUnavailable() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        var reducer = FireVaultLiveSpeedReducer()
+        _ = reducer.ingest(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: start,
+                accuracy: 5,
+                speed: -1
+            ),
+            receivedAt: start
+        )
+        let snapshot = reducer.ingest(
+            testLocation(
+                latitude: 43.6153,
+                longitude: -116.202,
+                timestamp: start.addingTimeInterval(2),
+                accuracy: 5,
+                speed: -1
+            ),
+            receivedAt: start.addingTimeInterval(2)
+        )
+
+        XCTAssertGreaterThan(try XCTUnwrap(snapshot.metersPerSecond), 1.5)
+        XCTAssertEqual(snapshot.source, .derived)
+    }
+
+    func testLiveSpeedReducerOverridesFrozenPositiveSpeedWithStationaryEvidence() {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        var reducer = FireVaultLiveSpeedReducer()
+        _ = reducer.ingest(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: start,
+                accuracy: 5,
+                speed: 13.9
+            ),
+            receivedAt: start
+        )
+        _ = reducer.ingest(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: start.addingTimeInterval(2),
+                accuracy: 5,
+                speed: 13.9
+            ),
+            receivedAt: start.addingTimeInterval(2)
+        )
+        let stationary = reducer.ingest(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: start.addingTimeInterval(4),
+                accuracy: 5,
+                speed: 13.9
+            ),
+            receivedAt: start.addingTimeInterval(4)
+        )
+
+        XCTAssertEqual(stationary.metersPerSecond, 0)
+        XCTAssertEqual(stationary.source, .stationary)
+
+    }
+
+    func testLiveSpeedReducerResumesOnFirstPositiveFixAfterStop() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        var reducer = FireVaultLiveSpeedReducer()
+        _ = reducer.ingest(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: start,
+                speed: 0
+            ),
+            receivedAt: start
+        )
+        let departing = reducer.ingest(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: start.addingTimeInterval(2),
+                speed: 8.5
+            ),
+            receivedAt: start.addingTimeInterval(2)
+        )
+
+        XCTAssertEqual(try XCTUnwrap(departing.metersPerSecond), 8.5, accuracy: 0.001)
+        XCTAssertEqual(departing.source, .coreLocation)
+    }
+
+    func testLiveSpeedReducerUsesCoordinateMovementWhenRawSpeedRemainsZero() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        var reducer = FireVaultLiveSpeedReducer()
+        _ = reducer.ingest(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: start,
+                accuracy: 5,
+                speed: 0
+            ),
+            receivedAt: start
+        )
+        let departing = reducer.ingest(
+            testLocation(
+                latitude: 43.6152,
+                longitude: -116.202,
+                timestamp: start.addingTimeInterval(2),
+                accuracy: 5,
+                speed: 0
+            ),
+            receivedAt: start.addingTimeInterval(2)
+        )
+
+        XCTAssertGreaterThan(try XCTUnwrap(departing.metersPerSecond), 1.5)
+        XCTAssertEqual(departing.source, .derived)
+    }
+
+    func testLiveSpeedReducerAccumulatesDepartureAcrossSubsecondFixes() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        var reducer = FireVaultLiveSpeedReducer()
+        _ = reducer.ingest(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: start,
+                accuracy: 5,
+                speed: 0
+            ),
+            receivedAt: start
+        )
+        _ = reducer.ingest(
+            testLocation(
+                latitude: 43.61505,
+                longitude: -116.202,
+                timestamp: start.addingTimeInterval(0.4),
+                accuracy: 5,
+                speed: 0
+            ),
+            receivedAt: start.addingTimeInterval(0.4)
+        )
+        _ = reducer.ingest(
+            testLocation(
+                latitude: 43.6151,
+                longitude: -116.202,
+                timestamp: start.addingTimeInterval(0.8),
+                accuracy: 5,
+                speed: 0
+            ),
+            receivedAt: start.addingTimeInterval(0.8)
+        )
+        let departing = reducer.ingest(
+            testLocation(
+                latitude: 43.61515,
+                longitude: -116.202,
+                timestamp: start.addingTimeInterval(1.2),
+                accuracy: 5,
+                speed: 0
+            ),
+            receivedAt: start.addingTimeInterval(1.2)
+        )
+
+        XCTAssertGreaterThan(try XCTUnwrap(departing.metersPerSecond), 1.5)
+        XCTAssertEqual(departing.source, .derived)
+    }
+
+    func testLiveSpeedReducerStopsFrozenPositiveSpeedWithSubsecondFixes() {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        var reducer = FireVaultLiveSpeedReducer()
+        for offset in [0.0, 0.4, 0.8, 1.2, 1.6] {
+            _ = reducer.ingest(
+                testLocation(
+                    latitude: 43.615,
+                    longitude: -116.202,
+                    timestamp: start.addingTimeInterval(offset),
+                    accuracy: 5,
+                    speed: 13.9
+                ),
+                receivedAt: start.addingTimeInterval(offset)
+            )
+        }
+        let stationary = reducer.ingest(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: start.addingTimeInterval(2),
+                accuracy: 5,
+                speed: 13.9
+            ),
+            receivedAt: start.addingTimeInterval(2)
+        )
+
+        XCTAssertEqual(stationary.metersPerSecond, 0)
+        XCTAssertEqual(stationary.source, .stationary)
+
+        for offset in [2.4, 2.8, 3.2, 10.4, 10.8, 11.2, 11.6] {
+            let stillStationary = reducer.ingest(
+                testLocation(
+                    latitude: 43.615,
+                    longitude: -116.202,
+                    timestamp: start.addingTimeInterval(offset),
+                    accuracy: 5,
+                    speed: 13.9
+                ),
+                receivedAt: start.addingTimeInterval(offset)
+            )
+            XCTAssertEqual(stillStationary.metersPerSecond, 0)
+            XCTAssertEqual(stillStationary.source, .stationary)
+        }
+    }
+
+    func testDerivedDepartureBeatsStaleLowPositiveRawSpeed() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        var reducer = FireVaultLiveSpeedReducer()
+        _ = reducer.ingest(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: start,
+                accuracy: 5,
+                speed: 0
+            ),
+            receivedAt: start
+        )
+        let departing = reducer.ingest(
+            testLocation(
+                latitude: 43.6152,
+                longitude: -116.202,
+                timestamp: start.addingTimeInterval(2),
+                accuracy: 5,
+                speed: 0.5
+            ),
+            receivedAt: start.addingTimeInterval(2)
+        )
+
+        XCTAssertGreaterThan(try XCTUnwrap(departing.metersPerSecond), 1.5)
+        XCTAssertEqual(departing.source, .derived)
+    }
+
+    func testLiveSpeedReducerExpiresFrozenReadingAfterEightSeconds() {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        var reducer = FireVaultLiveSpeedReducer()
+        _ = reducer.ingest(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: start,
+                speed: 13.9
+            ),
+            receivedAt: start
+        )
+        let stale = reducer.refresh(
+            at: start.addingTimeInterval(FireVaultBreadcrumbRules.maximumLiveSpeedAge + 0.1)
+        )
+
+        XCTAssertEqual(stale.metersPerSecond, 0)
+        XCTAssertEqual(stale.source, .stale)
+    }
+
+    func testCachedCallbackCannotReplaceOrRevalidateLatestTelemetry() {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let latest = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: now.addingTimeInterval(-2),
+            speed: 4
+        )
+        let duplicate = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: latest.timestamp,
+            speed: 4
+        )
+        let older = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: now.addingTimeInterval(-7),
+            speed: 4
+        )
+
+        XCTAssertFalse(
+            FireVaultBreadcrumbRules.shouldAcceptLiveTelemetry(
+                duplicate,
+                after: latest,
+                now: now
+            )
+        )
+        XCTAssertFalse(
+            FireVaultBreadcrumbRules.shouldAcceptLiveTelemetry(
+                older,
+                after: latest,
+                now: now
+            )
+        )
+    }
+
+    func testCoarseNetworkFixCannotMasqueradeAsNavigationTelemetry() {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let coarse = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: now,
+            accuracy: 250,
+            speed: 0
+        )
+
+        XCTAssertFalse(
+            FireVaultBreadcrumbRules.shouldAcceptNavigationTelemetry(
+                coarse,
+                after: nil,
+                now: now
+            )
+        )
+    }
+
+    func testDelayedRouteBatchDoesNotQualifyAsLiveTelemetry() {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let delayed = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: now.addingTimeInterval(-120),
+            accuracy: 10,
+            speed: 8
+        )
+
+        XCTAssertTrue(
+            FireVaultBreadcrumbRules.shouldAcceptRouteLocation(
+                delayed,
+                after: nil,
+                now: now
+            )
+        )
+        XCTAssertFalse(
+            FireVaultBreadcrumbRules.shouldAcceptNavigationTelemetry(
+                delayed,
+                after: nil,
+                now: now
+            )
+        )
+        XCTAssertTrue(FireVaultBreadcrumbRules.accepts(delayed, after: nil, now: now))
+        XCTAssertTrue(
+            FireVaultBreadcrumbRules.shouldEvaluateStop(delayed, after: nil, now: now)
+        )
+    }
+
+    func testGPSDiagnosticsHistoryEvictsOldestAtCapacity() {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        var history = FireVaultGPSDiagnosticHistory()
+
+        for index in 0..<(FireVaultGPSDiagnosticHistory.capacity + 3) {
+            let timestamp = start.addingTimeInterval(Double(index))
+            XCTAssertTrue(history.append(
+                testLocation(
+                    latitude: 43.615 + Double(index) / 1_000_000,
+                    longitude: -116.202,
+                    timestamp: timestamp,
+                    speed: 1
+                ),
+                speedSnapshot: .unavailable,
+                receivedAt: timestamp
+            ))
+        }
+
+        XCTAssertEqual(history.samples.count, FireVaultGPSDiagnosticHistory.capacity)
+        XCTAssertEqual(history.samples.first?.time, start.addingTimeInterval(3))
+        XCTAssertEqual(
+            history.samples.last?.time,
+            start.addingTimeInterval(Double(FireVaultGPSDiagnosticHistory.capacity + 2))
+        )
+    }
+
+    func testGPSDiagnosticsHistoryRejectsDuplicateOutOfOrderAndStaleFixes() {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        var history = FireVaultGPSDiagnosticHistory()
+        let initial = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: start
+        )
+
+        XCTAssertTrue(history.append(initial, speedSnapshot: .unavailable, receivedAt: start))
+        XCTAssertFalse(history.append(initial, speedSnapshot: .unavailable, receivedAt: start))
+        XCTAssertFalse(history.append(
+            testLocation(
+                latitude: 43.614,
+                longitude: -116.202,
+                timestamp: start.addingTimeInterval(-1)
+            ),
+            speedSnapshot: .unavailable,
+            receivedAt: start.addingTimeInterval(1)
+        ))
+        XCTAssertFalse(history.append(
+            testLocation(
+                latitude: 43.616,
+                longitude: -116.202,
+                timestamp: start.addingTimeInterval(1)
+            ),
+            speedSnapshot: .unavailable,
+            receivedAt: start.addingTimeInterval(
+                FireVaultBreadcrumbRules.maximumLiveTelemetryAge + 2
+            )
+        ))
+        XCTAssertEqual(history.samples.count, 1)
+    }
+
+    func testGPSDiagnosticsHistoryPreservesUnavailableMeasurements() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        var history = FireVaultGPSDiagnosticHistory()
+        XCTAssertTrue(history.append(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: now,
+                speed: -1
+            ),
+            speedSnapshot: .unavailable,
+            receivedAt: now
+        ))
+
+        let sample = try XCTUnwrap(history.samples.last)
+        XCTAssertNil(sample.altitudeFeet)
+        XCTAssertNil(sample.verticalAccuracyFeet)
+        XCTAssertNil(sample.resolvedSpeedMPH)
+        XCTAssertNil(sample.rawSpeedMPH)
+        XCTAssertNil(sample.derivedSpeedMPH)
+        XCTAssertNil(sample.speedAccuracyMPH)
+        XCTAssertNil(sample.courseDegrees)
+        XCTAssertNil(sample.courseAccuracyDegrees)
+    }
+
+    func testGPSDiagnosticsHistoryCapturesRealAccuracyAndTiming() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        var history = FireVaultGPSDiagnosticHistory()
+        let speedSnapshot = FireVaultLiveSpeedSnapshot(
+            metersPerSecond: 10,
+            source: .coreLocation,
+            sampleTimestamp: start,
+            receivedAt: start,
+            rawMetersPerSecond: 10,
+            derivedMetersPerSecond: 9.5
+        )
+        let first = CLLocation(
+            coordinate: .init(latitude: 43.615, longitude: -116.202),
+            altitude: 1_600,
+            horizontalAccuracy: 6,
+            verticalAccuracy: 4,
+            course: 312,
+            courseAccuracy: 5,
+            speed: 10,
+            speedAccuracy: 0.5,
+            timestamp: start
+        )
+        XCTAssertTrue(history.append(
+            first,
+            speedSnapshot: speedSnapshot,
+            receivedAt: start.addingTimeInterval(0.25)
+        ))
+
+        let sample = try XCTUnwrap(history.samples.last)
+        XCTAssertEqual(sample.horizontalAccuracyFeet, 19.685, accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(sample.verticalAccuracyFeet), 13.123, accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(sample.resolvedSpeedMPH), 22.369, accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(sample.rawSpeedMPH), 22.369, accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(sample.derivedSpeedMPH), 21.251, accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(sample.speedAccuracyMPH), 1.118, accuracy: 0.01)
+        XCTAssertEqual(sample.courseDegrees, 312)
+        XCTAssertEqual(sample.courseAccuracyDegrees, 5)
+        XCTAssertEqual(sample.callbackLatency, 0.25, accuracy: 0.001)
+        XCTAssertEqual(sample.speedSource, .coreLocation)
+    }
+
+    func testGPSDiagnosticsHistoryDoesNotChartMismatchedSpeedSnapshot() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let staleSnapshot = FireVaultLiveSpeedSnapshot(
+            metersPerSecond: 15,
+            source: .coreLocation,
+            sampleTimestamp: now.addingTimeInterval(-1),
+            receivedAt: now,
+            rawMetersPerSecond: 15,
+            derivedMetersPerSecond: nil
+        )
+        var history = FireVaultGPSDiagnosticHistory()
+        XCTAssertTrue(history.append(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: now,
+                speed: 15
+            ),
+            speedSnapshot: staleSnapshot,
+            receivedAt: now
+        ))
+
+        let sample = try XCTUnwrap(history.samples.last)
+        XCTAssertNil(sample.resolvedSpeedMPH)
+        XCTAssertNil(sample.rawSpeedMPH)
+        XCTAssertNil(sample.derivedSpeedMPH)
+        XCTAssertEqual(sample.speedSource, .unavailable)
+    }
+
+    func testGPSDiagnosticsHistoryCalculatesSecondFixMotionMetrics() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        var history = FireVaultGPSDiagnosticHistory()
+        let first = CLLocation(
+            coordinate: .init(latitude: 43.615, longitude: -116.202),
+            altitude: 1_600,
+            horizontalAccuracy: 5,
+            verticalAccuracy: 4,
+            course: -1,
+            speed: -1,
+            timestamp: start
+        )
+        let second = CLLocation(
+            coordinate: .init(latitude: 43.6151, longitude: -116.202),
+            altitude: 1_610,
+            horizontalAccuracy: 5,
+            verticalAccuracy: 4,
+            course: -1,
+            speed: -1,
+            timestamp: start.addingTimeInterval(2)
+        )
+
+        XCTAssertTrue(history.append(first, speedSnapshot: .unavailable, receivedAt: start))
+        XCTAssertTrue(history.append(
+            second,
+            speedSnapshot: .unavailable,
+            receivedAt: start.addingTimeInterval(2)
+        ))
+
+        let sample = try XCTUnwrap(history.samples.last)
+        XCTAssertEqual(sample.updateInterval, 2)
+        XCTAssertGreaterThan(try XCTUnwrap(sample.distanceFromPreviousFeet), 30)
+        XCTAssertEqual(
+            try XCTUnwrap(sample.verticalRateFeetPerMinute),
+            984.252,
+            accuracy: 0.02
+        )
+    }
+
+    func testGPSDiagnosticsAggregatesExcludeEvictedPreWindowGap() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        var history = FireVaultGPSDiagnosticHistory()
+        XCTAssertTrue(history.append(
+            testLocation(
+                latitude: 43.615,
+                longitude: -116.202,
+                timestamp: start
+            ),
+            speedSnapshot: .unavailable,
+            receivedAt: start
+        ))
+
+        for index in 1...FireVaultGPSDiagnosticHistory.capacity {
+            let timestamp = start.addingTimeInterval(100 + Double(index))
+            XCTAssertTrue(history.append(
+                testLocation(
+                    latitude: 43.615 + Double(index) / 1_000_000,
+                    longitude: -116.202,
+                    timestamp: timestamp
+                ),
+                speedSnapshot: .unavailable,
+                receivedAt: timestamp
+            ))
+        }
+
+        XCTAssertEqual(history.samples.count, FireVaultGPSDiagnosticHistory.capacity)
+        XCTAssertEqual(try XCTUnwrap(history.longestUpdateGap), 1, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(history.averageUpdateInterval), 1, accuracy: 0.001)
+    }
+
+    func testTripLogFrozenSpeedAgesToZero() throws {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_100)
+        let lastMovingFix = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: timestamp,
+            speed: 13.9
+        )
+
+        let speed = try XCTUnwrap(
+            FireVaultBreadcrumbRules.resolvedLiveSpeed(
+                location: lastMovingFix,
+                now: timestamp.addingTimeInterval(
+                    FireVaultBreadcrumbRules.maximumLiveSpeedAge + 0.1
+                )
+            )
+        )
+
         XCTAssertEqual(speed, 0)
+    }
+
+    func testTripLogRejectsOldAndFutureLiveLocations() {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let old = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: now.addingTimeInterval(-61)
+        )
+        let future = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: now.addingTimeInterval(6)
+        )
+
+        XCTAssertFalse(FireVaultBreadcrumbRules.isUsableLiveLocation(old, now: now))
+        XCTAssertFalse(FireVaultBreadcrumbRules.isUsableLiveLocation(future, now: now))
+    }
+
+    func testTripLogShowsConvergingLiveFixWithoutPersistingIt() {
+        let now = Date()
+        let coarse = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: now,
+            accuracy: 250
+        )
+
+        XCTAssertTrue(FireVaultBreadcrumbRules.isUsableLiveLocation(coarse, now: now))
+        XCTAssertFalse(FireVaultBreadcrumbRules.accepts(coarse, after: nil))
+        XCTAssertFalse(FireVaultBreadcrumbRules.shouldEvaluateStop(coarse, after: nil))
+    }
+
+    func testNewestGPSReceiverWinsInsteadOfStalePreferredReceiver() throws {
+        let old = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let fresh = testLocation(
+            latitude: 43.616,
+            longitude: -116.203,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_030)
+        )
+
+        let selected = try XCTUnwrap(FireVaultBreadcrumbRules.newestLocation(old, fresh))
+        XCTAssertEqual(selected.timestamp, fresh.timestamp)
+    }
+
+    func testTripLogGPSNoiseDoesNotRefreshMovementEvidence() {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        let reference = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: start,
+            accuracy: 40,
+            speed: 13.9
+        )
+        let noisy = testLocation(
+            latitude: 43.61515,
+            longitude: -116.202,
+            timestamp: start.addingTimeInterval(10),
+            accuracy: 40,
+            speed: 13.9
+        )
+
+        XCTAssertNil(
+            FireVaultBreadcrumbRules.updatedMeaningfulMovementDate(
+                for: noisy,
+                reference: reference,
+                previousMeaningfulMovementAt: nil,
+                now: noisy.timestamp
+            )
+        )
+    }
+
+    func testTripLogEvaluatesStationaryStopsMoreOftenThanRoutePersistence() {
+        let start = Date().addingTimeInterval(-20)
+        let first = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: start
+        )
+        let tenSecondsLater = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: start.addingTimeInterval(FireVaultBreadcrumbRules.stopEvaluationInterval)
+        )
+
+        XCTAssertTrue(FireVaultBreadcrumbRules.shouldEvaluateStop(first, after: nil))
+        XCTAssertTrue(FireVaultBreadcrumbRules.shouldEvaluateStop(tenSecondsLater, after: first))
+        XCTAssertFalse(FireVaultBreadcrumbRules.accepts(tenSecondsLater, after: first))
+    }
+
+    func testTripLogLocationWatchdogRecoversOnlyAfterSustainedSilence() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+
+        XCTAssertFalse(
+            FireVaultBreadcrumbRules.shouldRecoverLocationStream(
+                trackingStartedAt: start,
+                lastLocationReceivedAt: nil,
+                lastRecoveryAt: nil,
+                now: start.addingTimeInterval(14)
+            )
+        )
+        XCTAssertTrue(
+            FireVaultBreadcrumbRules.shouldRecoverLocationStream(
+                trackingStartedAt: start,
+                lastLocationReceivedAt: nil,
+                lastRecoveryAt: nil,
+                now: start.addingTimeInterval(15)
+            )
+        )
+        XCTAssertFalse(
+            FireVaultBreadcrumbRules.shouldRecoverLocationStream(
+                trackingStartedAt: start,
+                lastLocationReceivedAt: start,
+                lastRecoveryAt: start.addingTimeInterval(15),
+                now: start.addingTimeInterval(29)
+            )
+        )
+        XCTAssertTrue(
+            FireVaultBreadcrumbRules.shouldRecoverLocationStream(
+                trackingStartedAt: start,
+                lastLocationReceivedAt: start,
+                lastRecoveryAt: start.addingTimeInterval(15),
+                now: start.addingTimeInterval(30)
+            )
+        )
     }
 
     func testBreadcrumbDepartureRequiresConsistentEvidence() {
@@ -2177,8 +3029,28 @@ final class FireVaultTests: XCTestCase {
         XCTAssertGreaterThan(region.span.longitudeDelta, 0)
     }
 
-    func testLiveNearbyUsesDrivingDistanceRefreshThreshold() {
-        XCTAssertEqual(FireVaultLocationService.liveNearbyDistanceFilter, 50)
+    func testLiveNearbyDoesNotThrottleLiveSpeedByDistance() {
+        XCTAssertEqual(
+            FireVaultLocationService.liveNearbyDistanceFilter,
+            kCLDistanceFilterNone
+        )
+    }
+
+    func testDiagnosticsRestoresNearbyReceiverConfiguration() {
+        let service = FireVaultLocationService()
+
+        service.startLiveNearbyUpdates(highAccuracy: false)
+        service.startDiagnosticsUpdates(highAccuracy: true)
+        XCTAssertEqual(service.diagnosticsActivityTypeText, "Other")
+        XCTAssertEqual(service.diagnosticsDesiredAccuracy, kCLLocationAccuracyBest)
+
+        service.stopDiagnosticsUpdates()
+
+        XCTAssertEqual(service.diagnosticsActivityTypeText, "Automotive navigation")
+        XCTAssertEqual(service.diagnosticsDesiredAccuracy, kCLLocationAccuracyHundredMeters)
+        XCTAssertEqual(service.diagnosticsDistanceFilter, FireVaultLocationService.liveNearbyDistanceFilter)
+        XCTAssertFalse(service.diagnosticsAutomaticPausingEnabled)
+        service.stopLiveNearbyUpdates()
     }
 
     func testNearbyAccountCameraUsesTightAccountZoom() {

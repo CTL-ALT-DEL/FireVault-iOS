@@ -1,14 +1,33 @@
 # FireVault Current Build
 
-**Latest tested build: 1.08.42 (101)**
+**Latest tested build: 1.08.56 (116)**
 
-Build 1.08.42 (101) became the official latest tested build after the iPhone
-target compiled and the FireVault unit-test suite passed locally. Future build
+Build 1.08.56 (116) became the latest tested corrective build after the iPhone
+target compiled, launched on a connected iPhone, and the FireVault unit-test
+suite passed locally. Future build
 candidates must meet the same build-and-test requirement before replacing it.
 
 This is the only number to use when deciding whether an installed copy is current.
 In FireVault, open **Settings → About FireVault** and compare the displayed version
 and build with the number above.
+
+## Included in 1.08.56 (116)
+
+- Hardened the Trip Log receiver so live speed, route, stop detection, CarPlay,
+  and GPS Diagnostics share current, validated telemetry
+- Added stale-speed expiration, stationary confirmation, immediate departure
+  recovery, delayed-stream monitoring, and bounded automatic receiver recovery
+- Prevented cached, coarse, delayed, duplicate, and out-of-order fixes from
+  masquerading as current navigation telemetry
+- Added a high-contrast GPS Diagnostics console with live receiver health,
+  course and position instruments, and Accuracy, Speed, Elevation, and Timing charts
+- Added position, accuracy, altitude, speed-source, callback-latency, update-gap,
+  recovery, session, authorization, and source-integrity diagnostics
+- Clearly marks stale values as last known and avoids displaying GPS data that
+  iOS does not expose, including satellite count, SNR, DOP, and raw NMEA
+- Restores Nearby's automotive receiver configuration after leaving Diagnostics
+- Added focused GPS regression coverage and completed the full local test suite
+- Updated the developer identity to Bannerman US LLC and support@bannerman.us
 
 ## Included in 1.08.42 (101)
 
@@ -74,9 +93,9 @@ and build with the number above.
 - Aligned the FireVault wordmark with the day-of-week header label
 - Reduced the bottom navigation height while retaining 48-point touch targets
 - Centered the lower navigation controls and added a pulsing green Trip Log recording glow
-- Rewrote About FireVault with field-focused product copy and David Bannerman developer credit
+- Rewrote About FireVault with field-focused product copy and Bannerman US LLC developer credit
 - Replaced the Nearby Accounts vault label with Trip Log status and right-aligned live location status
-- Added David@Bannerman.us to About FireVault
+- Added support@bannerman.us to About FireVault
 - Replaced selected-navigation glow with a darker 3D-style shadow; the Trip Log truck is bright green while recording
 - Simplified the About FireVault email and styled the supporting developer message in script
 
