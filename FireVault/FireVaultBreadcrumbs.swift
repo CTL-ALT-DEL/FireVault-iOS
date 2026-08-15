@@ -2847,8 +2847,8 @@ struct FireVaultTripLogHistoryCalendarView: View {
             VStack(spacing: 1) {
                 Text(date.formatted(.dateTime.day()))
                     .font(.subheadline.bold().monospacedDigit())
-                if trips.count > 1 {
-                    Text("\(trips.count) trips")
+                if hasTrips {
+                    Text("\(trips.count) trip\(trips.count == 1 ? "" : "s")")
                         .font(.system(size: 8, weight: .bold))
                 } else {
                     Text(" ").font(.system(size: 8))

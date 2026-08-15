@@ -213,12 +213,13 @@ struct FireVaultTripLogPortraitView: View {
                     Button {
                         showsHistory = true
                     } label: {
-                        Label("History", systemImage: "chevron.left")
-                            .font(.caption.bold())
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 11)
-                            .frame(height: 36)
-                            .background(.black.opacity(0.76), in: Capsule())
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(NativeShellPalette.blue)
+                            .frame(width: 42, height: 42)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay { Circle().stroke(.white.opacity(0.55), lineWidth: 1) }
+                            .shadow(color: .black.opacity(0.22), radius: 5, y: 3)
                     }
                     .buttonStyle(.plain)
                     .padding(12)
