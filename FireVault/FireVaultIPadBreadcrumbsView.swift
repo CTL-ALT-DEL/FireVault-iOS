@@ -121,7 +121,7 @@ struct FireVaultIPadBreadcrumbsView: View {
         }
         .sheet(isPresented: $showsHistory) {
             FireVaultTripLogHistoryCalendarView(
-                days: breadcrumbs.days,
+                breadcrumbs: breadcrumbs,
                 selectedDayID: selectedDayID
             ) { dayID in
                 selectedDayID = dayID

@@ -137,6 +137,7 @@ struct FireVaultBreadcrumbStop: Codable, Identifiable, Equatable {
 
 struct FireVaultBreadcrumbDay: Codable, Identifiable, Equatable {
     var id = UUID()
+    var name: String? = nil
     var startedAt: Date
     var endedAt: Date?
     var isPaused = false
@@ -1175,6 +1176,15 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         guard days.first(where: { $0.id == id })?.isActive != true else { return }
         days.removeAll { $0.id == id }
         persist()
+    }
+
+    @discardableResult
+    func renameDay(_ id: UUID, name: String) -> Bool {
+        guard let index = days.firstIndex(where: { $0.id == id }) else { return false }
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        days[index].name = normalized.isEmpty ? nil : String(normalized.prefix(80))
+        persist()
+        return true
     }
 
     func stop(dayID: UUID, stopID: UUID) -> FireVaultBreadcrumbStop? {
@@ -2385,7 +2395,7 @@ struct FireVaultBreadcrumbsView: View {
         }
         .sheet(isPresented: $showsHistory) {
             FireVaultTripLogHistoryCalendarView(
-                days: breadcrumbs.days,
+                breadcrumbs: breadcrumbs,
                 selectedDayID: selectedDayID
             ) { dayID in
                 selectedDayID = dayID
@@ -2677,25 +2687,29 @@ struct FireVaultBreadcrumbsView: View {
 }
 
 struct FireVaultTripLogHistoryCalendarView: View {
-    let days: [FireVaultBreadcrumbDay]
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     let selectedDayID: UUID?
     let onSelect: (UUID) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var displayedMonth: Date
     @State private var selectedDate: Date
+    @State private var renamingTripID: UUID?
+    @State private var renameText = ""
+    @State private var pendingDeletionID: UUID?
 
     private let calendar = Calendar.autoupdatingCurrent
     private let weekdayColumns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 7)
 
     init(
-        days: [FireVaultBreadcrumbDay],
+        breadcrumbs: FireVaultBreadcrumbStore,
         selectedDayID: UUID?,
         onSelect: @escaping (UUID) -> Void
     ) {
-        self.days = days
+        self.breadcrumbs = breadcrumbs
         self.selectedDayID = selectedDayID
         self.onSelect = onSelect
+        let days = breadcrumbs.days
         let initialDate = days.first(where: { $0.id == selectedDayID })?.startedAt
             ?? days.first?.startedAt
             ?? Date()
@@ -2708,16 +2722,20 @@ struct FireVaultTripLogHistoryCalendarView: View {
             .sorted { $0.startedAt < $1.startedAt }
     }
 
+    private var days: [FireVaultBreadcrumbDay] { breadcrumbs.days }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    calendarCard
-                    tripsForSelectedDate
-                }
-                .padding(16)
-                .padding(.bottom, 20)
+            List {
+                calendarCard
+                    .listRowInsets(.init(top: 12, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+
+                tripsForSelectedDate
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .background(NativeShellPalette.background)
             .navigationTitle("Trip Log History")
             .navigationBarTitleDisplayMode(.inline)
@@ -2728,6 +2746,39 @@ struct FireVaultTripLogHistoryCalendarView: View {
             }
         }
         .tint(NativeShellPalette.blue)
+        .alert("Rename Trip", isPresented: Binding(
+            get: { renamingTripID != nil },
+            set: { if !$0 { renamingTripID = nil } }
+        )) {
+            TextField("Trip name", text: $renameText)
+            Button("Save") {
+                if let renamingTripID {
+                    _ = breadcrumbs.renameDay(renamingTripID, name: renameText)
+                }
+                renamingTripID = nil
+            }
+            Button("Cancel", role: .cancel) { renamingTripID = nil }
+        } message: {
+            Text("Give this recorded trip a recognizable name.")
+        }
+        .confirmationDialog(
+            "Delete this Trip Log?",
+            isPresented: Binding(
+                get: { pendingDeletionID != nil },
+                set: { if !$0 { pendingDeletionID = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Trip", role: .destructive) {
+                if let pendingDeletionID {
+                    breadcrumbs.deleteDay(pendingDeletionID)
+                }
+                pendingDeletionID = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDeletionID = nil }
+        } message: {
+            Text("This permanently removes the trip route, stops, and associated history. Account records are not deleted.")
+        }
     }
 
     private var calendarCard: some View {
@@ -2826,22 +2877,7 @@ struct FireVaultTripLogHistoryCalendarView: View {
 
     @ViewBuilder
     private var tripsForSelectedDate: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(selectedDate.formatted(.dateTime.weekday(.wide)))
-                        .font(.caption.bold())
-                        .tracking(0.9)
-                        .foregroundStyle(NativeShellPalette.red)
-                    Text(selectedDate.formatted(date: .long, time: .omitted))
-                        .font(.title3.bold())
-                }
-                Spacer()
-                Text("\(selectedTrips.count) TRIP\(selectedTrips.count == 1 ? "" : "S")")
-                    .font(.caption2.bold())
-                    .foregroundStyle(.secondary)
-            }
-
+        Section {
             if selectedTrips.isEmpty {
                 ContentUnavailableView(
                     "No Trips Recorded",
@@ -2850,12 +2886,15 @@ struct FireVaultTripLogHistoryCalendarView: View {
                 )
                 .frame(minHeight: 170)
                 .nativeSurfaceCard()
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             } else {
                 ForEach(Array(selectedTrips.enumerated()), id: \.element.id) { index, trip in
-                    Button {
-                        onSelect(trip.id)
-                    } label: {
-                        HStack(spacing: 12) {
+                    HStack(spacing: 8) {
+                        Button {
+                            onSelect(trip.id)
+                        } label: {
+                            HStack(spacing: 12) {
                             Image(systemName: trip.isActive ? "record.circle.fill" : "point.topleft.down.to.point.bottomright.curvepath")
                                 .font(.title3.bold())
                                 .foregroundStyle(trip.isActive ? NativeShellPalette.green : NativeShellPalette.red)
@@ -2866,7 +2905,7 @@ struct FireVaultTripLogHistoryCalendarView: View {
                                 )
 
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(selectedTrips.count > 1 ? "Trip \(index + 1)" : "Recorded Trip")
+                                Text(tripDisplayName(trip, index: index))
                                     .font(.subheadline.bold())
                                     .foregroundStyle(.primary)
                                 Text(tripTimeRange(trip))
@@ -2881,12 +2920,48 @@ struct FireVaultTripLogHistoryCalendarView: View {
                             Image(systemName: "chevron.right")
                                 .font(.caption.bold())
                                 .foregroundStyle(.tertiary)
+                            }
+                            .contentShape(Rectangle())
                         }
-                        .padding(13)
-                        .nativeSurfaceCard()
+                        .buttonStyle(.plain)
+
+                        Menu {
+                            Button("Rename Trip", systemImage: "pencil") {
+                                beginRename(trip, index: index)
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.title3)
+                                .frame(width: 38, height: 38)
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .padding(.vertical, 4)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        if !trip.isActive {
+                            Button("Delete", systemImage: "trash", role: .destructive) {
+                                pendingDeletionID = trip.id
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier("trip-history-entry-\(trip.id.uuidString)")
                 }
+            }
+        } header: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(selectedDate.formatted(.dateTime.weekday(.wide)))
+                        .font(.caption.bold())
+                        .tracking(0.9)
+                        .foregroundStyle(NativeShellPalette.red)
+                    Text(selectedDate.formatted(date: .long, time: .omitted))
+                        .font(.title3.bold())
+                        .textCase(nil)
+                        .foregroundStyle(.primary)
+                }
+                Spacer()
+                Text("\(selectedTrips.count) TRIP\(selectedTrips.count == 1 ? "" : "S")")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -2924,6 +2999,17 @@ struct FireVaultTripLogHistoryCalendarView: View {
         let start = trip.startedAt.formatted(date: .omitted, time: .shortened)
         let end = trip.endedAt?.formatted(date: .omitted, time: .shortened) ?? "Recording"
         return "\(start) – \(end)"
+    }
+
+    private func tripDisplayName(_ trip: FireVaultBreadcrumbDay, index: Int) -> String {
+        let savedName = trip.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !savedName.isEmpty { return savedName }
+        return selectedTrips.count > 1 ? "Trip \(index + 1)" : "Recorded Trip"
+    }
+
+    private func beginRename(_ trip: FireVaultBreadcrumbDay, index: Int) {
+        renameText = tripDisplayName(trip, index: index)
+        renamingTripID = trip.id
     }
 }
 

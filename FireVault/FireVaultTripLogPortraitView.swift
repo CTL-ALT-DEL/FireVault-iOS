@@ -23,6 +23,7 @@ struct FireVaultTripLogPortraitView: View {
     @State private var confirmsEnd = false
     @State private var showsReport = false
     @State private var showsHistory = false
+    @State private var showsHistoryReturn = false
     @State private var waypointPulse = false
     @State private var waypointPulseTask: Task<Void, Never>?
 
@@ -122,11 +123,12 @@ struct FireVaultTripLogPortraitView: View {
         }
         .sheet(isPresented: $showsHistory) {
             FireVaultTripLogHistoryCalendarView(
-                days: breadcrumbs.days,
+                breadcrumbs: breadcrumbs,
                 selectedDayID: selectedDayID
             ) { dayID in
                 selectedDayID = dayID
                 showsHistory = false
+                showsHistoryReturn = true
             }
         }
     }
@@ -205,6 +207,23 @@ struct FireVaultTripLogPortraitView: View {
             .overlay(alignment: .topLeading) {
                 compactMapDate(day)
                     .padding(12)
+            }
+            .overlay(alignment: .topTrailing) {
+                if showsHistoryReturn {
+                    Button {
+                        showsHistory = true
+                    } label: {
+                        Label("History", systemImage: "chevron.left")
+                            .font(.caption.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 11)
+                            .frame(height: 36)
+                            .background(.black.opacity(0.76), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(12)
+                    .accessibilityLabel("Return to Trip Log History for this day")
+                }
             }
         }
         .accessibilityIdentifier("trip-log-portrait-static-map")
@@ -307,6 +326,7 @@ struct FireVaultTripLogPortraitView: View {
     private var historyMenu: some View {
         Button {
             showsHistory = true
+            showsHistoryReturn = false
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: "calendar.badge.clock")
