@@ -270,8 +270,12 @@ enum FireVaultTripLogTelemetry {
 
 enum FireVaultBreadcrumbRules {
     static let maximumHorizontalAccuracy: CLLocationAccuracy = 100
+    // Keep live telemetry visible while GPS is still converging. Route and
+    // stop persistence continue to use the stricter 100-meter threshold.
+    static let maximumLiveHorizontalAccuracy: CLLocationAccuracy = 500
     static let minimumPointDistance: CLLocationDistance = 12
     static let maximumPointInterval: TimeInterval = 30
+    static let stopEvaluationInterval: TimeInterval = 10
     static let stopRadius: CLLocationDistance = 85
     static let minimumAccountStopDuration: TimeInterval = 180
     static let minimumUnrecognizedStopDuration: TimeInterval = 300
@@ -289,7 +293,85 @@ enum FireVaultBreadcrumbRules {
     static let duplicateStopInterval: TimeInterval = 15 * 60
     static let accountMatchRadius: CLLocationDistance = 175
     static let maximumLiveSpeedAge: TimeInterval = 8
+    static let maximumLiveTelemetryAge: TimeInterval = 60
+    // Route and stop processing may receive a short delayed batch after iOS
+    // wakes the app. Preserve that history without allowing an old sample to
+    // drive live telemetry or reset the receiver watchdog.
+    static let maximumRouteLocationAge: TimeInterval = 15 * 60
     static let maximumDerivedStationarySpeed: CLLocationSpeed = 1.5
+    static let maximumFutureLocationSkew: TimeInterval = 5
+    // An active automotive-navigation session normally delivers fixes every
+    // few seconds. Recover promptly when that usable stream goes silent rather
+    // than leaving every FireVault surface frozen for one or two minutes.
+    static let maximumLocationSilenceBeforeRecovery: TimeInterval = 15
+    static let minimumLocationRecoverySpacing: TimeInterval = 15
+
+    static func isUsableLiveLocation(
+        _ location: CLLocation,
+        now: Date = Date(),
+        maximumAge: TimeInterval = maximumLiveTelemetryAge
+    ) -> Bool {
+        let age = now.timeIntervalSince(location.timestamp)
+        return location.horizontalAccuracy >= 0
+            && location.horizontalAccuracy <= maximumLiveHorizontalAccuracy
+            && CLLocationCoordinate2DIsValid(location.coordinate)
+            && age >= -maximumFutureLocationSkew
+            && age <= maximumAge
+    }
+
+    static func newestLocation(_ first: CLLocation?, _ second: CLLocation?) -> CLLocation? {
+        switch (first, second) {
+        case let (first?, second?):
+            return first.timestamp >= second.timestamp ? first : second
+        case let (first?, nil):
+            return first
+        case let (nil, second?):
+            return second
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    static func shouldAcceptLiveTelemetry(
+        _ candidate: CLLocation,
+        after previous: CLLocation?,
+        now: Date = Date()
+    ) -> Bool {
+        guard isUsableLiveLocation(
+            candidate,
+            now: now,
+            maximumAge: maximumLiveSpeedAge
+        ) else { return false }
+        guard let previous else { return true }
+        return candidate.timestamp > previous.timestamp
+    }
+
+    static func shouldAcceptNavigationTelemetry(
+        _ candidate: CLLocation,
+        after previous: CLLocation?,
+        now: Date = Date()
+    ) -> Bool {
+        candidate.horizontalAccuracy >= 0
+            && candidate.horizontalAccuracy <= maximumHorizontalAccuracy
+            && shouldAcceptLiveTelemetry(candidate, after: previous, now: now)
+    }
+
+    static func shouldAcceptRouteLocation(
+        _ candidate: CLLocation,
+        after previousTimestamp: Date?,
+        now: Date = Date()
+    ) -> Bool {
+        guard isUsableLiveLocation(
+            candidate,
+            now: now,
+            maximumAge: maximumRouteLocationAge
+        ),
+        candidate.horizontalAccuracy <= maximumHorizontalAccuracy else {
+            return false
+        }
+        guard let previousTimestamp else { return true }
+        return candidate.timestamp > previousTimestamp
+    }
 
     static func normalizedVisit(
         arrival: Date,
@@ -299,15 +381,40 @@ enum FireVaultBreadcrumbRules {
         return (arrival, max(arrival, departure))
     }
 
-    static func accepts(_ location: CLLocation, after previous: CLLocation?) -> Bool {
-        guard location.horizontalAccuracy >= 0,
-              location.horizontalAccuracy <= maximumHorizontalAccuracy,
-              abs(location.timestamp.timeIntervalSinceNow) <= 60 else {
+    static func accepts(
+        _ location: CLLocation,
+        after previous: CLLocation?,
+        now: Date = Date()
+    ) -> Bool {
+        guard isUsableLiveLocation(
+            location,
+            now: now,
+            maximumAge: maximumRouteLocationAge
+        ),
+              location.horizontalAccuracy <= maximumHorizontalAccuracy else {
             return false
         }
         guard let previous else { return true }
         return location.distance(from: previous) >= minimumPointDistance
             || location.timestamp.timeIntervalSince(previous.timestamp) >= maximumPointInterval
+    }
+
+    static func shouldEvaluateStop(
+        _ location: CLLocation,
+        after previous: CLLocation?,
+        now: Date = Date()
+    ) -> Bool {
+        guard isUsableLiveLocation(
+            location,
+            now: now,
+            maximumAge: maximumRouteLocationAge
+        ),
+              location.horizontalAccuracy <= maximumHorizontalAccuracy else { return false }
+        guard let previous else { return true }
+        let interval = location.timestamp.timeIntervalSince(previous.timestamp)
+        guard interval > 0 else { return false }
+        return location.distance(from: previous) >= minimumPointDistance
+            || interval >= stopEvaluationInterval
     }
 
     /// Core Location can briefly retain the vehicle's last driving speed after
@@ -328,16 +435,69 @@ enum FireVaultBreadcrumbRules {
 
     static func resolvedLiveSpeed(
         location: CLLocation?,
-        lastMeaningfulMovementAt: Date?,
         now: Date = Date()
     ) -> CLLocationSpeed? {
-        guard let location, location.speed >= 0 else { return nil }
-        guard now.timeIntervalSince(location.timestamp) <= maximumLiveSpeedAge,
-              let lastMeaningfulMovementAt,
-              now.timeIntervalSince(lastMeaningfulMovementAt) <= maximumLiveSpeedAge else {
+        guard let location else { return nil }
+        let locationAge = now.timeIntervalSince(location.timestamp)
+        guard locationAge >= -maximumFutureLocationSkew,
+              locationAge <= maximumLiveSpeedAge else {
             return 0
         }
+        // A negative Core Location speed means unavailable, not stationary.
+        // Never turn an unknown reading into a false 0 mph value.
+        guard location.speed >= 0 else { return nil }
+        // Core Location already fuses GPS, Wi-Fi, cellular, and motion data
+        // into CLLocation.speed. Requiring a second coordinate-displacement
+        // proof delayed valid speed after launch and after every stop. Trust a
+        // fresh nonnegative speed; freshness still forces a frozen reading to
+        // zero when callbacks stop.
         return location.speed
+    }
+
+    static func updatedMeaningfulMovementDate(
+        for location: CLLocation,
+        reference: CLLocation?,
+        previousMeaningfulMovementAt: Date?,
+        now: Date = Date()
+    ) -> Date? {
+        guard isUsableLiveLocation(location, now: now),
+              location.horizontalAccuracy <= maximumHorizontalAccuracy else {
+            return previousMeaningfulMovementAt
+        }
+        guard let reference,
+              reference.horizontalAccuracy >= 0,
+              reference.horizontalAccuracy <= maximumHorizontalAccuracy,
+              CLLocationCoordinate2DIsValid(reference.coordinate) else {
+            return previousMeaningfulMovementAt
+        }
+
+        let interval = location.timestamp.timeIntervalSince(reference.timestamp)
+        guard interval > 0 else { return previousMeaningfulMovementAt }
+        let distance = location.distance(from: reference)
+        let derivedSpeed = distance / interval
+        let uncertaintyFloor = min(
+            20,
+            max(location.horizontalAccuracy, reference.horizontalAccuracy)
+        )
+        guard distance >= max(minimumPointDistance, uncertaintyFloor),
+              derivedSpeed > maximumDerivedStationarySpeed else {
+            return previousMeaningfulMovementAt
+        }
+        return location.timestamp
+    }
+
+    static func shouldRecoverLocationStream(
+        trackingStartedAt: Date?,
+        lastLocationReceivedAt: Date?,
+        lastRecoveryAt: Date?,
+        now: Date = Date()
+    ) -> Bool {
+        guard let baseline = lastLocationReceivedAt ?? trackingStartedAt,
+              now.timeIntervalSince(baseline) >= maximumLocationSilenceBeforeRecovery else {
+            return false
+        }
+        guard let lastRecoveryAt else { return true }
+        return now.timeIntervalSince(lastRecoveryAt) >= minimumLocationRecoverySpacing
     }
 
     static func closestAccount(
@@ -468,6 +628,215 @@ enum FireVaultBreadcrumbRules {
     }
 }
 
+enum FireVaultLiveSpeedSource: String, Equatable {
+    case coreLocation
+    case derived
+    case stationary
+    case stale
+    case unavailable
+}
+
+struct FireVaultLiveSpeedSnapshot: Equatable {
+    static let unavailable = FireVaultLiveSpeedSnapshot(
+        metersPerSecond: nil,
+        source: .unavailable,
+        sampleTimestamp: nil,
+        receivedAt: nil,
+        rawMetersPerSecond: nil,
+        derivedMetersPerSecond: nil
+    )
+
+    let metersPerSecond: CLLocationSpeed?
+    let source: FireVaultLiveSpeedSource
+    let sampleTimestamp: Date?
+    let receivedAt: Date?
+    let rawMetersPerSecond: CLLocationSpeed?
+    let derivedMetersPerSecond: CLLocationSpeed?
+}
+
+/// Converts Core Location fixes into one live speed value shared by the app,
+/// CarPlay, and GPS Diagnostics. Route-point persistence and stop detection
+/// intentionally do not participate in this reducer.
+struct FireVaultLiveSpeedReducer {
+    private static let maximumDerivedSpeed: CLLocationSpeed = 80
+    private static let maximumDerivedInterval: TimeInterval = 10
+    private static let minimumDerivedInterval: TimeInterval = 1
+    private static let stationaryDerivedSpeed: CLLocationSpeed = 0.8
+    private static let movingDerivedSpeed: CLLocationSpeed = 1.5
+    private static let minimumMovingDistance: CLLocationDistance = 5
+    private static let requiredStationaryPairs = 2
+    private static let requiredStationaryDuration: TimeInterval = 3
+
+    private var previousReliableFix: CLLocation?
+    private var stationaryPairCount = 0
+    private var stationaryEvidenceDuration: TimeInterval = 0
+    private(set) var snapshot = FireVaultLiveSpeedSnapshot.unavailable
+
+    mutating func ingest(
+        _ location: CLLocation,
+        receivedAt: Date = Date()
+    ) -> FireVaultLiveSpeedSnapshot {
+        guard FireVaultBreadcrumbRules.isUsableLiveLocation(
+            location,
+            now: receivedAt,
+            maximumAge: FireVaultBreadcrumbRules.maximumLocationSilenceBeforeRecovery
+        ) else {
+            return snapshot
+        }
+
+        let rawSpeed = location.speed >= 0 ? location.speed : nil
+        var derivedSpeed: CLLocationSpeed?
+        var comparablePair = false
+        var pairIsMoving = false
+        var pairIsStationary = false
+        var pairDuration: TimeInterval = 0
+
+        let hasReliableCoordinate = location.horizontalAccuracy >= 0
+            && location.horizontalAccuracy <= FireVaultBreadcrumbRules.maximumHorizontalAccuracy
+        if hasReliableCoordinate, let previousReliableFix {
+            let interval = location.timestamp.timeIntervalSince(previousReliableFix.timestamp)
+            if interval >= Self.minimumDerivedInterval,
+               interval <= Self.maximumDerivedInterval {
+                comparablePair = true
+                pairDuration = interval
+                let uncertainty = min(
+                    20,
+                    max(location.horizontalAccuracy, previousReliableFix.horizontalAccuracy)
+                )
+                let effectiveDistance = max(
+                    0,
+                    location.distance(from: previousReliableFix) - uncertainty
+                )
+                let candidate = effectiveDistance / interval
+                if candidate <= Self.maximumDerivedSpeed {
+                    derivedSpeed = candidate
+                    pairIsMoving = candidate > Self.movingDerivedSpeed
+                        && effectiveDistance >= Self.minimumMovingDistance
+                    pairIsStationary = candidate <= Self.stationaryDerivedSpeed
+                }
+            }
+        }
+
+        let wasKnownStationary = snapshot.metersPerSecond == 0
+        let previousRawWasStationary = snapshot.rawMetersPerSecond.map {
+            $0 <= FireVaultBreadcrumbRules.maximumStationarySpeed
+        } == true
+        let rawShowsDeparture = (rawSpeed ?? 0) > FireVaultBreadcrumbRules.maximumStationarySpeed
+            && wasKnownStationary
+            && previousRawWasStationary
+
+        if pairIsMoving || rawShowsDeparture {
+            stationaryPairCount = 0
+            stationaryEvidenceDuration = 0
+        } else if pairIsStationary {
+            stationaryPairCount += 1
+            stationaryEvidenceDuration += pairDuration
+        } else if rawSpeed.map({ $0 > FireVaultBreadcrumbRules.maximumStationarySpeed }) == true,
+                  !comparablePair,
+                  !wasKnownStationary {
+            // A first moving fix after launch or a signal gap must display
+            // immediately. Do not carry an old stationary latch across it.
+            // Once stationary was proven against a frozen positive sensor,
+            // however, an expired coordinate anchor must not resurrect that
+            // same stale speed. Movement coordinates will release the latch.
+            stationaryPairCount = 0
+            stationaryEvidenceDuration = 0
+        }
+
+        let stationaryIsConfirmed = stationaryPairCount >= Self.requiredStationaryPairs
+            && stationaryEvidenceDuration >= Self.requiredStationaryDuration
+
+        let resolvedSpeed: CLLocationSpeed?
+        let source: FireVaultLiveSpeedSource
+        if stationaryIsConfirmed, !pairIsMoving {
+            resolvedSpeed = 0
+            source = .stationary
+        } else if pairIsMoving,
+                  let derivedSpeed,
+                  rawSpeed.map({ $0 <= FireVaultBreadcrumbRules.maximumStationarySpeed }) ?? true {
+            // Core Location can briefly retain 0 after departure. Clear
+            // coordinate movement must also beat a stale low-positive value so
+            // every surface resumes promptly.
+            resolvedSpeed = derivedSpeed
+            source = .derived
+        } else if let rawSpeed, rawSpeed > 0 {
+            resolvedSpeed = rawSpeed
+            source = .coreLocation
+        } else if rawSpeed == 0 {
+            resolvedSpeed = 0
+            source = .stationary
+        } else {
+            resolvedSpeed = nil
+            source = .unavailable
+        }
+
+        snapshot = FireVaultLiveSpeedSnapshot(
+            metersPerSecond: resolvedSpeed,
+            source: source,
+            sampleTimestamp: location.timestamp,
+            receivedAt: receivedAt,
+            rawMetersPerSecond: rawSpeed,
+            derivedMetersPerSecond: derivedSpeed
+        )
+        if hasReliableCoordinate {
+            if let previousReliableFix {
+                let interval = location.timestamp.timeIntervalSince(previousReliableFix.timestamp)
+                // Retain the anchor while raw speed is zero/unavailable and no
+                // movement is proven. This lets departure displacement build
+                // across several small or sub-second fixes instead of resetting
+                // the evidence on every callback.
+                if pairIsMoving
+                    || interval > Self.maximumDerivedInterval {
+                    self.previousReliableFix = location
+                }
+            } else {
+                previousReliableFix = location
+            }
+        }
+        return snapshot
+    }
+
+    mutating func markStationary(at date: Date = Date()) -> FireVaultLiveSpeedSnapshot {
+        stationaryPairCount = Self.requiredStationaryPairs
+        stationaryEvidenceDuration = Self.requiredStationaryDuration
+        snapshot = FireVaultLiveSpeedSnapshot(
+            metersPerSecond: 0,
+            source: .stationary,
+            sampleTimestamp: snapshot.sampleTimestamp ?? date,
+            receivedAt: date,
+            rawMetersPerSecond: snapshot.rawMetersPerSecond,
+            derivedMetersPerSecond: 0
+        )
+        return snapshot
+    }
+
+    mutating func refresh(at now: Date = Date()) -> FireVaultLiveSpeedSnapshot {
+        guard let sampleTimestamp = snapshot.sampleTimestamp,
+              snapshot.metersPerSecond != nil,
+              now.timeIntervalSince(sampleTimestamp)
+                > FireVaultBreadcrumbRules.maximumLiveSpeedAge,
+              snapshot.source != .stale else {
+            return snapshot
+        }
+        snapshot = FireVaultLiveSpeedSnapshot(
+            metersPerSecond: 0,
+            source: .stale,
+            sampleTimestamp: sampleTimestamp,
+            receivedAt: snapshot.receivedAt,
+            rawMetersPerSecond: snapshot.rawMetersPerSecond,
+            derivedMetersPerSecond: snapshot.derivedMetersPerSecond
+        )
+        return snapshot
+    }
+
+    mutating func reset() {
+        previousReliableFix = nil
+        stationaryPairCount = 0
+        stationaryEvidenceDuration = 0
+        snapshot = .unavailable
+    }
+}
+
 struct FireVaultBreadcrumbPermissionState: Equatable {
     let authorizationStatus: CLAuthorizationStatus
     let accuracyAuthorization: CLAccuracyAuthorization
@@ -559,6 +928,21 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     @Published private(set) var lastRecoveryAt: Date?
     @Published private(set) var lastPersistenceError: String?
     @Published private(set) var latestLocation: CLLocation?
+    @Published private(set) var liveSpeedSnapshot = FireVaultLiveSpeedSnapshot.unavailable
+    @Published private(set) var lastMeaningfulMovementAt: Date?
+    /// Time Core Location most recently invoked the delegate, whether or not
+    /// the payload was current and accurate enough for FireVault to use.
+    @Published private(set) var lastLocationCallbackAt: Date?
+    /// Time FireVault most recently accepted a fresh navigation-quality fix.
+    /// The receiver watchdog intentionally uses this value, not the raw
+    /// callback heartbeat or a coarse network location.
+    @Published private(set) var lastLocationReceivedAt: Date?
+    /// Time FireVault most recently accepted a navigation-quality fix.
+    @Published private(set) var lastNavigationLocationReceivedAt: Date?
+    @Published private(set) var lastLocationRecoveryAt: Date?
+    @Published private(set) var locationRecoveryCount = 0
+    @Published private(set) var locationProviderText = "Inactive"
+    @Published private(set) var locationProviderDiagnostic = "Waiting to start"
 
     private let manager: CLLocationManager
     private let archiveURL: URL
@@ -573,6 +957,20 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     private var liveActivityControlObservation: AnyCancellable?
     private var gpsPreferences: FireVaultGPSPreferences
     private var notificationPreferences: FireVaultNotificationPreferences
+    private var speedReferenceLocation: CLLocation?
+    private var liveSpeedReducer = FireVaultLiveSpeedReducer()
+    private var lastStopEvaluationLocation: CLLocation?
+    private var lastRouteInputTimestamp: Date?
+    private var trackingStartedAt: Date?
+    private var locationWatchdogTask: Task<Void, Never>?
+    private var liveUpdateTask: Task<Void, Never>?
+    private var consecutiveLocationRecoveryCount = 0
+    private var legacyFallbackIsActive = false
+    private var lastModernUpdateAt: Date?
+    private var modernNavigationFixStreak = 0
+    private var systemReportedStationary = false
+    private var backgroundActivitySession: CLBackgroundActivitySession?
+    private var serviceSession: CLServiceSession?
 
     var activeDay: FireVaultBreadcrumbDay? {
         days.first(where: \.isActive)
@@ -587,6 +985,24 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             authorizationStatus: authorizationStatus,
             accuracyAuthorization: accuracyAuthorization
         )
+    }
+
+    var liveSpeedMetersPerSecond: CLLocationSpeed? {
+        liveSpeedSnapshot.metersPerSecond
+    }
+
+    /// Read-only receiver state used by the GPS Diagnostics console. These
+    /// values describe FireVault's active Core Location pipeline; they are not
+    /// estimates of satellite count or radio signal strength.
+    var diagnosticsSystemStationary: Bool { systemReportedStationary }
+    var diagnosticsLegacyFallbackActive: Bool { legacyFallbackIsActive }
+    var diagnosticsModernStreamActive: Bool { liveUpdateTask != nil }
+    var diagnosticsBackgroundSessionActive: Bool { backgroundActivitySession != nil }
+    var diagnosticsServiceSessionActive: Bool { serviceSession != nil }
+
+    func requestDiagnosticsReceiverCheck() {
+        guard isRecording else { return }
+        recoverLocationStream(force: true)
     }
 
     init(
@@ -610,7 +1026,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         manager.activityType = .automotiveNavigation
         manager.desiredAccuracy = kCLLocationAccuracyBest
         manager.distanceFilter = FireVaultBreadcrumbRules.minimumPointDistance
-        manager.pausesLocationUpdatesAutomatically = true
+        manager.pausesLocationUpdatesAutomatically = false
 
         if self.liveActivitiesEnabled {
             liveActivityControlObservation = NotificationCenter.default
@@ -654,6 +1070,9 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         candidateLocations.removeAll()
         departureCandidateLocations.removeAll()
         activeStopID = nil
+        speedReferenceLocation = nil
+        lastMeaningfulMovementAt = nil
+        lastStopEvaluationLocation = nil
         sessionIsPrepared = false
         updateActiveDay { $0.isPaused = true }
         statusText = "Trip Log paused"
@@ -676,6 +1095,18 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     func restoreActiveWorkday(accounts: [FireVaultWorkspaceAccount]) {
         self.accounts = accounts
+        restoreActiveReceiver()
+    }
+
+    func attachAccountsToActiveReceiver(_ accounts: [FireVaultWorkspaceAccount]) {
+        self.accounts = accounts
+        refreshRuntimePreferences()
+    }
+
+    /// Reinstates location interest before account storage is loaded. This is
+    /// intentionally lightweight so a background relaunch can recreate its
+    /// Core Location sessions before iOS suspends the process again.
+    func restoreActiveReceiver() {
         refreshRuntimePreferences()
         // A Live Activity/widget intent can run outside the main app process.
         // Consume its durable App Group command every time the app becomes
@@ -696,9 +1127,12 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             synchronizeLiveActivity(status: .paused)
             return
         }
-        guard !isRecording else { return }
         sessionIsPrepared = true
         restoreTrackingContext()
+        if isRecording {
+            rearmActiveLocationReceiverIfNeeded()
+            return
+        }
         beginLocationUpdates()
     }
 
@@ -714,6 +1148,9 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         disregardedStopCoordinate = nil
         disregardedDepartureLocations.removeAll()
         activeStopID = nil
+        speedReferenceLocation = nil
+        lastMeaningfulMovementAt = nil
+        lastStopEvaluationLocation = nil
         sessionIsPrepared = false
         statusText = "Workday complete"
         FireVaultNotificationService.shared.tripLogEnded()
@@ -884,11 +1321,24 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        let callbackAt = Date()
+        lastLocationCallbackAt = callbackAt
         for location in locations.sorted(by: { $0.timestamp < $1.timestamp }) {
-            guard location.horizontalAccuracy >= 0 else { continue }
-            latestLocation = location
-            record(location)
+            ingestLocation(location, receivedAt: callbackAt, fromModernStream: false)
         }
+    }
+
+    func locationManagerDidPauseLocationUpdates(_ manager: CLLocationManager) {
+        guard isRecording else { return }
+        locationProviderDiagnostic = "Legacy fallback paused by iOS"
+        recoverLocationStream(force: true)
+    }
+
+    func locationManagerDidResumeLocationUpdates(_ manager: CLLocationManager) {
+        guard isRecording else { return }
+        statusText = accuracyAuthorization == .fullAccuracy
+            ? "Recording today’s route"
+            : "Recording with approximate location"
     }
 
     func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
@@ -901,8 +1351,115 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             statusText = "Location access is off for Trip Log"
             dismissLiveActivity()
         } else {
+            locationProviderDiagnostic = "Legacy fallback error: \(error.localizedDescription)"
             statusText = "Waiting for a reliable GPS position…"
+            recoverLocationStream(force: true)
         }
+    }
+
+    private func handleLiveUpdate(_ update: CLLocationUpdate) {
+        guard isRecording, sessionIsPrepared, activeDay?.isPaused == false else { return }
+        let callbackAt = Date()
+        lastLocationCallbackAt = callbackAt
+        lastModernUpdateAt = callbackAt
+
+        if update.authorizationDenied || update.authorizationDeniedGlobally {
+            locationProviderDiagnostic = "Location authorization is denied"
+            statusText = "Location access is off for Trip Log"
+            return
+        }
+        if update.authorizationRestricted {
+            locationProviderDiagnostic = "Location authorization is restricted"
+            statusText = "Location access is restricted"
+            return
+        }
+        if update.serviceSessionRequired {
+            locationProviderDiagnostic = "Core Location needs an active service session"
+            retainActiveLocationSessions()
+        } else if update.insufficientlyInUse {
+            locationProviderDiagnostic = "Background location session is not active"
+            startLegacyLocationFallback(reason: "background session unavailable")
+        } else if update.accuracyLimited {
+            locationProviderDiagnostic = "Precise GPS is temporarily limited"
+        } else if update.locationUnavailable {
+            locationProviderDiagnostic = "GPS position is temporarily unavailable"
+        } else {
+            locationProviderDiagnostic = "Automotive live updates active"
+        }
+
+        if update.stationary {
+            systemReportedStationary = true
+            liveSpeedSnapshot = liveSpeedReducer.markStationary(at: callbackAt)
+            // Apple's automotive stream may intentionally suspend while the
+            // vehicle is stationary. Keep the legacy standard service alive as
+            // a no-distance-filter fallback so departure is noticed promptly.
+            startLegacyLocationFallback(reason: "stationary continuity")
+        }
+
+        guard let location = update.location else { return }
+        ingestLocation(location, receivedAt: callbackAt, fromModernStream: true)
+    }
+
+    private func ingestLocation(
+        _ location: CLLocation,
+        receivedAt callbackAt: Date,
+        fromModernStream: Bool
+    ) {
+        let routeWasAccepted = FireVaultBreadcrumbRules.shouldAcceptRouteLocation(
+            location,
+            after: lastRouteInputTimestamp,
+            now: callbackAt
+        )
+        if routeWasAccepted {
+            lastRouteInputTimestamp = location.timestamp
+            updateMotionEvidence(with: location)
+            record(location)
+        }
+
+        guard FireVaultBreadcrumbRules.shouldAcceptNavigationTelemetry(
+                  location,
+                  after: latestLocation,
+                  now: callbackAt
+              ) else {
+            if fromModernStream {
+                modernNavigationFixStreak = 0
+            }
+            if !routeWasAccepted {
+                rejectedLocationCount += 1
+            }
+            // Delayed route batches and coarse network fixes must never replace
+            // live telemetry or make the GPS watchdog appear healthy.
+            return
+        }
+
+        lastLocationReceivedAt = location.timestamp
+        lastNavigationLocationReceivedAt = location.timestamp
+        liveSpeedSnapshot = liveSpeedReducer.ingest(location, receivedAt: callbackAt)
+        consecutiveLocationRecoveryCount = 0
+        if fromModernStream {
+            modernNavigationFixStreak += 1
+        }
+
+        if let speed = liveSpeedSnapshot.metersPerSecond,
+           speed > FireVaultBreadcrumbRules.maximumStationarySpeed {
+            systemReportedStationary = false
+        } else if liveSpeedSnapshot.source == .stationary {
+            systemReportedStationary = true
+        }
+
+        if fromModernStream {
+            locationProviderText = legacyFallbackIsActive
+                ? "Automotive + fallback"
+                : "Automotive live"
+            if modernNavigationFixStreak >= 3, !systemReportedStationary {
+                stopLegacyLocationFallback()
+                locationProviderText = "Automotive live"
+            }
+        } else {
+            locationProviderText = "Legacy GPS fallback"
+        }
+
+        latestLocation = location
     }
 
     private var activeDayIndex: Int? {
@@ -940,11 +1497,66 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     private func startAuthorizedUpdates() {
         guard sessionIsPrepared, activeDay?.isPaused == false else { return }
-        manager.activityType = .automotiveNavigation
-        manager.desiredAccuracy = gpsPreferences.highAccuracy
-            ? kCLLocationAccuracyBest
-            : kCLLocationAccuracyHundredMeters
-        manager.distanceFilter = FireVaultBreadcrumbRules.minimumPointDistance
+        configureActiveLocationManager()
+        retainActiveLocationSessions()
+        if !isRecording {
+            trackingStartedAt = Date()
+            lastLocationCallbackAt = nil
+            lastLocationReceivedAt = nil
+            lastNavigationLocationReceivedAt = nil
+            lastLocationRecoveryAt = nil
+            lastModernUpdateAt = nil
+            lastRouteInputTimestamp = activeDay?.points.last?.timestamp
+                ?? activeDay?.startedAt
+            consecutiveLocationRecoveryCount = 0
+            modernNavigationFixStreak = 0
+            systemReportedStationary = false
+            liveSpeedReducer.reset()
+            liveSpeedSnapshot = .unavailable
+        }
+        // Durable recording intent must be visible before the asynchronous
+        // live-update sequence can deliver its first event.
+        isRecording = true
+        manager.startMonitoringVisits()
+        startModernLocationUpdates()
+        // Keep a standard receiver active during acquisition and while parked.
+        // This catches departure immediately if the automotive stream is
+        // stationary or still warming, then retires after modern movement is
+        // established.
+        startLegacyLocationFallback(reason: "initial acquisition")
+        startLocationWatchdog()
+        if accuracyAuthorization == .reducedAccuracy {
+            manager.requestTemporaryFullAccuracyAuthorization(
+                withPurposeKey: "TripLogPreciseLocation"
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.accuracyAuthorization = self.manager.accuracyAuthorization
+                    if self.accuracyAuthorization == .fullAccuracy {
+                        self.statusText = "Recording today’s route"
+                    }
+                }
+            }
+        }
+        statusText = accuracyAuthorization == .fullAccuracy
+            ? "Recording today’s route"
+            : "Trip Log needs Precise Location for reliable recording"
+        synchronizeLiveActivity(status: .recording)
+    }
+
+    private func configureActiveLocationManager() {
+        // The modern live-update stream is configured for automotive
+        // navigation. This manager is the continuity fallback used if that
+        // stream is stationary or temporarily unavailable, so use the broader
+        // navigation activity type to avoid duplicating an automotive pause.
+        manager.activityType = .otherNavigation
+        manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
+        // Dwell recognition needs periodic stationary fixes. A positive
+        // distance filter can suppress every sample after the vehicle stops,
+        // preventing an otherwise valid three- or five-minute visit from ever
+        // accumulating confirmation evidence. Route persistence remains
+        // throttled separately by `FireVaultBreadcrumbRules.accepts`.
+        manager.distanceFilter = kCLDistanceFilterNone
         // Automatic pausing can occur before a three- or five-minute stop has
         // enough samples to be confirmed. Trip Log already throttles persisted
         // points, so keep Core Location active for reliable arrival/departure
@@ -952,25 +1564,122 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         manager.pausesLocationUpdatesAutomatically = false
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = true
-        manager.startMonitoringVisits()
-        manager.startUpdatingLocation()
-        isRecording = true
-        statusText = accuracyAuthorization == .fullAccuracy
-            ? "Recording today’s route"
-            : "Recording with approximate location"
-        synchronizeLiveActivity(status: .recording)
+    }
+
+    private func retainActiveLocationSessions() {
+        // Service and background sessions describe the active Trip Log job to
+        // modern Core Location. They are required independently of whether
+        // the user chose to display a Live Activity.
+        if serviceSession == nil {
+            serviceSession = CLServiceSession(
+                authorization: .whenInUse,
+                fullAccuracyPurposeKey: "TripLogPreciseLocation"
+            )
+        }
+        if backgroundActivitySession == nil {
+            backgroundActivitySession = CLBackgroundActivitySession()
+        }
     }
 
     private func stopLocationUpdates() {
+        locationWatchdogTask?.cancel()
+        locationWatchdogTask = nil
+        liveUpdateTask?.cancel()
+        liveUpdateTask = nil
         manager.stopUpdatingLocation()
         manager.stopMonitoringVisits()
         manager.allowsBackgroundLocationUpdates = false
         manager.showsBackgroundLocationIndicator = false
+        backgroundActivitySession?.invalidate()
+        backgroundActivitySession = nil
+        serviceSession?.invalidate()
+        serviceSession = nil
+        trackingStartedAt = nil
+        lastLocationCallbackAt = nil
+        lastLocationReceivedAt = nil
+        lastNavigationLocationReceivedAt = nil
+        lastLocationRecoveryAt = nil
+        lastModernUpdateAt = nil
+        lastRouteInputTimestamp = nil
+        consecutiveLocationRecoveryCount = 0
+        legacyFallbackIsActive = false
+        modernNavigationFixStreak = 0
+        systemReportedStationary = false
+        liveSpeedReducer.reset()
+        liveSpeedSnapshot = .unavailable
+        locationProviderText = "Inactive"
+        locationProviderDiagnostic = "Trip Log is not recording"
         isRecording = false
+    }
+
+    private func startModernLocationUpdates() {
+        guard isRecording, liveUpdateTask == nil else { return }
+        locationProviderText = legacyFallbackIsActive
+            ? "Automotive + fallback"
+            : "Automotive live"
+        locationProviderDiagnostic = "Starting automotive live updates…"
+        liveUpdateTask = Task { @MainActor [weak self] in
+            do {
+                for try await update in CLLocationUpdate.liveUpdates(.automotiveNavigation) {
+                    guard !Task.isCancelled, let self else { return }
+                    self.handleLiveUpdate(update)
+                }
+                guard !Task.isCancelled, let self, self.isRecording else { return }
+                self.liveUpdateTask = nil
+                self.locationProviderDiagnostic = "Automotive stream ended unexpectedly"
+                self.startLegacyLocationFallback(reason: "automotive stream ended")
+            } catch {
+                guard !Task.isCancelled, let self, self.isRecording else { return }
+                self.liveUpdateTask = nil
+                self.locationProviderDiagnostic = "Automotive stream error: \(error.localizedDescription)"
+                self.startLegacyLocationFallback(reason: "automotive stream error")
+            }
+        }
+    }
+
+    private func restartModernLocationUpdates() {
+        liveUpdateTask?.cancel()
+        liveUpdateTask = nil
+        lastModernUpdateAt = nil
+        modernNavigationFixStreak = 0
+        startModernLocationUpdates()
+    }
+
+    private func startLegacyLocationFallback(reason: String) {
+        guard isRecording, sessionIsPrepared, activeDay?.isPaused == false else { return }
+        configureActiveLocationManager()
+        if !legacyFallbackIsActive {
+            legacyFallbackIsActive = true
+            locationProviderText = "Automotive + fallback"
+            locationProviderDiagnostic = "Fallback active • \(reason)"
+        }
+        // Repeating startUpdatingLocation is intentionally idempotent. Do not
+        // stop the receiver during ordinary recovery because that discards its
+        // warm GPS state and can lengthen reacquisition after a stop.
+        manager.startUpdatingLocation()
+    }
+
+    private func stopLegacyLocationFallback() {
+        guard legacyFallbackIsActive else { return }
+        manager.stopUpdatingLocation()
+        legacyFallbackIsActive = false
     }
 
     private func record(_ location: CLLocation) {
         guard let index = activeDayIndex, !days[index].isPaused else { return }
+        if FireVaultBreadcrumbRules.shouldEvaluateStop(
+            location,
+            after: lastStopEvaluationLocation
+        ) {
+            let previousEvaluation = lastStopEvaluationLocation
+            lastStopEvaluationLocation = location
+            updateStopDetection(
+                with: location,
+                previous: previousEvaluation,
+                dayIndex: index
+            )
+        }
+
         let previous = days[index].points.last?.location
         guard FireVaultBreadcrumbRules.accepts(location, after: previous) else {
             rejectedLocationCount += 1
@@ -988,7 +1697,6 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
                 speedMetersPerSecond: location.speed >= 0 ? location.speed : nil
             )
         )
-        updateStopDetection(with: location, previous: previous, dayIndex: index)
         if let stop = days[index].stops.last(where: { $0.departure == nil }) {
             let state = stop.accountID == nil ? "Stop detected" : "On site"
             statusText = "\(state) • \(days[index].stopDuration(for: stop).fireVaultDuration)"
@@ -999,6 +1707,99 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         }
         persist()
         synchronizeLiveActivity(status: .recording)
+    }
+
+    private func updateMotionEvidence(with location: CLLocation) {
+        lastMeaningfulMovementAt = FireVaultBreadcrumbRules.updatedMeaningfulMovementDate(
+            for: location,
+            reference: speedReferenceLocation,
+            previousMeaningfulMovementAt: lastMeaningfulMovementAt,
+            now: location.timestamp
+        )
+
+        guard let reference = speedReferenceLocation else {
+            speedReferenceLocation = location
+            return
+        }
+
+        let interval = location.timestamp.timeIntervalSince(reference.timestamp)
+        if interval >= FireVaultBreadcrumbRules.maximumLiveSpeedAge {
+            speedReferenceLocation = location
+        }
+    }
+
+    private func startLocationWatchdog() {
+        guard locationWatchdogTask == nil else { return }
+        locationWatchdogTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch {
+                    return
+                }
+                guard let self else { return }
+                let refreshed = self.liveSpeedReducer.refresh()
+                if refreshed != self.liveSpeedSnapshot {
+                    self.liveSpeedSnapshot = refreshed
+                }
+                self.recoverLocationStream(force: false)
+            }
+        }
+    }
+
+    private func recoverLocationStream(force: Bool) {
+        guard isRecording, sessionIsPrepared, activeDay?.isPaused == false else { return }
+        let now = Date()
+        let telemetryIsSilent = FireVaultBreadcrumbRules.shouldRecoverLocationStream(
+            trackingStartedAt: trackingStartedAt,
+            lastLocationReceivedAt: lastNavigationLocationReceivedAt,
+            lastRecoveryAt: lastLocationRecoveryAt,
+            now: now
+        )
+        let modernBaseline = lastModernUpdateAt ?? trackingStartedAt
+        let modernIsSilent = modernBaseline.map {
+            now.timeIntervalSince($0)
+                >= FireVaultBreadcrumbRules.maximumLocationSilenceBeforeRecovery * 2
+        } ?? false
+        guard force || telemetryIsSilent || (modernIsSilent && !systemReportedStationary) else {
+            return
+        }
+
+        if let lastLocationRecoveryAt,
+           now.timeIntervalSince(lastLocationRecoveryAt)
+            < FireVaultBreadcrumbRules.minimumLocationRecoverySpacing {
+            return
+        }
+
+        lastLocationRecoveryAt = now
+        locationRecoveryCount += 1
+        consecutiveLocationRecoveryCount += 1
+        retainActiveLocationSessions()
+        if telemetryIsSilent || force {
+            statusText = "GPS signal delayed • continuity receiver active…"
+            startLegacyLocationFallback(reason: force ? "receiver paused" : "live fixes delayed")
+        }
+        if modernIsSilent && !systemReportedStationary {
+            locationProviderDiagnostic = "Restarting silent automotive update stream"
+            restartModernLocationUpdates()
+        } else if liveUpdateTask == nil {
+            startModernLocationUpdates()
+        }
+    }
+
+    private func rearmActiveLocationReceiverIfNeeded() {
+        configureActiveLocationManager()
+        retainActiveLocationSessions()
+        manager.startMonitoringVisits()
+        startModernLocationUpdates()
+        startLocationWatchdog()
+
+        let now = Date()
+        let lastUsableAge = lastLocationReceivedAt.map { now.timeIntervalSince($0) }
+        if lastUsableAge == nil
+            || lastUsableAge! >= FireVaultBreadcrumbRules.maximumLocationSilenceBeforeRecovery {
+            startLegacyLocationFallback(reason: "restoring active Trip Log")
+        }
     }
 
     private func restoreTrackingContext() {
