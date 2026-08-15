@@ -2851,16 +2851,6 @@ struct FireVaultTripLogHistoryCalendarView: View {
             .navigationTitle("Trip Log History")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    if mergeableTrips.count >= 2 || isSelectingTripsToMerge {
-                        Button(isSelectingTripsToMerge ? "Cancel" : "Merge") {
-                            withAnimation(.snappy(duration: 0.22)) {
-                                isSelectingTripsToMerge.toggle()
-                                mergeSelection.removeAll()
-                            }
-                        }
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
@@ -3088,6 +3078,14 @@ struct FireVaultTripLogHistoryCalendarView: View {
                                 Button("Rename Trip", systemImage: "pencil") {
                                     beginRename(trip, index: index)
                                 }
+                                if mergeableTrips.count >= 2, !trip.isActive {
+                                    Button("Merge Trips…", systemImage: "arrow.triangle.merge") {
+                                        withAnimation(.snappy(duration: 0.22)) {
+                                            mergeSelection = [trip.id]
+                                            isSelectingTripsToMerge = true
+                                        }
+                                    }
+                                }
                             } label: {
                                 Image(systemName: "ellipsis.circle")
                                     .font(.title3)
@@ -3186,6 +3184,13 @@ struct FireVaultTripLogHistoryCalendarView: View {
                     .font(.subheadline.bold())
             }
             Spacer()
+            Button("Cancel") {
+                withAnimation(.snappy(duration: 0.22)) {
+                    mergeSelection.removeAll()
+                    isSelectingTripsToMerge = false
+                }
+            }
+            .buttonStyle(.bordered)
             Button("Merge Selected", systemImage: "arrow.triangle.merge") {
                 confirmsMerge = true
             }

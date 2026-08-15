@@ -2621,6 +2621,7 @@ final class FireVaultTests: XCTestCase {
             var stops: [FireVaultBreadcrumbStop] = []
             for stopIndex in 0..<3 {
                 let arrival = start.addingTimeInterval(Double((stopIndex + 1) * 75 * 60))
+                let city = stopIndex == 2 ? "Meridian" : "Boise"
                 stops.append(
                     FireVaultBreadcrumbStop(
                         arrival: arrival,
@@ -2629,7 +2630,7 @@ final class FireVaultTests: XCTestCase {
                         longitude: -116.202 - Double(dayIndex) * 0.01 - Double(stopIndex) * 0.002,
                         accountID: "D\(dayIndex)-S\(stopIndex)",
                         accountName: "Day \(dayIndex + 1) Account \(stopIndex + 1)",
-                        accountAddress: "\(100 + stopIndex) Main Street"
+                        accountAddress: "\(100 + stopIndex) Main Street, \(city), ID 83702"
                     )
                 )
             }
@@ -2676,6 +2677,7 @@ final class FireVaultTests: XCTestCase {
         let images = FireVaultTripLogImageRenderer.images(from: data)
 
         XCTAssertEqual(report.dailyReports.count, 3)
+        XCTAssertEqual(report.dailyReports.first?.cityRouteText, "Boise – Meridian")
         XCTAssertEqual(document.numberOfPages, 3)
         XCTAssertEqual(images.count, 3)
 
@@ -2686,6 +2688,66 @@ final class FireVaultTests: XCTestCase {
         for (index, image) in images.prefix(2).enumerated() {
             let attachment = XCTAttachment(image: image)
             attachment.name = index == 0 ? "FireVault-Weekly-Overview" : "FireVault-Weekly-Daily-Page"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    func testWeeklyCompactReportPaginatesEveryTripSummary() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let monday = try XCTUnwrap(
+            calendar.date(from: DateComponents(year: 2026, month: 8, day: 10, hour: 6))
+        )
+        let trips = (0..<16).map { index in
+            let start = monday.addingTimeInterval(Double(index) * 45 * 60)
+            let stopArrival = start.addingTimeInterval(5 * 60)
+            return FireVaultBreadcrumbDay(
+                name: "Trip \(index + 1)",
+                startedAt: start,
+                endedAt: start.addingTimeInterval(30 * 60),
+                points: [
+                    .init(timestamp: start, latitude: 43.61, longitude: -116.20, horizontalAccuracy: 8),
+                    .init(timestamp: start.addingTimeInterval(30 * 60), latitude: 43.62, longitude: -116.22, horizontalAccuracy: 8)
+                ],
+                stops: [
+                    .init(
+                        arrival: stopArrival,
+                        departure: stopArrival.addingTimeInterval(8 * 60),
+                        latitude: 43.615,
+                        longitude: -116.21,
+                        accountID: "ACCOUNT-\(index)",
+                        accountName: "Account \(index + 1)",
+                        accountAddress: "100 Main Street, Boise, ID 83702"
+                    )
+                ]
+            )
+        }
+        let report = FireVaultTripLogWeeklyReport(
+            days: trips,
+            anchorDate: monday,
+            technicianName: "David Bannerman",
+            companyName: "Bannerman US LLC",
+            includeCoordinates: true,
+            generatedAt: monday.addingTimeInterval(7 * 24 * 60 * 60),
+            calendar: calendar
+        )
+        let data = FireVaultTripLogPDFRenderer.weekly(
+            report: report,
+            detail: .compact,
+            mapImage: nil
+        )
+        let document = try XCTUnwrap(
+            CGPDFDocument(CGDataProvider(data: data as CFData)!)
+        )
+        let images = FireVaultTripLogImageRenderer.images(from: data)
+
+        XCTAssertEqual(report.dailyReports.count, 16)
+        XCTAssertEqual(document.numberOfPages, 2)
+        XCTAssertEqual(images.count, 2)
+        for (index, image) in images.enumerated() {
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "FireVault-Weekly-16-Trips-Page-\(index + 1)"
             attachment.lifetime = .keepAlways
             add(attachment)
         }
