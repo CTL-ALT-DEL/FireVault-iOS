@@ -1786,7 +1786,9 @@ struct NativePhotoView: View {
     @State private var showsPhotoPicker = false
     @State private var pendingCaptureIntent: CaptureIntent?
     @State private var mediaAccountID: String?
+    @State private var mediaDocumentID: String?
     @State private var saveStatus = ""
+    @State private var confirmsMediaDeletion = false
 
     private enum CaptureRoute: String, Identifiable {
         case camera
@@ -1812,6 +1814,11 @@ struct NativePhotoView: View {
     private var mediaAccount: FireVaultWorkspaceAccount? {
         guard let mediaAccountID else { return nil }
         return store.accounts.first { $0.id == mediaAccountID }
+    }
+
+    private var currentMediaURL: URL? {
+        guard let mediaAccountID, let mediaDocumentID else { return nil }
+        return store.mediaURL(accountID: mediaAccountID, documentID: mediaDocumentID)
     }
 
     private var technicianName: String {
@@ -1909,6 +1916,18 @@ struct NativePhotoView: View {
             } message: {
                 Text(alertMessage)
             }
+            .confirmationDialog(
+                "Delete this saved item?",
+                isPresented: $confirmsMediaDeletion,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Photo or Scan", role: .destructive) {
+                    deleteCurrentMedia()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently removes the FireVault copy from the selected account.")
+            }
         }
     }
 
@@ -1942,11 +1961,59 @@ struct NativePhotoView: View {
                 }
                 .font(.caption.bold())
                 .padding(.horizontal, 4)
+
+                previewActions
             } else {
                 captureReadyCard
                     .frame(height: horizontalSizeClass == .regular ? 410 : 218)
             }
         }
+    }
+
+    private var previewActions: some View {
+        HStack(spacing: 10) {
+            if let currentMediaURL {
+                ShareLink(item: currentMediaURL) {
+                    previewActionLabel("Share", symbol: "square.and.arrow.up", tint: NativeShellPalette.blue)
+                }
+                .accessibilityIdentifier("native-preview-share")
+            } else {
+                previewActionLabel("Share", symbol: "square.and.arrow.up", tint: .secondary)
+                    .opacity(0.45)
+            }
+
+            Button(role: .destructive) {
+                confirmsMediaDeletion = true
+            } label: {
+                previewActionLabel("Delete", symbol: "trash", tint: NativeShellPalette.red)
+            }
+            .disabled(mediaDocumentID == nil)
+            .accessibilityIdentifier("native-preview-delete")
+
+            Button {
+                alertTitle = "Saved to Account"
+                alertMessage = saveStatus.isEmpty ? "This item is saved in FireVault." : saveStatus
+                showsAlert = true
+            } label: {
+                previewActionLabel("Save", symbol: "checkmark.circle.fill", tint: NativeShellPalette.green)
+            }
+            .disabled(mediaDocumentID == nil)
+            .accessibilityLabel("Confirm item is saved to account")
+            .accessibilityIdentifier("native-preview-save")
+        }
+    }
+
+    private func previewActionLabel(_ title: String, symbol: String, tint: Color) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.subheadline.bold())
+            .foregroundStyle(tint)
+            .frame(maxWidth: .infinity)
+            .frame(height: 46)
+            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(tint.opacity(0.18), lineWidth: 1)
+            }
     }
 
     private var ipadCapturePanel: some View {
@@ -2262,12 +2329,16 @@ struct NativePhotoView: View {
             timestamp: timestamp
         )
 
+        let priorDocumentIDs = Set(account.documents.map(\.id))
         do {
             try store.attachCapturedPhoto(renderedImage, to: account.id)
             selectedImage = renderedImage
             scannedPages = []
             mediaKind = .photo
             mediaAccountID = account.id
+            mediaDocumentID = store.accounts
+                .first(where: { $0.id == account.id })?
+                .documents.first(where: { !priorDocumentIDs.contains($0.id) })?.id
             saveStatus = "Photo saved to \(account.name)"
             captureRoute = nil
         } catch {
@@ -2285,12 +2356,16 @@ struct NativePhotoView: View {
             return
         }
 
+        let priorDocumentIDs = Set(account.documents.map(\.id))
         do {
             try store.attachScannedDocument(pages, to: account.id)
             selectedImage = firstPage
             scannedPages = pages
             mediaKind = .scan
             mediaAccountID = account.id
+            mediaDocumentID = store.accounts
+                .first(where: { $0.id == account.id })?
+                .documents.first(where: { !priorDocumentIDs.contains($0.id) })?.id
             saveStatus = "Scan saved to \(account.name)"
             captureRoute = nil
         } catch {
@@ -2303,6 +2378,24 @@ struct NativePhotoView: View {
         alertTitle = "Capture Unavailable"
         alertMessage = message
         showsAlert = true
+    }
+
+    private func deleteCurrentMedia() {
+        guard let mediaAccountID, let mediaDocumentID else { return }
+        do {
+            guard try store.deleteDocument(accountID: mediaAccountID, documentID: mediaDocumentID) else {
+                throw FireVaultMediaError.deleteFailed("The saved item could not be found.")
+            }
+            selectedImage = nil
+            scannedPages = []
+            self.mediaAccountID = nil
+            self.mediaDocumentID = nil
+            saveStatus = ""
+        } catch {
+            alertTitle = "Couldn’t Delete Item"
+            alertMessage = error.localizedDescription
+            showsAlert = true
+        }
     }
 }
 
