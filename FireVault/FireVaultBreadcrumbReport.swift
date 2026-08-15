@@ -287,7 +287,7 @@ struct FireVaultBreadcrumbReport: Equatable {
     }
 
     var speedProfileMPH: [Double] {
-        routePoints.map { max(0, $0.speedMPH ?? 0) }
+        routePoints.compactMap(\.speedMPH).map { max(0, $0) }
     }
 
     var averageSpeedMPH: Double? {
@@ -1005,7 +1005,7 @@ struct FireVaultBreadcrumbReportView: View {
 
         VStack(alignment: .leading, spacing: 7) {
             HStack {
-                Text("ROUTE PERFORMANCE")
+                Text("TRIP PROFILE")
                     .font(.caption.bold())
                     .tracking(0.9)
                     .foregroundStyle(FireVaultTripLogReportPalette.navy)
@@ -1379,7 +1379,7 @@ struct FireVaultBreadcrumbReportView: View {
                 routeSets: [report.routePoints],
                 stops: report.mapStops,
                 region: report.mapRegion,
-                size: .init(width: 480, height: 480)
+                size: .init(width: 528, height: 148)
             )
             let data = FireVaultTripLogPDFRenderer.daily(
                 report: report,
@@ -1392,7 +1392,7 @@ struct FireVaultBreadcrumbReportView: View {
                 routeSets: weeklyReport.routeSets,
                 stops: detail == .detailed ? weeklyReport.mapStops : [],
                 region: weeklyReport.mapRegion,
-                size: .init(width: 480, height: 480)
+                size: .init(width: 528, height: 148)
             )
             let data = FireVaultTripLogPDFRenderer.weekly(
                 report: weeklyReport,
@@ -1416,7 +1416,7 @@ struct FireVaultBreadcrumbReportView: View {
                 routeSets: [report.routePoints],
                 stops: report.mapStops,
                 region: report.mapRegion,
-                size: .init(width: 480, height: 480)
+                size: .init(width: 528, height: 148)
             )
             pdfData = FireVaultTripLogPDFRenderer.daily(
                 report: report,
@@ -1428,7 +1428,7 @@ struct FireVaultBreadcrumbReportView: View {
                 routeSets: weeklyReport.routeSets,
                 stops: detail == .detailed ? weeklyReport.mapStops : [],
                 region: weeklyReport.mapRegion,
-                size: .init(width: 480, height: 480)
+                size: .init(width: 528, height: 148)
             )
             pdfData = FireVaultTripLogPDFRenderer.weekly(
                 report: weeklyReport,
@@ -1617,9 +1617,9 @@ enum FireVaultTripLogPDFRenderer {
                 ],
                 y: y
             )
-            y += 12
-            y = drawMap(mapImage, y: y, side: 230)
-            y += 12
+            y += 8
+            y = drawMap(mapImage, y: y, size: .init(width: 528, height: 148))
+            y += 8
             y = drawRoutePerformance(
                 elevationSets: [report.elevationProfileFeet],
                 speedSets: [report.speedProfileMPH],
@@ -1627,17 +1627,19 @@ enum FireVaultTripLogPDFRenderer {
                 averageSpeed: report.averageSpeedMPH,
                 y: y
             )
-            y += 12
+            y += 8
             y = drawSectionTitle("STOP DETAILS", y: y)
             y = drawStopTableHeader(y: y)
 
             if report.visits.isEmpty {
                 y += drawText("No stops were recorded for this workday.", font: .systemFont(ofSize: 10), color: .darkGray, x: 42, y: y + 12, width: 528)
             } else {
-                let rowBudget = max(1, Int((742 - y) / 34))
+                let availableHeight = max(30, 742 - y)
+                let rowBudget = max(1, Int(availableHeight / 30))
                 let visits = Array(report.visits.prefix(rowBudget))
+                let rowHeight = min(48, max(30, availableHeight / CGFloat(max(1, visits.count))))
                 for visit in visits {
-                    y = drawStopRow(visit, note: "", y: y, height: 34)
+                    y = drawStopRow(visit, note: "", y: y, height: rowHeight)
                 }
                 if report.visits.count > visits.count {
                     _ = drawText(
@@ -1687,9 +1689,9 @@ enum FireVaultTripLogPDFRenderer {
                 ],
                 y: y
             )
-            y += 15
-            y = drawMap(mapImage, y: y, side: 230)
-            y += 12
+            y += 8
+            y = drawMap(mapImage, y: y, size: .init(width: 528, height: 148))
+            y += 8
             y = drawRoutePerformance(
                 elevationSets: report.elevationSetsFeet,
                 speedSets: report.speedSetsMPH,
@@ -1697,7 +1699,7 @@ enum FireVaultTripLogPDFRenderer {
                 averageSpeed: report.averageSpeedMPH,
                 y: y
             )
-            y += 14
+            y += 8
             y = drawSectionTitle("WEEKLY SUMMARY", y: y)
             y = drawWeeklyHeader(y: y)
 
@@ -1733,20 +1735,20 @@ enum FireVaultTripLogPDFRenderer {
         paper.setFill()
         pageBounds.fill()
 
-        let masthead = CGRect(x: 24, y: 22, width: 564, height: 112)
+        let masthead = CGRect(x: 24, y: 22, width: 564, height: 100)
         navy.setFill()
         UIBezierPath(roundedRect: masthead, cornerRadius: 18).fill()
 
-        drawFireVaultProWordmark(x: 42, y: 39, fontSize: 23)
-        drawText(title, font: .systemFont(ofSize: 10, weight: .bold), color: .white, x: 42, y: 70, width: 374)
+        drawFireVaultProWordmark(x: 42, y: 35, fontSize: 25)
+        drawText(title, font: .systemFont(ofSize: 11.5, weight: .bold), color: .white, x: 42, y: 78, width: 374)
 
         let identity = [
             company,
             technician.isEmpty ? "Technician not configured" : technician
         ].filter { !$0.isEmpty }.joined(separator: "  |  ")
-        drawText(identity, font: .systemFont(ofSize: 8.5, weight: .medium), color: UIColor.white.withAlphaComponent(0.72), x: 42, y: 91, width: 414)
+        drawText(identity, font: .systemFont(ofSize: 9.5, weight: .medium), color: UIColor.white.withAlphaComponent(0.76), x: 42, y: 98, width: 414)
 
-        let badge = CGRect(x: 476, y: 37, width: 90, height: 80)
+        let badge = CGRect(x: 476, y: 34, width: 90, height: 76)
         UIColor.white.setFill()
         UIBezierPath(roundedRect: badge, cornerRadius: 13).fill()
         UIColor.white.withAlphaComponent(0.35).setStroke()
@@ -1763,7 +1765,7 @@ enum FireVaultTripLogPDFRenderer {
         red.setFill()
         CGRect(x: masthead.minX + 18, y: masthead.maxY - 3, width: 88, height: 3).fill()
         drawFooter(page: page, generatedAt: generatedAt)
-        return 151
+        return 139
     }
 
     private static func drawContinuationHeader(title: String, date: String, page: Int) -> CGFloat {
@@ -1780,14 +1782,14 @@ enum FireVaultTripLogPDFRenderer {
     }
 
     private static func drawMetrics(_ metrics: [(String, String)], y: CGFloat) -> CGFloat {
-        let rect = CGRect(x: 42, y: y, width: 528, height: 54)
+        let rect = CGRect(x: 42, y: y, width: 528, height: 50)
         paleBlue.setFill()
         UIBezierPath(roundedRect: rect, cornerRadius: 10).fill()
         let width = rect.width / CGFloat(metrics.count)
         for (index, metric) in metrics.enumerated() {
             let metricRect = CGRect(x: rect.minX + CGFloat(index) * width, y: rect.minY, width: width, height: rect.height)
-            drawCenteredText(metric.1, font: .systemFont(ofSize: 11, weight: .bold), color: navy, rect: CGRect(x: metricRect.minX + 4, y: metricRect.minY + 10, width: metricRect.width - 8, height: 18))
-            drawCenteredText(metric.0, font: .systemFont(ofSize: 6.8, weight: .bold), color: .darkGray, rect: CGRect(x: metricRect.minX + 4, y: metricRect.minY + 31, width: metricRect.width - 8, height: 14))
+            drawCenteredText(metric.1, font: .systemFont(ofSize: 12.5, weight: .bold), color: navy, rect: CGRect(x: metricRect.minX + 4, y: metricRect.minY + 7, width: metricRect.width - 8, height: 19))
+            drawCenteredText(metric.0, font: .systemFont(ofSize: 7.5, weight: .bold), color: .darkGray, rect: CGRect(x: metricRect.minX + 4, y: metricRect.minY + 29, width: metricRect.width - 8, height: 14))
             if index < metrics.count - 1 {
                 lightLine.setStroke()
                 let line = UIBezierPath()
@@ -1800,16 +1802,24 @@ enum FireVaultTripLogPDFRenderer {
         return rect.maxY
     }
 
-    private static func drawMap(_ image: UIImage?, y: CGFloat, side: CGFloat) -> CGFloat {
+    private static func drawMap(_ image: UIImage?, y: CGFloat, size: CGSize) -> CGFloat {
         _ = drawSectionTitle("ROUTE MAP", y: y)
         let imageY = y + 19
-        let resolvedHeight: CGFloat = image == nil ? 62 : side
-        let resolvedWidth: CGFloat = image == nil ? 528 : side
+        let resolvedHeight: CGFloat = image == nil ? 62 : size.height
+        let resolvedWidth: CGFloat = image == nil ? 528 : size.width
         let rect = CGRect(x: (pageBounds.width - resolvedWidth) / 2, y: imageY, width: resolvedWidth, height: resolvedHeight)
         if let image {
             UIGraphicsGetCurrentContext()?.saveGState()
             UIBezierPath(roundedRect: rect, cornerRadius: 12).addClip()
-            image.draw(in: rect)
+            let scale = max(rect.width / max(1, image.size.width), rect.height / max(1, image.size.height))
+            let drawSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            let drawRect = CGRect(
+                x: rect.midX - drawSize.width / 2,
+                y: rect.midY - drawSize.height / 2,
+                width: drawSize.width,
+                height: drawSize.height
+            )
+            image.draw(in: drawRect)
             UIGraphicsGetCurrentContext()?.restoreGState()
         } else {
             paleBlue.setFill()
@@ -1830,9 +1840,9 @@ enum FireVaultTripLogPDFRenderer {
         averageSpeed: Double?,
         y: CGFloat
     ) -> CGFloat {
-        _ = drawSectionTitle("ROUTE PERFORMANCE", y: y)
+        _ = drawSectionTitle("TRIP PROFILE", y: y)
         let graphY = y + 19
-        let rect = CGRect(x: 42, y: graphY, width: 528, height: 88)
+        let rect = CGRect(x: 42, y: graphY, width: 528, height: 98)
         paleBlue.setFill()
         UIBezierPath(roundedRect: rect, cornerRadius: 10).fill()
         lightLine.setStroke()
@@ -1844,9 +1854,10 @@ enum FireVaultTripLogPDFRenderer {
         let elevations = validSets.flatMap { $0 }
         let validSpeeds = speedSets.filter { $0.count >= 2 }
         let speeds = validSpeeds.flatMap { $0 }
+        let maximumSpeed = max(1, speeds.max() ?? 1)
         guard elevations.count >= 2 || speeds.count >= 2 else {
             drawCenteredText(
-                "Route performance data was not recorded for this Trip Log",
+                "Elevation and speed samples were not recorded for this Trip Log",
                 font: .systemFont(ofSize: 9, weight: .medium),
                 color: .darkGray,
                 rect: rect
@@ -1856,25 +1867,36 @@ enum FireVaultTripLogPDFRenderer {
 
         let minimum = elevations.min() ?? 0
         let maximum = elevations.max() ?? minimum + 1
-        let plot = rect.insetBy(dx: 14, dy: 17)
+        let plotX = rect.minX + 66
+        let plotWidth = rect.width - 80
+        let elevationPlot = CGRect(x: plotX, y: rect.minY + 20, width: plotWidth, height: 28)
+        let speedPlot = CGRect(x: plotX, y: rect.minY + 57, width: plotWidth, height: 18)
         let range = max(1, maximum - minimum)
-        UIColor(white: 0.78, alpha: 0.7).setStroke()
-        for gridIndex in 0...3 {
-            let gridY = plot.minY + plot.height * CGFloat(gridIndex) / 3
-            let grid = UIBezierPath()
-            grid.move(to: .init(x: plot.minX, y: gridY))
-            grid.addLine(to: .init(x: plot.maxX, y: gridY))
-            grid.lineWidth = 0.45
-            grid.stroke()
+
+        drawText("ELEVATION", font: .systemFont(ofSize: 7.4, weight: .bold), color: blue, x: rect.minX + 8, y: elevationPlot.midY - 9, width: 54)
+        drawText("FEET", font: .systemFont(ofSize: 6.4, weight: .semibold), color: .gray, x: rect.minX + 8, y: elevationPlot.midY + 2, width: 54)
+        drawText("SPEED", font: .systemFont(ofSize: 7.4, weight: .bold), color: red, x: rect.minX + 8, y: speedPlot.midY - 9, width: 54)
+        drawText("0–\(Int(maximumSpeed.rounded())) MPH", font: .systemFont(ofSize: 6.2, weight: .semibold), color: .gray, x: rect.minX + 8, y: speedPlot.midY + 2, width: 54)
+
+        UIColor(white: 0.78, alpha: 0.65).setStroke()
+        for plot in [elevationPlot, speedPlot] {
+            for gridIndex in 0...2 {
+                let gridY = plot.minY + plot.height * CGFloat(gridIndex) / 2
+                let grid = UIBezierPath()
+                grid.move(to: .init(x: plot.minX, y: gridY))
+                grid.addLine(to: .init(x: plot.maxX, y: gridY))
+                grid.lineWidth = 0.4
+                grid.stroke()
+            }
         }
 
-        let segmentWidth = plot.width / CGFloat(max(1, validSets.count))
+        let segmentWidth = elevationPlot.width / CGFloat(max(1, validSets.count))
         for (setIndex, set) in validSets.enumerated() {
             let path = UIBezierPath()
             for (pointIndex, elevation) in set.enumerated() {
                 let fraction = CGFloat(pointIndex) / CGFloat(max(1, set.count - 1))
-                let x = plot.minX + CGFloat(setIndex) * segmentWidth + fraction * segmentWidth
-                let graphY = plot.minY + CGFloat((maximum - elevation) / range) * plot.height
+                let x = elevationPlot.minX + CGFloat(setIndex) * segmentWidth + fraction * segmentWidth
+                let graphY = elevationPlot.minY + CGFloat((maximum - elevation) / range) * elevationPlot.height
                 if pointIndex == 0 { path.move(to: .init(x: x, y: graphY)) }
                 else { path.addLine(to: .init(x: x, y: graphY)) }
             }
@@ -1885,14 +1907,13 @@ enum FireVaultTripLogPDFRenderer {
             path.stroke()
         }
 
-        let maximumSpeed = max(1, speeds.max() ?? 1)
-        let speedSegmentWidth = plot.width / CGFloat(max(1, validSpeeds.count))
+        let speedSegmentWidth = speedPlot.width / CGFloat(max(1, validSpeeds.count))
         for (setIndex, set) in validSpeeds.enumerated() {
             let path = UIBezierPath()
             for (pointIndex, speed) in set.enumerated() {
                 let fraction = CGFloat(pointIndex) / CGFloat(max(1, set.count - 1))
-                let x = plot.minX + CGFloat(setIndex) * speedSegmentWidth + fraction * speedSegmentWidth
-                let graphY = plot.minY + CGFloat(1 - speed / maximumSpeed) * plot.height
+                let x = speedPlot.minX + CGFloat(setIndex) * speedSegmentWidth + fraction * speedSegmentWidth
+                let graphY = speedPlot.minY + CGFloat(1 - speed / maximumSpeed) * speedPlot.height
                 if pointIndex == 0 { path.move(to: .init(x: x, y: graphY)) }
                 else { path.addLine(to: .init(x: x, y: graphY)) }
             }
@@ -1903,24 +1924,28 @@ enum FireVaultTripLogPDFRenderer {
             path.stroke()
         }
 
+        if validSpeeds.isEmpty {
+            drawCenteredText("Speed samples unavailable", font: .systemFont(ofSize: 7.2, weight: .medium), color: .gray, rect: speedPlot)
+        }
+
         if let averageSpeed {
-            let averageY = plot.minY + CGFloat(1 - min(averageSpeed, maximumSpeed) / maximumSpeed) * plot.height
+            let averageY = speedPlot.minY + CGFloat(1 - min(averageSpeed, maximumSpeed) / maximumSpeed) * speedPlot.height
             let averagePath = UIBezierPath()
-            averagePath.move(to: .init(x: plot.minX, y: averageY))
-            averagePath.addLine(to: .init(x: plot.maxX, y: averageY))
+            averagePath.move(to: .init(x: speedPlot.minX, y: averageY))
+            averagePath.addLine(to: .init(x: speedPlot.maxX, y: averageY))
             UIColor(red: 0.18, green: 0.58, blue: 0.28, alpha: 1).setStroke()
             averagePath.lineWidth = 1
             averagePath.setLineDash([4, 3], count: 2, phase: 0)
             averagePath.stroke()
-            drawText("AVG \(Int(averageSpeed.rounded())) MPH", font: .systemFont(ofSize: 6.5, weight: .bold), color: UIColor(red: 0.18, green: 0.58, blue: 0.28, alpha: 1), x: rect.minX + 190, y: rect.minY + 4, width: 145, alignment: .center)
+            drawText("AVG \(Int(averageSpeed.rounded())) MPH", font: .systemFont(ofSize: 7.5, weight: .bold), color: UIColor(red: 0.18, green: 0.58, blue: 0.28, alpha: 1), x: rect.midX - 55, y: rect.minY + 5, width: 110, alignment: .center)
         }
 
         let markerFractions = [0.0] + stopFractions + [1.0]
         for (index, fraction) in markerFractions.enumerated() {
-            let x = plot.minX + CGFloat(min(1, max(0, fraction))) * plot.width
+            let x = elevationPlot.minX + CGFloat(min(1, max(0, fraction))) * elevationPlot.width
             let marker = UIBezierPath()
-            marker.move(to: .init(x: x, y: plot.minY))
-            marker.addLine(to: .init(x: x, y: plot.maxY))
+            marker.move(to: .init(x: x, y: elevationPlot.minY))
+            marker.addLine(to: .init(x: x, y: speedPlot.maxY))
             (index == 0 ? UIColor.systemGreen : (index == markerFractions.count - 1 ? navy : red)).setStroke()
             marker.lineWidth = 0.8
             marker.setLineDash([2, 2], count: 2, phase: 0)
@@ -1929,31 +1954,31 @@ enum FireVaultTripLogPDFRenderer {
 
         drawText(
             "HIGH \(Int(maximum.rounded()).formatted()) FT",
-            font: .systemFont(ofSize: 6.8, weight: .bold),
+            font: .systemFont(ofSize: 7.2, weight: .bold),
             color: navy,
-            x: rect.minX + 10,
+            x: elevationPlot.minX,
             y: rect.minY + 4,
             width: 125
         )
         drawText(
             "LOW \(Int(minimum.rounded()).formatted()) FT",
-            font: .systemFont(ofSize: 6.8, weight: .bold),
+            font: .systemFont(ofSize: 7.2, weight: .bold),
             color: navy,
-            x: rect.maxX - 135,
+            x: elevationPlot.maxX - 135,
             y: rect.minY + 4,
             width: 125,
             alignment: .right
         )
-        drawText("START", font: .systemFont(ofSize: 6.3, weight: .bold), color: .systemGreen, x: plot.minX, y: rect.maxY - 12, width: 48)
+        drawText("START", font: .systemFont(ofSize: 7, weight: .bold), color: .systemGreen, x: elevationPlot.minX, y: rect.maxY - 14, width: 48)
         drawText("STOPS", font: .systemFont(ofSize: 6.3, weight: .bold), color: red, x: rect.midX - 30, y: rect.maxY - 12, width: 60, alignment: .center)
-        drawText("END", font: .systemFont(ofSize: 6.3, weight: .bold), color: navy, x: plot.maxX - 48, y: rect.maxY - 12, width: 48, alignment: .right)
+        drawText("END", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: elevationPlot.maxX - 48, y: rect.maxY - 14, width: 48, alignment: .right)
         return rect.maxY
     }
 
     private static func drawSectionTitle(_ title: String, y: CGFloat) -> CGFloat {
         red.setFill()
         UIBezierPath(roundedRect: CGRect(x: 42, y: y + 1, width: 4, height: 12), cornerRadius: 2).fill()
-        let height = drawText(title.uppercased(), font: .systemFont(ofSize: 9, weight: .bold), color: navy, x: 54, y: y, width: 516)
+        let height = drawText(title.uppercased(), font: .systemFont(ofSize: 10, weight: .bold), color: navy, x: 54, y: y, width: 516)
         return y + height + 8
     }
 
@@ -1961,10 +1986,10 @@ enum FireVaultTripLogPDFRenderer {
         let rect = CGRect(x: 42, y: y, width: 528, height: 24)
         navy.setFill()
         rect.fill()
-        drawText("#", font: .systemFont(ofSize: 7, weight: .bold), color: .white, x: 48, y: y + 7, width: 20)
-        drawText("TIME RANGE", font: .systemFont(ofSize: 7, weight: .bold), color: .white, x: 76, y: y + 7, width: 88)
-        drawText("LOCATION / ACCOUNT", font: .systemFont(ofSize: 7, weight: .bold), color: .white, x: 170, y: y + 7, width: 305)
-        drawText("STOP DURATION", font: .systemFont(ofSize: 7, weight: .bold), color: .white, x: 488, y: y + 7, width: 76)
+        drawText("#", font: .systemFont(ofSize: 8, weight: .bold), color: .white, x: 48, y: y + 6, width: 20)
+        drawText("TIME RANGE", font: .systemFont(ofSize: 8, weight: .bold), color: .white, x: 76, y: y + 6, width: 88)
+        drawText("LOCATION / ACCOUNT", font: .systemFont(ofSize: 8, weight: .bold), color: .white, x: 170, y: y + 6, width: 305)
+        drawText("DURATION", font: .systemFont(ofSize: 8, weight: .bold), color: .white, x: 488, y: y + 6, width: 76)
         return rect.maxY
     }
 
@@ -1981,26 +2006,25 @@ enum FireVaultTripLogPDFRenderer {
     }
 
     private static func drawFireVaultProWordmark(x: CGFloat, y: CGFloat, fontSize: CGFloat) {
-        let fireWidth = fontSize * 2.72
-        let vaultWidth = fontSize * 3.5
-        drawText("FIRE", font: .systemFont(ofSize: fontSize, weight: .black), color: red, x: x, y: y, width: fireWidth)
-        drawText("VAULT", font: .systemFont(ofSize: fontSize, weight: .black), color: .white, x: x + fireWidth, y: y, width: vaultWidth)
+        let font = UIFont.systemFont(ofSize: fontSize, weight: .black)
+        let fireWidth = ceil(NSString(string: "FIRE").size(withAttributes: [.font: font]).width)
+        let vaultWidth = ceil(NSString(string: "VAULT").size(withAttributes: [.font: font]).width)
+        let letterGap: CGFloat = 3
+        let wordmarkWidth = fireWidth + letterGap + vaultWidth
+        drawText("FIRE", font: font, color: red, x: x, y: y, width: fireWidth + 2)
+        drawText("VAULT", font: font, color: .white, x: x + fireWidth + letterGap, y: y, width: vaultWidth + 3)
 
-        let wordmarkWidth = fireWidth + vaultWidth
-        let proRect = CGRect(
-            x: x + wordmarkWidth - fontSize * 1.35,
-            y: y + fontSize * 0.92,
-            width: fontSize * 1.35,
-            height: fontSize * 0.64
-        )
-        UIColor.white.withAlphaComponent(0.72).setStroke()
+        let baselineY = y + fontSize + 6
+        let proWidth = max(25, fontSize * 1.32)
+        let proRect = CGRect(x: x + wordmarkWidth - proWidth, y: baselineY - 6, width: proWidth, height: 12)
+        UIColor.white.withAlphaComponent(0.78).setStroke()
         let underline = UIBezierPath()
-        underline.move(to: CGPoint(x: x, y: proRect.midY))
-        underline.addLine(to: CGPoint(x: proRect.minX - fontSize * 0.2, y: proRect.midY))
-        underline.lineWidth = max(0.7, fontSize * 0.045)
+        underline.move(to: CGPoint(x: x, y: baselineY))
+        underline.addLine(to: CGPoint(x: proRect.minX - 7, y: baselineY))
+        underline.lineWidth = max(1, fontSize * 0.055)
         underline.stroke()
 
-        drawCenteredText("PRO", font: .systemFont(ofSize: fontSize * 0.32, weight: .black), color: .white, rect: proRect)
+        drawCenteredText("PRO", font: .systemFont(ofSize: max(7, fontSize * 0.34), weight: .black), color: .white, rect: proRect)
     }
 
     private static func stopRowHeight(visit: FireVaultBreadcrumbReport.Visit, note: String) -> CGFloat {
@@ -2022,16 +2046,17 @@ enum FireVaultTripLogPDFRenderer {
             CGRect(x: 42, y: y, width: 528, height: height).fill()
         }
 
-        let badge = CGRect(x: 48, y: y + 8, width: 18, height: 18)
+        let contentTop = y + max(6, (height - 30) / 2)
+        let badge = CGRect(x: 47, y: y + (height - 20) / 2, width: 20, height: 20)
         blue.setFill()
         UIBezierPath(ovalIn: badge).fill()
-        drawCenteredText("\(visit.sequence)", font: .systemFont(ofSize: 7.5, weight: .bold), color: .white, rect: badge)
+        drawCenteredText("\(visit.sequence)", font: .systemFont(ofSize: 8.5, weight: .bold), color: .white, rect: badge)
 
-        drawText(visit.reportTimeText, font: .monospacedSystemFont(ofSize: 7.2, weight: .regular), color: .darkGray, x: 76, y: y + 7, width: 88)
-        var locationY = y + 7
-        locationY += drawText(visit.title, font: .systemFont(ofSize: 9, weight: .semibold), color: navy, x: 170, y: locationY, width: 305) + 1
+        drawText(visit.reportTimeText, font: .monospacedSystemFont(ofSize: height >= 40 ? 8.2 : 7.5, weight: .medium), color: .darkGray, x: 76, y: contentTop, width: 88)
+        var locationY = contentTop
+        locationY += drawText(visit.title, font: .systemFont(ofSize: height >= 40 ? 10.5 : 9.5, weight: .semibold), color: navy, x: 170, y: locationY, width: 305) + 1
         if !visit.addressText.isEmpty {
-            locationY += drawText(visit.addressText, font: .systemFont(ofSize: 7.3), color: .darkGray, x: 170, y: locationY, width: 305) + 1
+            locationY += drawText(visit.addressText, font: .systemFont(ofSize: height >= 40 ? 8.4 : 7.5), color: .darkGray, x: 170, y: locationY, width: 305) + 1
         }
         if !note.isEmpty {
             locationY += drawText("Note: \(note)", font: .italicSystemFont(ofSize: 7.2), color: .darkGray, x: 170, y: locationY, width: 305) + 1
@@ -2039,10 +2064,10 @@ enum FireVaultTripLogPDFRenderer {
         if height >= 44, let coordinates = visit.coordinateText {
             _ = drawText("GPS: \(coordinates)", font: .monospacedSystemFont(ofSize: 6.7, weight: .regular), color: .gray, x: 170, y: locationY, width: 305)
         }
-        let durationRect = CGRect(x: 492, y: y + 8, width: 68, height: 20)
+        let durationRect = CGRect(x: 492, y: y + (height - 22) / 2, width: 68, height: 22)
         paleBlue.setFill()
         UIBezierPath(roundedRect: durationRect, cornerRadius: 10).fill()
-        drawCenteredText(visit.durationText, font: .monospacedSystemFont(ofSize: 8, weight: .semibold), color: navy, rect: durationRect)
+        drawCenteredText(visit.durationText, font: .monospacedSystemFont(ofSize: 8.5, weight: .semibold), color: navy, rect: durationRect)
 
         lightLine.setStroke()
         let line = UIBezierPath()

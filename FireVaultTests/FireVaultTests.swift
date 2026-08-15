@@ -2458,9 +2458,29 @@ final class FireVaultTests: XCTestCase {
                 accountAddress: "\(index + 1) Main Street"
             )
         }
+        var points: [FireVaultBreadcrumbPoint] = []
+        for index in 0..<36 {
+            let indexValue = Double(index)
+            let timestamp = start.addingTimeInterval(indexValue * 8 * 60)
+            let latitude = 43.615 + indexValue * 0.0005
+            let longitude = -116.202 - indexValue * 0.0004
+            let altitude = 810 + sin(indexValue / 4) * 26
+            let speed = Double(index % 9) * 1.4
+            points.append(
+                FireVaultBreadcrumbPoint(
+                    timestamp: timestamp,
+                    latitude: latitude,
+                    longitude: longitude,
+                    horizontalAccuracy: 9,
+                    altitude: altitude,
+                    speedMetersPerSecond: speed
+                )
+            )
+        }
         let day = FireVaultBreadcrumbDay(
             startedAt: start,
             endedAt: start.addingTimeInterval(5 * 60 * 60),
+            points: points,
             stops: stops
         )
         let report = FireVaultBreadcrumbReport(
@@ -2469,10 +2489,27 @@ final class FireVaultTests: XCTestCase {
             companyName: "Western States Fire Protection",
             includeCoordinates: true
         )
+        let mapImage = UIGraphicsImageRenderer(size: .init(width: 528, height: 148)).image { renderer in
+            UIColor(red: 0.91, green: 0.95, blue: 0.90, alpha: 1).setFill()
+            renderer.fill(.init(x: 0, y: 0, width: 528, height: 148))
+            UIColor(white: 1, alpha: 0.7).setStroke()
+            renderer.cgContext.setLineWidth(8)
+            for y in stride(from: CGFloat(20), through: CGFloat(132), by: 28) {
+                renderer.cgContext.move(to: .init(x: 0, y: y))
+                renderer.cgContext.addLine(to: .init(x: 528, y: y + 8))
+            }
+            renderer.cgContext.strokePath()
+            let route = UIBezierPath()
+            route.move(to: .init(x: 38, y: 118))
+            route.addCurve(to: .init(x: 488, y: 32), controlPoint1: .init(x: 175, y: 16), controlPoint2: .init(x: 342, y: 140))
+            UIColor.systemBlue.setStroke()
+            route.lineWidth = 5
+            route.stroke()
+        }
         let data = FireVaultTripLogPDFRenderer.daily(
             report: report,
             detail: .detailed,
-            mapImage: nil
+            mapImage: mapImage
         )
         let document = try XCTUnwrap(
             CGPDFDocument(CGDataProvider(data: data as CFData)!)
