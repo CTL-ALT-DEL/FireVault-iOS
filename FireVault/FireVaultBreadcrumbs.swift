@@ -2293,6 +2293,7 @@ struct FireVaultBreadcrumbsView: View {
     @State private var confirmsEnd = false
     @State private var editingStop: BreadcrumbStopSelection?
     @State private var showsReport = false
+    @State private var showsHistory = false
 
     private var selectedDay: FireVaultBreadcrumbDay? {
         if let selectedDayID {
@@ -2382,6 +2383,15 @@ struct FireVaultBreadcrumbsView: View {
                 )
             }
         }
+        .sheet(isPresented: $showsHistory) {
+            FireVaultTripLogHistoryCalendarView(
+                days: breadcrumbs.days,
+                selectedDayID: selectedDayID
+            ) { dayID in
+                selectedDayID = dayID
+                showsHistory = false
+            }
+        }
     }
 
     private var daySelector: some View {
@@ -2397,17 +2407,8 @@ struct FireVaultBreadcrumbsView: View {
             }
             Spacer()
             if !breadcrumbs.days.isEmpty {
-                Menu {
-                    ForEach(breadcrumbs.days) { day in
-                        Button {
-                            selectedDayID = day.id
-                        } label: {
-                            Label(
-                                day.startedAt.formatted(date: .abbreviated, time: .omitted),
-                                systemImage: day.isActive ? "record.circle" : "calendar"
-                            )
-                        }
-                    }
+                Button {
+                    showsHistory = true
                 } label: {
                     Label("History", systemImage: "calendar")
                 }
@@ -2672,6 +2673,257 @@ struct FireVaultBreadcrumbsView: View {
             parts.append("Note added")
         }
         return parts.joined(separator: " • ")
+    }
+}
+
+private struct FireVaultTripLogHistoryCalendarView: View {
+    let days: [FireVaultBreadcrumbDay]
+    let selectedDayID: UUID?
+    let onSelect: (UUID) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var displayedMonth: Date
+    @State private var selectedDate: Date
+
+    private let calendar = Calendar.autoupdatingCurrent
+    private let weekdayColumns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 7)
+
+    init(
+        days: [FireVaultBreadcrumbDay],
+        selectedDayID: UUID?,
+        onSelect: @escaping (UUID) -> Void
+    ) {
+        self.days = days
+        self.selectedDayID = selectedDayID
+        self.onSelect = onSelect
+        let initialDate = days.first(where: { $0.id == selectedDayID })?.startedAt
+            ?? days.first?.startedAt
+            ?? Date()
+        _displayedMonth = State(initialValue: initialDate)
+        _selectedDate = State(initialValue: initialDate)
+    }
+
+    private var selectedTrips: [FireVaultBreadcrumbDay] {
+        days.filter { calendar.isDate($0.startedAt, inSameDayAs: selectedDate) }
+            .sorted { $0.startedAt < $1.startedAt }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    calendarCard
+                    tripsForSelectedDate
+                }
+                .padding(16)
+                .padding(.bottom, 20)
+            }
+            .background(NativeShellPalette.background)
+            .navigationTitle("Trip Log History")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .tint(NativeShellPalette.blue)
+    }
+
+    private var calendarCard: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Button {
+                    changeMonth(by: -1)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .frame(width: 36, height: 36)
+                }
+                .buttonStyle(.glass)
+
+                Spacer()
+                Text(displayedMonth.formatted(.dateTime.month(.wide).year()))
+                    .font(.headline)
+                Spacer()
+
+                Button {
+                    changeMonth(by: 1)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .frame(width: 36, height: 36)
+                }
+                .buttonStyle(.glass)
+            }
+
+            LazyVGrid(columns: weekdayColumns, spacing: 7) {
+                ForEach(weekdaySymbols, id: \.self) { weekday in
+                    Text(weekday)
+                        .font(.caption2.bold())
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+
+                ForEach(Array(monthDates.enumerated()), id: \.offset) { _, date in
+                    if let date {
+                        calendarDay(date)
+                    } else {
+                        Color.clear.frame(height: 46)
+                    }
+                }
+            }
+
+            HStack(spacing: 16) {
+                Label("Trip history", systemImage: "circle.fill")
+                    .foregroundStyle(NativeShellPalette.red)
+                Label("No trips", systemImage: "circle.fill")
+                    .foregroundStyle(.secondary.opacity(0.42))
+            }
+            .font(.caption2.bold())
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .nativeSurfaceCard()
+    }
+
+    private func calendarDay(_ date: Date) -> some View {
+        let trips = days.filter { calendar.isDate($0.startedAt, inSameDayAs: date) }
+        let hasTrips = !trips.isEmpty
+        let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
+
+        return Button {
+            selectedDate = date
+        } label: {
+            VStack(spacing: 1) {
+                Text(date.formatted(.dateTime.day()))
+                    .font(.subheadline.bold().monospacedDigit())
+                if trips.count > 1 {
+                    Text("\(trips.count) trips")
+                        .font(.system(size: 8, weight: .bold))
+                } else {
+                    Text(" ").font(.system(size: 8))
+                }
+            }
+            .foregroundStyle(hasTrips ? Color.white : Color.secondary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 46)
+            .background(
+                hasTrips ? NativeShellPalette.red : Color.secondary.opacity(0.10),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(
+                        isSelected ? NativeShellPalette.blue : Color.clear,
+                        lineWidth: isSelected ? 3 : 0
+                    )
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(
+            "\(date.formatted(date: .complete, time: .omitted)), \(trips.count) trip\(trips.count == 1 ? "" : "s")"
+        )
+    }
+
+    @ViewBuilder
+    private var tripsForSelectedDate: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(selectedDate.formatted(.dateTime.weekday(.wide)))
+                        .font(.caption.bold())
+                        .tracking(0.9)
+                        .foregroundStyle(NativeShellPalette.red)
+                    Text(selectedDate.formatted(date: .long, time: .omitted))
+                        .font(.title3.bold())
+                }
+                Spacer()
+                Text("\(selectedTrips.count) TRIP\(selectedTrips.count == 1 ? "" : "S")")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.secondary)
+            }
+
+            if selectedTrips.isEmpty {
+                ContentUnavailableView(
+                    "No Trips Recorded",
+                    systemImage: "calendar.badge.minus",
+                    description: Text("Choose a red date to review its Trip Log history.")
+                )
+                .frame(minHeight: 170)
+                .nativeSurfaceCard()
+            } else {
+                ForEach(Array(selectedTrips.enumerated()), id: \.element.id) { index, trip in
+                    Button {
+                        onSelect(trip.id)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: trip.isActive ? "record.circle.fill" : "point.topleft.down.to.point.bottomright.curvepath")
+                                .font(.title3.bold())
+                                .foregroundStyle(trip.isActive ? NativeShellPalette.green : NativeShellPalette.red)
+                                .frame(width: 38, height: 38)
+                                .background(
+                                    (trip.isActive ? NativeShellPalette.green : NativeShellPalette.red).opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                )
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(selectedTrips.count > 1 ? "Trip \(index + 1)" : "Recorded Trip")
+                                    .font(.subheadline.bold())
+                                    .foregroundStyle(.primary)
+                                Text(tripTimeRange(trip))
+                                    .font(.caption2.bold().monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                Text("\(trip.stops.count) stops • \(trip.totalDistanceMeters.fireVaultMiles)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.bold())
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(13)
+                        .nativeSurfaceCard()
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var weekdaySymbols: [String] {
+        let symbols = calendar.veryShortStandaloneWeekdaySymbols
+        let offset = max(0, min(symbols.count - 1, calendar.firstWeekday - 1))
+        return Array(symbols[offset...] + symbols[..<offset])
+    }
+
+    private var monthDates: [Date?] {
+        guard let monthInterval = calendar.dateInterval(of: .month, for: displayedMonth),
+              let dayRange = calendar.range(of: .day, in: .month, for: displayedMonth) else {
+            return []
+        }
+        let firstWeekday = calendar.component(.weekday, from: monthInterval.start)
+        let leading = (firstWeekday - calendar.firstWeekday + 7) % 7
+        var result = Array<Date?>(repeating: nil, count: leading)
+        result.append(contentsOf: dayRange.compactMap { day in
+            calendar.date(byAdding: .day, value: day - 1, to: monthInterval.start)
+        })
+        while !result.count.isMultiple(of: 7) { result.append(nil) }
+        return result
+    }
+
+    private func changeMonth(by value: Int) {
+        guard let next = calendar.date(byAdding: .month, value: value, to: displayedMonth) else { return }
+        displayedMonth = next
+        if let monthStart = calendar.dateInterval(of: .month, for: next)?.start {
+            selectedDate = monthStart
+        }
+    }
+
+    private func tripTimeRange(_ trip: FireVaultBreadcrumbDay) -> String {
+        let start = trip.startedAt.formatted(date: .omitted, time: .shortened)
+        let end = trip.endedAt?.formatted(date: .omitted, time: .shortened) ?? "Recording"
+        return "\(start) – \(end)"
     }
 }
 
