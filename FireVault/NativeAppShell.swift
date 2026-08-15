@@ -1944,8 +1944,7 @@ struct NativePhotoView: View {
                 .padding(.horizontal, 4)
             } else {
                 captureReadyCard
-                    .aspectRatio(1, contentMode: .fit)
-                    .frame(maxHeight: 650)
+                    .frame(height: horizontalSizeClass == .regular ? 410 : 218)
             }
         }
     }
@@ -2137,78 +2136,61 @@ struct NativePhotoView: View {
         Button {
             beginCapture(intent)
         } label: {
-            VStack(spacing: 7) {
+            VStack(spacing: 6) {
                 Image(systemName: symbol)
-                    .font(.system(size: 27, weight: .bold))
+                    .font(.system(size: 23, weight: .bold))
+                    .foregroundStyle(tint)
+                    .frame(width: 42, height: 42)
+                    .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
                 VStack(spacing: 1) {
                     Text(title)
                         .font(.caption.bold())
                         .tracking(0.7)
+                        .foregroundStyle(.primary)
                     Text(subtitle)
                         .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.72))
+                        .foregroundStyle(.secondary)
                 }
             }
-            .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .frame(height: 94)
-            .background(
-                LinearGradient(
-                    colors: [tint.opacity(0.92), tint.opacity(0.55)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-            )
+            .frame(height: 84)
+            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(.white.opacity(0.16), lineWidth: 1)
+                    .stroke(tint.opacity(0.20), lineWidth: 1)
             }
         }
         .buttonStyle(.plain)
-        .shadow(color: tint.opacity(0.18), radius: 8, y: 4)
+        .shadow(color: .black.opacity(0.12), radius: 7, y: 4)
     }
 
     private var captureReadyCard: some View {
         ZStack {
             LinearGradient(
-                colors: [NativeShellPalette.blue.opacity(0.14), NativeShellPalette.surface],
+                colors: [Color.black.opacity(0.78), Color.black.opacity(0.92)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
 
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(NativeShellPalette.blue.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [7, 7]))
-                .padding(16)
+            Image(systemName: "viewfinder")
+                .font(.system(size: horizontalSizeClass == .regular ? 250 : 150, weight: .ultraLight))
+                .foregroundStyle(.white.opacity(0.10))
 
-            VStack(spacing: 14) {
-                Image(systemName: "camera.aperture")
-                    .font(.system(size: 44, weight: .semibold))
-                    .foregroundStyle(NativeShellPalette.blue)
-                    .frame(width: 82, height: 82)
-                    .background(NativeShellPalette.blue.opacity(0.12), in: Circle())
-                    .overlay {
-                        Circle().stroke(NativeShellPalette.blue.opacity(0.24), lineWidth: 1)
-                    }
+            VStack(spacing: 10) {
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 31, weight: .semibold))
+                    .foregroundStyle(.white)
 
-                VStack(spacing: 5) {
-                    Text("FIELD CAPTURE")
-                        .font(.system(size: 21, weight: .bold, design: .rounded))
-                        .tracking(1.1)
-                    Text("Photo • Scan • Import")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
+                Text("Ready to capture")
+                    .font(.headline)
+                    .foregroundStyle(.white)
 
-                HStack(spacing: 8) {
-                    Label("Account linked", systemImage: "building.2.fill")
-                    Label("Overlay ready", systemImage: "camera.filters")
-                }
-                .font(.caption2.bold())
-                .foregroundStyle(.secondary)
+                Text(destinationAccount == nil ? "Choose an account, then select an option below." : "Photos and scans will be saved to this account.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.68))
+                    .multilineTextAlignment(.center)
             }
-            .padding(28)
+            .padding(24)
         }
         .frame(maxWidth: .infinity)
         .nativeSurfaceCard(cornerRadius: NativeShellMetrics.mapRadius)
