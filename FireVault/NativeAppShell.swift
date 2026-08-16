@@ -446,6 +446,7 @@ private struct NativeNearbyView: View {
         .padding(.top, 4)
         .task {
             mapLayer = FireVaultMapLayer(rawValue: settings.gps.resolvedDefaultMapLayer) ?? .standard
+            mapIs3D = settings.gps.opensMapsIn3D
             scrollAccountID = nearbyRows.first?.id
             if payload.demoMode {
                 cameraPosition = overviewCameraPosition
@@ -1146,14 +1147,6 @@ private struct NativeNearbyView: View {
                     if let selected {
                         FireVaultMapActionStrip {
                             FireVaultMapControlButton(
-                                role: .note,
-                                label: "Open \(selected.account.name) details"
-                            ) {
-                                store.openAccount(selected.account.id)
-                            }
-                            .accessibilityIdentifier("nearby-map-note")
-
-                            FireVaultMapControlButton(
                                 role: .call,
                                 label: "Call \(selected.account.name)",
                                 disabled: !selectedHasPhone
@@ -1401,7 +1394,11 @@ private struct NativeNearbyView: View {
         index: Int
     ) -> some View {
         return Button {
-            selectAccount(row, scrollToCard: true, haptic: true)
+            if selectedID == row.id {
+                store.openAccount(row.account.id)
+            } else {
+                selectAccount(row, scrollToCard: true, haptic: true)
+            }
         } label: {
             HStack(alignment: .top, spacing: 10) {
                 Text("\(index + 1)")
@@ -1484,7 +1481,11 @@ private struct NativeNearbyView: View {
                 row.distanceLabel
             ].joined(separator: ", ")
         )
-        .accessibilityHint("Tap to select on the map. Long press to open account details.")
+        .accessibilityHint(
+            selectedID == row.id
+                ? "Tap again to open account details."
+                : "Tap to select and show this account on the map."
+        )
         .accessibilityValue(selectedID == row.id ? "Selected" : "Not selected")
         .accessibilityAddTraits(selectedID == row.id ? .isSelected : [])
         .accessibilityAction(named: "Open Account Details") {
@@ -3090,6 +3091,13 @@ private struct NativeGPSSettingsView: View {
                     Label("Standard", systemImage: "map").tag("standard")
                     Label("Satellite", systemImage: "globe.americas.fill").tag("satellite")
                     Label("Hybrid", systemImage: "square.3.layers.3d").tag("hybrid")
+                }
+
+                Toggle(isOn: Binding(
+                    get: { draft.defaultMapIs3D ?? false },
+                    set: { draft.defaultMapIs3D = $0 }
+                )) {
+                    Label("Open maps in 3D", systemImage: "view.3d")
                 }
 
                 Toggle("High-accuracy GPS", isOn: $draft.highAccuracy)

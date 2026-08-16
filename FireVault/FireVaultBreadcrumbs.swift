@@ -146,7 +146,7 @@ struct FireVaultBreadcrumbDay: Codable, Identifiable, Equatable {
     var isPaused = false
     var points: [FireVaultBreadcrumbPoint] = []
     var stops: [FireVaultBreadcrumbStop] = []
-    var reportSummary: FireVaultTripReportSummary? = nil
+    var reportEndpoints: FireVaultTripReportEndpoints? = nil
 
     var isActive: Bool { endedAt == nil }
 
@@ -1079,13 +1079,6 @@ struct FireVaultBreadcrumbPermissionState: Equatable {
 
 @MainActor
 final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationManagerDelegate {
-    private struct TripSummaryAIRequest: Sendable {
-        let dayID: UUID
-        let attemptedAt: Date
-        let factualRevision: Int
-        let factualParagraph: String
-    }
-
     /// The single live archive owner shared by the iPhone/iPad scene and
     /// CarPlay. Demo stores continue to use their own isolated archive URLs.
     static let shared = FireVaultBreadcrumbStore()
@@ -1119,7 +1112,6 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     private let manager: CLLocationManager
     private let archiveURL: URL
     private let liveActivitiesEnabled: Bool
-    private let tripSummaryAIProvider: (any FireVaultTripSummaryAIProviding)?
     private var accounts: [FireVaultWorkspaceAccount] = []
     private var accountsAreLoaded = false
     private var deferredControlCommand: FireVaultTripLogControlCommand?
@@ -1185,17 +1177,12 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     init(
         archiveURL: URL? = nil,
-        liveActivitiesEnabled: Bool? = nil,
-        tripSummaryAIProvider: (any FireVaultTripSummaryAIProviding)? = nil,
-        tripSummaryAIEnabled: Bool? = nil
+        liveActivitiesEnabled: Bool? = nil
     ) {
         let manager = CLLocationManager()
         self.manager = manager
         self.archiveURL = archiveURL ?? Self.defaultArchiveURL
         self.liveActivitiesEnabled = liveActivitiesEnabled ?? (archiveURL == nil)
-        let shouldEnableTripSummaryAI = tripSummaryAIEnabled ?? (archiveURL == nil)
-        self.tripSummaryAIProvider = tripSummaryAIProvider
-            ?? (shouldEnableTripSummaryAI ? FireVaultTripSummaryAIService.shared : nil)
         let loaded = Self.load(from: archiveURL ?? Self.defaultArchiveURL)
         days = loaded.days
         authorizationStatus = manager.authorizationStatus
@@ -1333,7 +1320,6 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         statusText = "Workday complete"
         FireVaultNotificationService.shared.tripLogEnded()
         prepareReportData(at: index, accounts: accounts)
-        let summaryAIRequest = beginTripSummaryAIRequestIfNeeded(dayID: days[index].id)
         persist()
         let completedDay = days[index]
         if liveActivitiesEnabled {
@@ -1343,16 +1329,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             )
         }
         let preferences = FireVaultNativeSettingsStore().preferences
-        if let summaryAIRequest {
-            let synchronizesAutomation = liveActivitiesEnabled
-            Task { [weak self] in
-                await self?.completeTripSummaryAIRequest(
-                    summaryAIRequest,
-                    preferences: preferences,
-                    synchronizesAutomation: synchronizesAutomation
-                )
-            }
-        } else if liveActivitiesEnabled {
+        if liveActivitiesEnabled {
             Task {
                 await FireVaultTripLogAutomationService.shared.syncCompletedDay(
                     completedDay,
@@ -1375,19 +1352,11 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
               var merged = FireVaultTripLogIntegrity.mergedDay(selected) else {
             return nil
         }
-        if var summary = FireVaultTripSummaryBuilder.refreshed(
+        if let endpoints = FireVaultTripEndpointResolver.resolve(
             day: merged,
-            accounts: accounts,
-            preserving: nil
+            accounts: accounts
         ) {
-            let highestPreviousRevision = selected
-                .compactMap { $0.reportSummary?.factualRevision }
-                .max() ?? 0
-            summary.factualRevision = max(1, highestPreviousRevision + 1)
-            summary.intelligenceAttemptedAt = selected
-                .compactMap { $0.reportSummary?.intelligenceAttemptedAt }
-                .min()
-            merged.reportSummary = summary
+            merged.reportEndpoints = endpoints
         }
         days.removeAll { ids.contains($0.id) }
         days.append(merged)
@@ -1405,9 +1374,8 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         return true
     }
 
-    /// Creates the saved report narrative and endpoint labels once for every
-    /// completed trip in the selected calendar week. Existing summaries are
-    /// intentionally reused so previewing or exporting never reruns analysis.
+    /// Resolves the saved Start and End labels for every completed trip in the
+    /// selected calendar week before a report is created.
     @discardableResult
     func prepareReportDays(
         anchorDayID: UUID,
@@ -2481,68 +2449,6 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         persist()
     }
 
-    /// Claims the on-device model pass before any asynchronous work begins.
-    /// Once this timestamp is persisted, no report preview, export, relaunch,
-    /// or repeated End command can invoke the model for this trip again.
-    private func beginTripSummaryAIRequestIfNeeded(dayID: UUID) -> TripSummaryAIRequest? {
-        guard let provider = tripSummaryAIProvider,
-              provider.availability.isAvailable,
-              let dayIndex = days.firstIndex(where: { $0.id == dayID }),
-              days[dayIndex].endedAt != nil,
-              var summary = days[dayIndex].reportSummary,
-              summary.intelligenceAttemptedAt == nil,
-              summary.generationSource != .onDeviceAI else {
-            return nil
-        }
-
-        let attemptedAt = Date()
-        let factualRevision = max(1, summary.factualRevision ?? 1)
-        summary.intelligenceAttemptedAt = attemptedAt
-        summary.factualRevision = factualRevision
-        days[dayIndex].reportSummary = summary
-        return .init(
-            dayID: dayID,
-            attemptedAt: attemptedAt,
-            factualRevision: factualRevision,
-            factualParagraph: summary.paragraph
-        )
-    }
-
-    private func completeTripSummaryAIRequest(
-        _ request: TripSummaryAIRequest,
-        preferences: FireVaultNativePreferences,
-        synchronizesAutomation: Bool
-    ) async {
-        guard let provider = tripSummaryAIProvider else { return }
-
-        do {
-            let paragraph = try await provider.refine(
-                factualParagraph: request.factualParagraph
-            )
-            if let dayIndex = days.firstIndex(where: { $0.id == request.dayID }),
-               var summary = days[dayIndex].reportSummary,
-               summary.intelligenceAttemptedAt == request.attemptedAt,
-               summary.factualRevision == request.factualRevision,
-               summary.generationSource != .onDeviceAI {
-                summary.paragraph = paragraph
-                summary.generatedAt = Date()
-                summary.generationSource = .onDeviceAI
-                days[dayIndex].reportSummary = summary
-                persist()
-            }
-        } catch {
-            // The deterministic factual paragraph is intentionally retained.
-            // The saved attempt timestamp enforces the requested one-run rule.
-        }
-        if synchronizesAutomation,
-           let completedDay = days.first(where: { $0.id == request.dayID }) {
-            await FireVaultTripLogAutomationService.shared.syncCompletedDay(
-                completedDay,
-                preferences: preferences
-            )
-        }
-    }
-
     @discardableResult
     private func prepareReportData(
         at dayIndex: Int,
@@ -2559,29 +2465,19 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             days[dayIndex].stops[stopIndex].accountCategory = category
             changed = true
         }
-        if days[dayIndex].reportSummary == nil {
-            if let summary = FireVaultTripSummaryBuilder.generate(
+        if days[dayIndex].reportEndpoints == nil || changed {
+            if let endpoints = FireVaultTripEndpointResolver.resolve(
                 day: days[dayIndex],
                 accounts: accounts
             ) {
-                days[dayIndex].reportSummary = summary
+                days[dayIndex].reportEndpoints = endpoints
                 changed = true
             }
-        } else if changed {
-            changed = refreshCompletedReportData(
-                at: dayIndex,
-                accounts: accounts
-            ) || changed
-        } else if days[dayIndex].reportSummary?.factualRevision == nil {
-            days[dayIndex].reportSummary?.factualRevision = 1
-            changed = true
         }
         return changed
     }
 
-    /// Completed-trip stop edits immediately rebuild the deterministic facts.
-    /// The prior attempt timestamp is preserved, so corrected reports never
-    /// trigger another on-device model pass.
+    /// Completed-trip stop edits immediately refresh the report endpoints.
     @discardableResult
     private func refreshCompletedReportData(
         at dayIndex: Int,
@@ -2589,12 +2485,11 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     ) -> Bool {
         guard days.indices.contains(dayIndex),
               days[dayIndex].endedAt != nil,
-              let refreshed = FireVaultTripSummaryBuilder.refreshed(
+              let refreshed = FireVaultTripEndpointResolver.resolve(
                   day: days[dayIndex],
-                  accounts: accounts,
-                  preserving: days[dayIndex].reportSummary
+                  accounts: accounts
               ) else { return false }
-        days[dayIndex].reportSummary = refreshed
+        days[dayIndex].reportEndpoints = refreshed
         return true
     }
 

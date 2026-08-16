@@ -55,17 +55,11 @@ type TripDay = {
       technicianNote?: string;
       isPersonal?: boolean;
     }>;
-    reportSummary?: {
+    reportEndpoints?: {
       schemaVersion: number;
-      generatedAt: string;
-      paragraph: string;
+      resolvedAt: string;
       start: TripEndpoint;
       end: TripEndpoint;
-      averageSpeedMPH?: number;
-      minimumElevationFeet?: number;
-      maximumElevationFeet?: number;
-      generationSource?: "localAnalysis" | "onDeviceAI";
-      intelligenceAttemptedAt?: string;
     };
   };
 };
@@ -335,24 +329,6 @@ async function buildPDF(
       rgb(0.16, 0.58, 0.31),
       preference.time_zone,
     );
-    const summaryParagraph = summaryFor(day, preference.include_coordinates);
-    if (summaryParagraph) {
-      page.drawText(summaryHeadingFor(day), { x: 64, y, size: 7, font: bold, color: blue });
-      page.drawText(summarySourceFor(day), { x: 420, y, size: 6.5, font: bold, color: gray });
-      y -= 12;
-      y = drawWrappedText(
-        page,
-        summaryParagraph,
-        regular,
-        8.5,
-        navy,
-        64,
-        y,
-        494,
-        11,
-      );
-      y -= 8;
-    }
     for (const [index, stop] of stops.entries()) {
       if (y < 72) {
         page = document.addPage([612, 792]);
@@ -535,7 +511,7 @@ function endpointFor(
   role: "start" | "end",
   includeCoordinates = true,
 ): TripEndpoint {
-  const saved = day.payload.reportSummary?.[role];
+  const saved = day.payload.reportEndpoints?.[role];
   if (saved) {
     return saved.source === "coordinate" && !includeCoordinates
       ? { ...saved, address: "Approximate recorded location" }
@@ -645,123 +621,6 @@ function hasVisibleCoordinate<T extends {
   return point.isPrivate !== true &&
     typeof point.latitude === "number" && Number.isFinite(point.latitude) &&
     typeof point.longitude === "number" && Number.isFinite(point.longitude);
-}
-
-// New completed trips carry a persisted reportSummary generated once on the
-// device. This deterministic fallback keeps older synced payloads readable;
-// it does not invoke a model or overwrite the archived trip.
-function summaryUsesOnDeviceAI(day: TripDay): boolean {
-  return day.payload.reportSummary?.generationSource === "onDeviceAI";
-}
-
-function summaryHeadingFor(day: TripDay): string {
-  return summaryUsesOnDeviceAI(day) ? "ON-DEVICE AI TRIP SUMMARY" : "TRIP SUMMARY";
-}
-
-function summarySourceFor(day: TripDay): string {
-  return summaryUsesOnDeviceAI(day) ? "ON-DEVICE AI" : "SAVED LOCAL ANALYSIS";
-}
-
-function summaryFor(day: TripDay, includeCoordinates = true): string {
-  const saved = day.payload.reportSummary?.paragraph?.trim();
-  if (saved) return saved;
-
-  const start = endpointFor(day, "start", includeCoordinates);
-  const end = endpointFor(day, "end", includeCoordinates);
-  const stops = day.payload.stops ?? [];
-  const elapsed = Math.max(0, Date.parse(day.ended_at) - Date.parse(day.started_at));
-  const stopped = stops.reduce((total, stop) => {
-    if (!stop.departure) return total;
-    return total + Math.max(0, Date.parse(stop.departure) - Date.parse(stop.arrival));
-  }, 0);
-  const travelHours = Math.max(0, elapsed - stopped) / 3_600_000;
-  const distance = routeDistance(day.payload.points ?? []);
-  const averageSpeed = travelHours > 0 ? Math.min(150, distance / travelHours) : undefined;
-  const elevations = (day.payload.points ?? [])
-    .map((point) => point.altitude)
-    .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
-    .map((meters) => meters * 3.28084);
-
-  const sentences = [
-    `This trip started at ${endpointPhrase(start)} and ended at ${endpointPhrase(end)}.`,
-    `The recorded trip covered ${distance.toFixed(1)} miles over ${compactDuration(elapsed)}` +
-    (averageSpeed === undefined
-      ? ". A reliable average travel speed was not available."
-      : `, with an average travel speed of ${Math.round(averageSpeed)} mph.`),
-  ];
-
-  if (stops.length) {
-    const namedStops = stops.slice(0, 4).map((stop) => {
-      if (stop.isPersonal) return "a Personal stop";
-      const title = stop.accountName ?? stop.customTitle ?? "an Unrecognized stop";
-      const category = stop.accountCategory?.trim();
-      return category ? `${title} (${category})` : title;
-    });
-    const remaining = stops.length - namedStops.length;
-    sentences.push(
-      `It included ${stops.length} logged ${stops.length === 1 ? "stop" : "stops"}: ` +
-        `${joinList(namedStops)}${remaining > 0 ? `, plus ${remaining} additional ${remaining === 1 ? "stop" : "stops"}` : ""}.`,
-    );
-  } else {
-    sentences.push("No qualifying stops were logged during this trip.");
-  }
-
-  if (elevations.length) {
-    const low = Math.round(Math.min(...elevations));
-    const high = Math.round(Math.max(...elevations));
-    sentences.push(`Recorded elevation ranged from ${low.toLocaleString("en-US")} to ${high.toLocaleString("en-US")} feet.`);
-  } else {
-    sentences.push("Reliable elevation readings were not available for this trip.");
-  }
-  return sentences.join(" ");
-}
-
-function endpointPhrase(endpoint: TripEndpoint): string {
-  const title = endpoint.title?.trim() || "an unavailable location";
-  const address = endpoint.address?.trim();
-  return address && address !== title ? `${title}, ${address}` : title;
-}
-
-function joinList(values: string[]): string {
-  if (values.length <= 1) return values[0] ?? "";
-  if (values.length === 2) return `${values[0]} and ${values[1]}`;
-  return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
-}
-
-function drawWrappedText(
-  page: PDFPage,
-  value: string,
-  font: PDFFont,
-  size: number,
-  color: ReturnType<typeof rgb>,
-  x: number,
-  y: number,
-  width: number,
-  lineHeight: number,
-): number {
-  const paragraphs = value
-    .split(/\r?\n/)
-    .map((paragraph) => paragraph.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-  let cursor = y;
-  for (const paragraph of paragraphs) {
-    let line = "";
-    for (const word of paragraph.split(" ").filter(Boolean)) {
-      const candidate = line ? `${line} ${word}` : word;
-      if (line && font.widthOfTextAtSize(candidate, size) > width) {
-        page.drawText(line, { x, y: cursor, size, font, color });
-        cursor -= lineHeight;
-        line = word;
-      } else {
-        line = candidate;
-      }
-    }
-    if (line) {
-      page.drawText(line, { x, y: cursor, size, font, color });
-      cursor -= lineHeight;
-    }
-  }
-  return cursor;
 }
 
 function emailHTML(kind: ReportKind, preference: Preference, days: TripDay[], periodStart: string): string {

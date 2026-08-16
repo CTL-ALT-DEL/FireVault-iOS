@@ -228,11 +228,13 @@ struct FireVaultGPSPreferences: Codable, Equatable {
     var addressAssistanceEnabled = true
     var hapticsEnabled: Bool? = true
     var defaultMapLayer: String?
+    var defaultMapIs3D: Bool?
     var tripLogMinimumUnknownStopMinutes: Int?
     var tripLogRejectPoorAccuracyStops: Bool?
     var tripLogMergeNearbyStops: Bool?
     var hapticsAreEnabled: Bool { hapticsEnabled ?? true }
     var resolvedDefaultMapLayer: String { defaultMapLayer ?? "standard" }
+    var opensMapsIn3D: Bool { defaultMapIs3D ?? false }
     var resolvedTripLogMinimumUnknownStopMinutes: Int {
         tripLogMinimumUnknownStopMinutes ?? 5
     }
