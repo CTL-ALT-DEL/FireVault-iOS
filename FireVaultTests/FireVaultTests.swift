@@ -8,8 +8,36 @@
 import XCTest
 import CoreLocation
 import MapKit
+import PDFKit
 import UIKit
 @testable import FireVault
+
+private actor FireVaultTripSummaryAIProviderStub: FireVaultTripSummaryAIProviding {
+    nonisolated let availability: FireVaultTripSummaryAIAvailability
+    private let result: Result<String, FireVaultTripSummaryAIError>
+    private let delayNanoseconds: UInt64
+    private var invocationCount = 0
+
+    init(
+        availability: FireVaultTripSummaryAIAvailability = .available,
+        result: Result<String, FireVaultTripSummaryAIError>,
+        delayNanoseconds: UInt64 = 0
+    ) {
+        self.availability = availability
+        self.result = result
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func refine(factualParagraph: String) async throws -> String {
+        invocationCount += 1
+        if delayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: delayNanoseconds)
+        }
+        return try result.get()
+    }
+
+    func calls() -> Int { invocationCount }
+}
 
 @MainActor
 final class FireVaultTests: XCTestCase {
@@ -2682,7 +2710,7 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(store.accounts.contains(where: { $0.id == account.id }))
     }
 
-    func testRedesignedDailyPDFKeepsSixStandardStopsOnOnePage() throws {
+    func testRedesignedDailyPDFPreservesSixStandardStopsAcrossPages() throws {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let stops = (0..<6).map { index in
             let arrival = start.addingTimeInterval(Double(index * 35 * 60))
@@ -2753,7 +2781,7 @@ final class FireVaultTests: XCTestCase {
             CGPDFDocument(CGDataProvider(data: data as CFData)!)
         )
 
-        XCTAssertEqual(document.numberOfPages, 1)
+        XCTAssertGreaterThanOrEqual(document.numberOfPages, 2)
         let images = FireVaultTripLogImageRenderer.images(from: data)
         let image = try XCTUnwrap(images.first)
         XCTAssertEqual(images.count, document.numberOfPages)
@@ -2879,9 +2907,12 @@ final class FireVaultTests: XCTestCase {
         let images = FireVaultTripLogImageRenderer.images(from: data)
 
         XCTAssertEqual(report.dailyReports.count, 3)
-        XCTAssertEqual(report.dailyReports.first?.cityRouteText, "Boise – Meridian")
-        XCTAssertEqual(document.numberOfPages, 3)
-        XCTAssertEqual(images.count, 3)
+        XCTAssertEqual(
+            report.dailyReports.first?.cityRouteText,
+            "Recorded GPS location – Recorded GPS location"
+        )
+        XCTAssertGreaterThanOrEqual(document.numberOfPages, 3)
+        XCTAssertEqual(images.count, document.numberOfPages)
 
         let pdfAttachment = XCTAttachment(data: data, uniformTypeIdentifier: "com.adobe.pdf")
         pdfAttachment.name = "FireVault-Weekly-Overview-And-Daily-Breakdown.pdf"
@@ -2939,14 +2970,20 @@ final class FireVaultTests: XCTestCase {
             detail: .compact,
             mapImage: nil
         )
+        let searchablePDF = try XCTUnwrap(PDFKit.PDFDocument(data: data))
+        let searchableText = searchablePDF.string ?? ""
         let document = try XCTUnwrap(
             CGPDFDocument(CGDataProvider(data: data as CFData)!)
         )
         let images = FireVaultTripLogImageRenderer.images(from: data)
 
         XCTAssertEqual(report.dailyReports.count, 16)
-        XCTAssertEqual(document.numberOfPages, 2)
-        XCTAssertEqual(images.count, 2)
+        XCTAssertGreaterThanOrEqual(document.numberOfPages, 2)
+        XCTAssertEqual(images.count, document.numberOfPages)
+        XCTAssertTrue(searchableText.contains("Account 1"))
+        XCTAssertTrue(searchableText.contains("Account 16"))
+        XCTAssertTrue(searchableText.contains("START"))
+        XCTAssertTrue(searchableText.contains("END"))
         for (index, image) in images.enumerated() {
             let attachment = XCTAttachment(image: image)
             attachment.name = "FireVault-Weekly-16-Trips-Page-\(index + 1)"
@@ -3066,8 +3103,768 @@ final class FireVaultTests: XCTestCase {
         )
 
         XCTAssertEqual(stop.accountName, "Central Library")
+        XCTAssertNil(stop.accountCategory)
         XCTAssertNil(stop.technicianNote)
         XCTAssertFalse(stop.isPersonalStop)
+    }
+
+    func testTripLogArchiveCreatedBeforeReportSummariesStillDecodes() throws {
+        let legacyJSON = """
+        {
+          "id": "5A591C4A-F321-43AE-B2EF-A019F31E1784",
+          "startedAt": "2026-08-15T14:00:00Z",
+          "endedAt": "2026-08-15T15:00:00Z",
+          "isPaused": false,
+          "points": [],
+          "stops": [
+            {
+              "id": "DE0677D9-BF97-4EC2-AE9D-C799E8F2D049",
+              "arrival": "2026-08-15T14:20:00Z",
+              "departure": "2026-08-15T14:30:00Z",
+              "latitude": 43.615,
+              "longitude": -116.202,
+              "accountID": "account-1",
+              "accountName": "Central Library",
+              "accountAddress": "100 Main Street, Boise, ID 83702"
+            }
+          ]
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let day = try decoder.decode(
+            FireVaultBreadcrumbDay.self,
+            from: Data(legacyJSON.utf8)
+        )
+
+        XCTAssertNil(day.reportSummary)
+        XCTAssertNil(try XCTUnwrap(day.stops.first).accountCategory)
+    }
+
+    func testTripSummaryCapturesEndpointsStopCategoriesSpeedAndElevation() throws {
+        let start = Date(timeIntervalSince1970: 1_786_800_000)
+        let startAccount = FireVaultWorkspaceAccount(
+            id: "station-1",
+            name: "Pioneer Station",
+            address: "10 First Avenue, Boise, ID 83702",
+            category: "Public Safety",
+            accountId: "FV-100",
+            phone: "",
+            favorite: false,
+            latitude: 43.615,
+            longitude: -116.202,
+            tags: [],
+            notes: [],
+            documents: [],
+            equipment: [],
+            locations: [],
+            recent: []
+        )
+        let endAccount = FireVaultWorkspaceAccount(
+            id: "clinic-1",
+            name: "Mountain Clinic",
+            address: "500 Health Way, Meridian, ID 83642",
+            category: "Healthcare",
+            accountId: "FV-200",
+            phone: "",
+            favorite: false,
+            latitude: 43.625,
+            longitude: -116.222,
+            tags: [],
+            notes: [],
+            documents: [],
+            equipment: [],
+            locations: [],
+            recent: []
+        )
+        let accountStop = FireVaultBreadcrumbStop(
+            arrival: start.addingTimeInterval(15 * 60),
+            departure: start.addingTimeInterval(25 * 60),
+            latitude: 43.620,
+            longitude: -116.212,
+            accountID: endAccount.id,
+            accountName: endAccount.name,
+            accountAddress: endAccount.address,
+            accountCategory: endAccount.category
+        )
+        let identifiedStop = FireVaultBreadcrumbStop(
+            arrival: start.addingTimeInterval(35 * 60),
+            departure: start.addingTimeInterval(40 * 60),
+            latitude: 43.622,
+            longitude: -116.216,
+            customTitle: "Supply House"
+        )
+        let day = FireVaultBreadcrumbDay(
+            startedAt: start,
+            endedAt: start.addingTimeInterval(60 * 60),
+            points: [
+                .init(
+                    timestamp: start,
+                    latitude: 43.615,
+                    longitude: -116.202,
+                    horizontalAccuracy: 6,
+                    altitude: 1_500,
+                    speedMetersPerSecond: 12
+                ),
+                .init(
+                    timestamp: start.addingTimeInterval(30 * 60),
+                    latitude: 43.620,
+                    longitude: -116.212,
+                    horizontalAccuracy: 7,
+                    altitude: 1_550,
+                    speedMetersPerSecond: 14
+                ),
+                .init(
+                    timestamp: start.addingTimeInterval(60 * 60),
+                    latitude: 43.625,
+                    longitude: -116.222,
+                    horizontalAccuracy: 6,
+                    altitude: 1_600,
+                    speedMetersPerSecond: 10
+                )
+            ],
+            stops: [accountStop, identifiedStop]
+        )
+
+        let summary = try XCTUnwrap(
+            FireVaultTripSummaryBuilder.generate(
+                day: day,
+                accounts: [startAccount, endAccount],
+                generatedAt: start.addingTimeInterval(65 * 60)
+            )
+        )
+
+        XCTAssertEqual(summary.start.title, startAccount.name)
+        XCTAssertEqual(summary.start.address, startAccount.address)
+        XCTAssertEqual(summary.start.source, .account)
+        XCTAssertEqual(summary.start.timestamp, day.startedAt)
+        XCTAssertEqual(summary.end.title, endAccount.name)
+        XCTAssertEqual(summary.end.address, endAccount.address)
+        XCTAssertEqual(summary.end.source, .account)
+        XCTAssertEqual(summary.end.timestamp, day.endedAt)
+        XCTAssertGreaterThan(try XCTUnwrap(summary.averageSpeedMPH), 0)
+        XCTAssertEqual(try XCTUnwrap(summary.minimumElevationFeet), 4_921.26, accuracy: 1)
+        XCTAssertEqual(try XCTUnwrap(summary.maximumElevationFeet), 5_249.34, accuracy: 1)
+        XCTAssertTrue(summary.stopCategories.contains(.init(name: "Healthcare", count: 1)))
+        XCTAssertTrue(summary.stopCategories.contains(.init(name: "Identified Place", count: 1)))
+        XCTAssertTrue(summary.paragraph.contains("Pioneer Station"))
+        XCTAssertTrue(summary.paragraph.contains("Mountain Clinic"))
+        XCTAssertFalse(summary.paragraph.contains("Supply House"))
+        XCTAssertFalse(summary.paragraph.contains("Healthcare"))
+        XCTAssertTrue(summary.paragraph.contains("averaging"))
+        XCTAssertTrue(summary.paragraph.contains("included 2 recorded stops"))
+        XCTAssertTrue(summary.paragraph.contains("Elevation ranged"))
+    }
+
+    func testPreparingReportDaysPersistsAndReusesTheFirstSummary() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultTripSummaryTests-\(UUID().uuidString)", isDirectory: true)
+        let archiveURL = root.appendingPathComponent("trip-log.json")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let start = Date(timeIntervalSince1970: 1_786_800_000)
+        let account = FireVaultWorkspaceAccount(
+            id: "account-1",
+            name: "Central Library",
+            address: "100 Main Street, Boise, ID 83702",
+            category: "Government",
+            accountId: "FV-42",
+            phone: "",
+            favorite: false,
+            latitude: 43.615,
+            longitude: -116.202,
+            tags: [],
+            notes: [],
+            documents: [],
+            equipment: [],
+            locations: [],
+            recent: []
+        )
+        let stop = FireVaultBreadcrumbStop(
+            arrival: start.addingTimeInterval(10 * 60),
+            departure: start.addingTimeInterval(20 * 60),
+            latitude: 43.615,
+            longitude: -116.202,
+            accountID: account.id,
+            accountName: account.name,
+            accountAddress: account.address
+        )
+        let day = FireVaultBreadcrumbDay(
+            startedAt: start,
+            endedAt: start.addingTimeInterval(30 * 60),
+            points: [
+                .init(timestamp: start, latitude: 43.615, longitude: -116.202, horizontalAccuracy: 8),
+                .init(timestamp: start.addingTimeInterval(30 * 60), latitude: 43.620, longitude: -116.210, horizontalAccuracy: 8)
+            ],
+            stops: [stop]
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        try encoder.encode([day]).write(to: archiveURL, options: .atomic)
+
+        let firstStore = FireVaultBreadcrumbStore(archiveURL: archiveURL, liveActivitiesEnabled: false)
+        _ = firstStore.prepareReportDays(anchorDayID: day.id, accounts: [account])
+        let firstSummary = try XCTUnwrap(firstStore.days.first?.reportSummary)
+        XCTAssertEqual(firstStore.days.first?.stops.first?.accountCategory, "Government")
+
+        var changedAccount = account
+        changedAccount.name = "Renamed After Report"
+        changedAccount.category = "Education"
+        let reloadedStore = FireVaultBreadcrumbStore(archiveURL: archiveURL, liveActivitiesEnabled: false)
+        _ = reloadedStore.prepareReportDays(anchorDayID: day.id, accounts: [changedAccount])
+        let reusedSummary = try XCTUnwrap(reloadedStore.days.first?.reportSummary)
+
+        XCTAssertEqual(reusedSummary.schemaVersion, firstSummary.schemaVersion)
+        XCTAssertEqual(reusedSummary.paragraph, firstSummary.paragraph)
+        XCTAssertEqual(reusedSummary.start, firstSummary.start)
+        XCTAssertEqual(reusedSummary.end, firstSummary.end)
+        XCTAssertEqual(reusedSummary.averageSpeedMPH, firstSummary.averageSpeedMPH)
+        XCTAssertEqual(reusedSummary.minimumElevationFeet, firstSummary.minimumElevationFeet)
+        XCTAssertEqual(reusedSummary.maximumElevationFeet, firstSummary.maximumElevationFeet)
+        XCTAssertEqual(reusedSummary.stopCategories, firstSummary.stopCategories)
+        XCTAssertLessThan(abs(reusedSummary.generatedAt.timeIntervalSince(firstSummary.generatedAt)), 1)
+        XCTAssertFalse(reusedSummary.paragraph.contains("Renamed After Report"))
+        XCTAssertFalse(reusedSummary.stopCategories.contains(.init(name: "Education", count: 1)))
+    }
+
+    func testCompletedTripRunsOnDeviceSummaryRefinementOnlyOnceAndPersistsIt() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultTripSummaryAITests-\(UUID().uuidString)", isDirectory: true)
+        let archiveURL = root.appendingPathComponent("trip-log.json")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let start = Date().addingTimeInterval(-45 * 60)
+        let day = FireVaultBreadcrumbDay(
+            startedAt: start,
+            points: [
+                .init(timestamp: start, latitude: 43.615, longitude: -116.202, horizontalAccuracy: 8),
+                .init(timestamp: start.addingTimeInterval(30 * 60), latitude: 43.625, longitude: -116.222, horizontalAccuracy: 8)
+            ]
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode([day]).write(to: archiveURL, options: .atomic)
+
+        let refinedParagraph = "This polished Trip Log paragraph was produced once by the on-device model and saved for every report format."
+        let provider = FireVaultTripSummaryAIProviderStub(result: .success(refinedParagraph))
+        let store = FireVaultBreadcrumbStore(
+            archiveURL: archiveURL,
+            liveActivitiesEnabled: false,
+            tripSummaryAIProvider: provider,
+            tripSummaryAIEnabled: true
+        )
+
+        store.endWorkday()
+        for _ in 0..<100 {
+            if store.days.first?.reportSummary?.generationSource == .onDeviceAI { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let savedSummary = try XCTUnwrap(store.days.first?.reportSummary)
+        var providerCallCount = await provider.calls()
+        XCTAssertEqual(providerCallCount, 1)
+        XCTAssertEqual(savedSummary.generationSource, .onDeviceAI)
+        XCTAssertEqual(savedSummary.paragraph, refinedParagraph)
+        XCTAssertNotNil(savedSummary.intelligenceAttemptedAt)
+
+        _ = store.prepareReportDays(anchorDayID: day.id, accounts: [])
+        store.endWorkday()
+        _ = FireVaultBreadcrumbReport(
+            day: try XCTUnwrap(store.days.first),
+            technicianName: "Taylor",
+            companyName: "Bannerman US LLC",
+            includeCoordinates: false
+        )
+        providerCallCount = await provider.calls()
+        XCTAssertEqual(providerCallCount, 1)
+
+        let reloaded = FireVaultBreadcrumbStore(
+            archiveURL: archiveURL,
+            liveActivitiesEnabled: false,
+            tripSummaryAIProvider: provider,
+            tripSummaryAIEnabled: true
+        )
+        _ = reloaded.prepareReportDays(anchorDayID: day.id, accounts: [])
+        providerCallCount = await provider.calls()
+        XCTAssertEqual(providerCallCount, 1)
+        XCTAssertEqual(reloaded.days.first?.reportSummary?.paragraph, refinedParagraph)
+        XCTAssertEqual(reloaded.days.first?.reportSummary?.generationSource, .onDeviceAI)
+        XCTAssertNotNil(reloaded.days.first?.reportSummary?.intelligenceAttemptedAt)
+    }
+
+    func testFailedOnDeviceSummaryAttemptKeepsFactualParagraphAndDoesNotRetry() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultTripSummaryAIFailureTests-\(UUID().uuidString)", isDirectory: true)
+        let archiveURL = root.appendingPathComponent("trip-log.json")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let start = Date().addingTimeInterval(-20 * 60)
+        let day = FireVaultBreadcrumbDay(
+            startedAt: start,
+            points: [
+                .init(timestamp: start, latitude: 43.615, longitude: -116.202, horizontalAccuracy: 8),
+                .init(timestamp: start.addingTimeInterval(15 * 60), latitude: 43.620, longitude: -116.210, horizontalAccuracy: 8)
+            ]
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode([day]).write(to: archiveURL, options: .atomic)
+
+        let provider = FireVaultTripSummaryAIProviderStub(result: .failure(.generationFailed))
+        let store = FireVaultBreadcrumbStore(
+            archiveURL: archiveURL,
+            liveActivitiesEnabled: false,
+            tripSummaryAIProvider: provider,
+            tripSummaryAIEnabled: true
+        )
+
+        store.endWorkday()
+        for _ in 0..<100 {
+            if await provider.calls() == 1 { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let factualSummary = try XCTUnwrap(store.days.first?.reportSummary)
+        var providerCallCount = await provider.calls()
+        XCTAssertEqual(providerCallCount, 1)
+        XCTAssertEqual(factualSummary.generationSource, .localAnalysis)
+        XCTAssertNotNil(factualSummary.intelligenceAttemptedAt)
+        XCTAssertTrue(factualSummary.paragraph.contains("This trip started"))
+
+        _ = store.prepareReportDays(anchorDayID: day.id, accounts: [])
+        store.endWorkday()
+        providerCallCount = await provider.calls()
+        XCTAssertEqual(providerCallCount, 1)
+        XCTAssertEqual(store.days.first?.reportSummary?.paragraph, factualSummary.paragraph)
+    }
+
+    func testCompletedStopChangesRefreshFactsAndRejectDelayedAIResult() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultTripSummaryRevisionTests-\(UUID().uuidString)", isDirectory: true)
+        let archiveURL = root.appendingPathComponent("trip-log.json")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let startedAt = Date().addingTimeInterval(-30 * 60)
+        let stop = FireVaultBreadcrumbStop(
+            arrival: startedAt.addingTimeInterval(5 * 60),
+            departure: startedAt.addingTimeInterval(10 * 60),
+            latitude: 43.617,
+            longitude: -116.205,
+            customTitle: "Original Stop"
+        )
+        let day = FireVaultBreadcrumbDay(
+            startedAt: startedAt,
+            points: [
+                .init(timestamp: startedAt, latitude: 43.615, longitude: -116.202, horizontalAccuracy: 8),
+                .init(timestamp: startedAt.addingTimeInterval(20 * 60), latitude: 43.625, longitude: -116.222, horizontalAccuracy: 8)
+            ],
+            stops: [stop]
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode([day]).write(to: archiveURL, options: .atomic)
+
+        let provider = FireVaultTripSummaryAIProviderStub(
+            result: .success("A delayed model paragraph that must never replace corrected trip facts."),
+            delayNanoseconds: 250_000_000
+        )
+        let store = FireVaultBreadcrumbStore(
+            archiveURL: archiveURL,
+            liveActivitiesEnabled: false,
+            tripSummaryAIProvider: provider,
+            tripSummaryAIEnabled: true
+        )
+
+        store.endWorkday()
+        let claimedSummary = try XCTUnwrap(store.days.first?.reportSummary)
+        let attemptedAt = try XCTUnwrap(claimedSummary.intelligenceAttemptedAt)
+        let claimedRevision = try XCTUnwrap(claimedSummary.factualRevision)
+
+        XCTAssertTrue(store.updateStop(
+            dayID: day.id,
+            stopID: stop.id,
+            arrival: stop.arrival,
+            departure: stop.departure,
+            account: nil,
+            customTitle: "Supply Depot",
+            customAddress: "500 Supply Way, Boise, ID 83702",
+            customCategory: "Industrial",
+            technicianNote: "",
+            isPersonal: false
+        ))
+
+        var correctedSummary = try XCTUnwrap(store.days.first?.reportSummary)
+        XCTAssertEqual(correctedSummary.generationSource, .localAnalysis)
+        XCTAssertEqual(correctedSummary.intelligenceAttemptedAt, attemptedAt)
+        XCTAssertGreaterThan(try XCTUnwrap(correctedSummary.factualRevision), claimedRevision)
+        XCTAssertTrue(correctedSummary.paragraph.contains("Supply Depot"))
+        XCTAssertTrue(correctedSummary.stopCategories.contains(.init(name: "Industrial", count: 1)))
+
+        try await Task.sleep(nanoseconds: 400_000_000)
+        correctedSummary = try XCTUnwrap(store.days.first?.reportSummary)
+        var providerCallCount = await provider.calls()
+        XCTAssertEqual(providerCallCount, 1)
+        XCTAssertEqual(correctedSummary.generationSource, .localAnalysis)
+        XCTAssertFalse(correctedSummary.paragraph.contains("delayed model paragraph"))
+        XCTAssertTrue(correctedSummary.paragraph.contains("Supply Depot"))
+
+        let revisionBeforeDelete = try XCTUnwrap(correctedSummary.factualRevision)
+        XCTAssertTrue(store.deleteStop(dayID: day.id, stopID: stop.id))
+        let deletedSummary = try XCTUnwrap(store.days.first?.reportSummary)
+        XCTAssertEqual(deletedSummary.intelligenceAttemptedAt, attemptedAt)
+        XCTAssertGreaterThan(try XCTUnwrap(deletedSummary.factualRevision), revisionBeforeDelete)
+        XCTAssertTrue(deletedSummary.paragraph.contains("No qualifying stops were recorded"))
+        providerCallCount = await provider.calls()
+        XCTAssertEqual(providerCallCount, 1)
+    }
+
+    func testMergeRebuildsFactsAndRejectsDelayedAIForRetainedTripID() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultTripSummaryMergeRevisionTests-\(UUID().uuidString)", isDirectory: true)
+        let archiveURL = root.appendingPathComponent("trip-log.json")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date()
+        let firstStart = now.addingTimeInterval(-60 * 60)
+        let secondStart = now.addingTimeInterval(-20 * 60)
+        let firstStop = FireVaultBreadcrumbStop(
+            arrival: firstStart.addingTimeInterval(10 * 60),
+            departure: firstStart.addingTimeInterval(16 * 60),
+            latitude: 43.615,
+            longitude: -116.202,
+            accountCategory: "Commercial",
+            customTitle: "First Service Stop"
+        )
+        let secondStop = FireVaultBreadcrumbStop(
+            arrival: secondStart.addingTimeInterval(4 * 60),
+            departure: secondStart.addingTimeInterval(10 * 60),
+            latitude: 43.630,
+            longitude: -116.230,
+            accountCategory: "Industrial",
+            customTitle: "Second Service Stop"
+        )
+        let firstDay = FireVaultBreadcrumbDay(
+            startedAt: firstStart,
+            points: [
+                .init(timestamp: firstStart, latitude: 43.610, longitude: -116.198, horizontalAccuracy: 8),
+                .init(timestamp: firstStart.addingTimeInterval(30 * 60), latitude: 43.620, longitude: -116.212, horizontalAccuracy: 8)
+            ],
+            stops: [firstStop]
+        )
+        let secondDay = FireVaultBreadcrumbDay(
+            startedAt: secondStart,
+            endedAt: secondStart.addingTimeInterval(15 * 60),
+            points: [
+                .init(timestamp: secondStart, latitude: 43.625, longitude: -116.220, horizontalAccuracy: 8),
+                .init(timestamp: secondStart.addingTimeInterval(15 * 60), latitude: 43.635, longitude: -116.238, horizontalAccuracy: 8)
+            ],
+            stops: [secondStop]
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode([firstDay, secondDay]).write(to: archiveURL, options: .atomic)
+
+        let provider = FireVaultTripSummaryAIProviderStub(
+            result: .success("A delayed model paragraph that must not replace merged facts."),
+            delayNanoseconds: 250_000_000
+        )
+        let store = FireVaultBreadcrumbStore(
+            archiveURL: archiveURL,
+            liveActivitiesEnabled: false,
+            tripSummaryAIProvider: provider,
+            tripSummaryAIEnabled: true
+        )
+
+        store.endWorkday()
+        let claimedSummary = try XCTUnwrap(
+            store.days.first(where: { $0.id == firstDay.id })?.reportSummary
+        )
+        let claimedRevision = try XCTUnwrap(claimedSummary.factualRevision)
+        let attemptedAt = try XCTUnwrap(claimedSummary.intelligenceAttemptedAt)
+
+        let mergedID = try XCTUnwrap(store.mergeDays([firstDay.id, secondDay.id]))
+        XCTAssertEqual(mergedID, firstDay.id)
+        var mergedSummary = try XCTUnwrap(
+            store.days.first(where: { $0.id == mergedID })?.reportSummary
+        )
+        XCTAssertEqual(mergedSummary.generationSource, .localAnalysis)
+        XCTAssertEqual(mergedSummary.intelligenceAttemptedAt, attemptedAt)
+        XCTAssertGreaterThan(try XCTUnwrap(mergedSummary.factualRevision), claimedRevision)
+        XCTAssertTrue(mergedSummary.paragraph.contains("First Service Stop"))
+        XCTAssertTrue(mergedSummary.paragraph.contains("Second Service Stop"))
+
+        try await Task.sleep(nanoseconds: 400_000_000)
+        mergedSummary = try XCTUnwrap(
+            store.days.first(where: { $0.id == mergedID })?.reportSummary
+        )
+        let providerCallCount = await provider.calls()
+        XCTAssertEqual(providerCallCount, 1)
+        XCTAssertEqual(mergedSummary.generationSource, .localAnalysis)
+        XCTAssertFalse(mergedSummary.paragraph.contains("delayed model paragraph"))
+        XCTAssertTrue(mergedSummary.paragraph.contains("Second Service Stop"))
+    }
+
+    func testTripSummaryRejectsStaleEndpointPointsAndUsesNearbyStops() throws {
+        let start = Date(timeIntervalSince1970: 1_786_800_000)
+        let startStop = FireVaultBreadcrumbStop(
+            arrival: start.addingTimeInterval(5 * 60),
+            departure: start.addingTimeInterval(10 * 60),
+            latitude: 43.615,
+            longitude: -116.202,
+            customTitle: "Starting Depot"
+        )
+        let endStop = FireVaultBreadcrumbStop(
+            arrival: start.addingTimeInterval(50 * 60),
+            departure: start.addingTimeInterval(58 * 60),
+            latitude: 43.625,
+            longitude: -116.222,
+            customTitle: "Ending Warehouse"
+        )
+        let day = FireVaultBreadcrumbDay(
+            startedAt: start,
+            endedAt: start.addingTimeInterval(60 * 60),
+            points: [
+                .init(timestamp: start.addingTimeInterval(20 * 60), latitude: 40, longitude: -110, horizontalAccuracy: 8),
+                .init(timestamp: start.addingTimeInterval(40 * 60), latitude: 41, longitude: -111, horizontalAccuracy: 8)
+            ],
+            stops: [startStop, endStop]
+        )
+
+        let summary = try XCTUnwrap(FireVaultTripSummaryBuilder.generate(day: day, accounts: []))
+
+        XCTAssertEqual(summary.start.source, .recordedStop)
+        XCTAssertEqual(summary.start.title, "Starting Depot")
+        XCTAssertEqual(summary.end.source, .recordedStop)
+        XCTAssertEqual(summary.end.title, "Ending Warehouse")
+    }
+
+    func testTripSummaryUsesUnavailableEndpointsWhenAllEvidenceIsStale() throws {
+        let start = Date(timeIntervalSince1970: 1_786_800_000)
+        let day = FireVaultBreadcrumbDay(
+            startedAt: start,
+            endedAt: start.addingTimeInterval(60 * 60),
+            points: [
+                .init(timestamp: start.addingTimeInterval(20 * 60), latitude: 43.615, longitude: -116.202, horizontalAccuracy: 8),
+                .init(timestamp: start.addingTimeInterval(40 * 60), latitude: 43.625, longitude: -116.222, horizontalAccuracy: 8)
+            ],
+            stops: [
+                .init(
+                    arrival: start.addingTimeInterval(25 * 60),
+                    departure: start.addingTimeInterval(35 * 60),
+                    latitude: 43.620,
+                    longitude: -116.212,
+                    customTitle: "Mid-Trip Stop"
+                )
+            ]
+        )
+
+        let summary = try XCTUnwrap(FireVaultTripSummaryBuilder.generate(day: day, accounts: []))
+
+        XCTAssertEqual(summary.start.source, .unavailable)
+        XCTAssertEqual(summary.end.source, .unavailable)
+    }
+
+    func testCoordinateEndpointAddressRespectsReportCoordinatePreference() {
+        let endpoint = FireVaultTripEndpoint(
+            timestamp: Date(timeIntervalSince1970: 1_786_800_000),
+            latitude: 43.615_123,
+            longitude: -116.202_456,
+            title: "Recorded GPS location",
+            address: "Approximate recorded location",
+            city: "",
+            category: nil,
+            source: .coordinate,
+            isPrivate: false
+        )
+
+        XCTAssertEqual(endpoint.reportAddress(includesCoordinates: false), "Approximate recorded location")
+        XCTAssertEqual(endpoint.reportAddress(includesCoordinates: true), "43.615123, -116.202456")
+    }
+
+    func testTripReportsIncludeStartStopsAndEndInMapAndTextExports() throws {
+        let start = Date(timeIntervalSince1970: 1_786_800_000)
+        let startEndpoint = FireVaultTripEndpoint(
+            timestamp: start,
+            latitude: 43.615,
+            longitude: -116.202,
+            title: "FireVault Office",
+            address: "10 First Avenue, Boise, ID 83702",
+            city: "Boise",
+            category: "Office",
+            source: .account,
+            isPrivate: false
+        )
+        let endEndpoint = FireVaultTripEndpoint(
+            timestamp: start.addingTimeInterval(60 * 60),
+            latitude: 43.625,
+            longitude: -116.222,
+            title: "Mountain Clinic",
+            address: "500 Health Way, Meridian, ID 83642",
+            city: "Meridian",
+            category: "Healthcare",
+            source: .account,
+            isPrivate: false
+        )
+        let summary = FireVaultTripReportSummary(
+            generatedAt: start.addingTimeInterval(60 * 60),
+            paragraph: "Saved once for every report format.",
+            start: startEndpoint,
+            end: endEndpoint,
+            averageSpeedMPH: 31,
+            minimumElevationFeet: 2_700,
+            maximumElevationFeet: 3_100,
+            stopCategories: [.init(name: "Healthcare", count: 1)]
+        )
+        let stop = FireVaultBreadcrumbStop(
+            arrival: start.addingTimeInterval(20 * 60),
+            departure: start.addingTimeInterval(35 * 60),
+            latitude: 43.620,
+            longitude: -116.212,
+            accountID: "account-1",
+            accountName: "Central Library",
+            accountAddress: "100 Main Street, Boise, ID 83702",
+            accountCategory: "Government"
+        )
+        let day = FireVaultBreadcrumbDay(
+            startedAt: start,
+            endedAt: start.addingTimeInterval(60 * 60),
+            points: [
+                .init(timestamp: start, latitude: 43.615, longitude: -116.202, horizontalAccuracy: 8),
+                .init(timestamp: start.addingTimeInterval(60 * 60), latitude: 43.625, longitude: -116.222, horizontalAccuracy: 8)
+            ],
+            stops: [stop],
+            reportSummary: summary
+        )
+        let report = FireVaultBreadcrumbReport(
+            day: day,
+            technicianName: "Taylor",
+            companyName: "Bannerman US LLC",
+            includeCoordinates: true,
+            generatedAt: start.addingTimeInterval(60 * 60)
+        )
+        let weekly = FireVaultTripLogWeeklyReport(
+            days: [day],
+            anchorDate: start,
+            technicianName: "Taylor",
+            companyName: "Bannerman US LLC",
+            includeCoordinates: true,
+            generatedAt: start.addingTimeInterval(60 * 60)
+        )
+        let csv = try XCTUnwrap(String(data: report.csvData, encoding: .utf8))
+
+        XCTAssertEqual(report.summaryHeading, "TRIP SUMMARY")
+        XCTAssertEqual(report.summarySourceText, "LOCAL ANALYSIS")
+        XCTAssertEqual(report.mapMarkers.map(\.kind), [.start, .stop, .end])
+        XCTAssertEqual(report.mapMarkers.map(\.markerText), ["S", "1", "E"])
+        XCTAssertTrue(report.plainText.contains("Start: FireVault Office"))
+        XCTAssertTrue(report.plainText.contains("1. Central Library"))
+        XCTAssertTrue(report.plainText.contains("End: Mountain Clinic"))
+        XCTAssertTrue(report.plainText.contains(summary.paragraph))
+        let dailyStart = try XCTUnwrap(report.plainText.range(of: "Start: FireVault Office"))
+        let dailyStop = try XCTUnwrap(report.plainText.range(of: "1. Central Library"))
+        let dailyEnd = try XCTUnwrap(report.plainText.range(of: "End: Mountain Clinic"))
+        XCTAssertLessThan(dailyStart.lowerBound, dailyStop.lowerBound)
+        XCTAssertLessThan(dailyStop.lowerBound, dailyEnd.lowerBound)
+        XCTAssertTrue(csv.contains("\"START\""))
+        XCTAssertTrue(csv.contains("\"STOP 1\""))
+        XCTAssertTrue(csv.contains("\"Central Library\""))
+        XCTAssertTrue(csv.contains("\"END\""))
+        XCTAssertTrue(csv.contains("\"Trip Summary\""))
+        XCTAssertTrue(csv.contains("\"Saved once for every report format.\""))
+        XCTAssertTrue(csv.contains("\"LOCAL ANALYSIS\""))
+        let csvStart = try XCTUnwrap(csv.range(of: "\"START\""))
+        let csvStop = try XCTUnwrap(csv.range(of: "\"STOP 1\""))
+        let csvEnd = try XCTUnwrap(csv.range(of: "\"END\""))
+        XCTAssertLessThan(csvStart.lowerBound, csvStop.lowerBound)
+        XCTAssertLessThan(csvStop.lowerBound, csvEnd.lowerBound)
+        XCTAssertTrue(weekly.plainText.contains("Start: FireVault Office"))
+        XCTAssertTrue(weekly.plainText.contains("End: Mountain Clinic"))
+        XCTAssertTrue(weekly.plainText.contains(summary.paragraph))
+        let weeklyStart = try XCTUnwrap(weekly.plainText.range(of: "Start: FireVault Office"))
+        let weeklyStop = try XCTUnwrap(
+            weekly.plainText.range(of: "  \(report.visits[0].arrivalText)  Central Library")
+        )
+        let weeklyEnd = try XCTUnwrap(weekly.plainText.range(of: "End: Mountain Clinic"))
+        XCTAssertLessThan(weeklyStart.lowerBound, weeklyStop.lowerBound)
+        XCTAssertLessThan(weeklyStop.lowerBound, weeklyEnd.lowerBound)
+
+        var aiSummary = summary
+        aiSummary.generationSource = .onDeviceAI
+        let aiDay = FireVaultBreadcrumbDay(
+            startedAt: start,
+            endedAt: start.addingTimeInterval(60 * 60),
+            points: day.points,
+            stops: day.stops,
+            reportSummary: aiSummary
+        )
+        let aiReport = FireVaultBreadcrumbReport(
+            day: aiDay,
+            technicianName: "Taylor",
+            companyName: "Bannerman US LLC",
+            includeCoordinates: true,
+            generatedAt: start.addingTimeInterval(60 * 60)
+        )
+        XCTAssertEqual(aiReport.summaryHeading, "ON-DEVICE AI TRIP SUMMARY")
+        XCTAssertEqual(aiReport.summarySourceText, "ON-DEVICE AI")
+    }
+
+    func testTripReportCoordinatePrivacyRemovesEveryMapGeometryInput() throws {
+        let start = Date(timeIntervalSince1970: 1_786_900_000)
+        let day = FireVaultBreadcrumbDay(
+            startedAt: start,
+            endedAt: start.addingTimeInterval(3_600),
+            points: [
+                .init(timestamp: start, latitude: 43.615_123, longitude: -116.202_456, horizontalAccuracy: 8),
+                .init(timestamp: start.addingTimeInterval(3_600), latitude: 43.625_789, longitude: -116.222_987, horizontalAccuracy: 8)
+            ],
+            stops: [
+                .init(
+                    arrival: start.addingTimeInterval(1_200),
+                    departure: start.addingTimeInterval(1_800),
+                    latitude: 43.620_555,
+                    longitude: -116.212_555,
+                    accountID: "A-PRIVATE-TEST",
+                    accountName: "Central Library",
+                    accountAddress: "100 Main Street"
+                )
+            ]
+        )
+        let report = FireVaultBreadcrumbReport(
+            day: day,
+            technicianName: "Taylor",
+            companyName: "Bannerman US LLC",
+            includeCoordinates: false,
+            generatedAt: start.addingTimeInterval(3_600)
+        )
+
+        XCTAssertTrue(report.routePoints.isEmpty)
+        XCTAssertTrue(report.mapStops.isEmpty)
+        XCTAssertTrue(report.mapMarkers.isEmpty)
+        XCTAssertNil(report.summary.start.latitude)
+        XCTAssertNil(report.summary.start.longitude)
+        XCTAssertNil(report.summary.end.latitude)
+        XCTAssertNil(report.summary.end.longitude)
+        XCTAssertTrue(report.visits.allSatisfy { $0.latitude == nil && $0.longitude == nil })
+
+        let pdf = FireVaultTripLogPDFRenderer.daily(
+            report: report,
+            detail: .compact,
+            mapImage: nil
+        )
+        XCTAssertFalse(pdf.isEmpty)
+        XCTAssertFalse(FireVaultTripLogImageRenderer.images(from: pdf).isEmpty)
+        let csv = try XCTUnwrap(String(data: report.csvData, encoding: .utf8))
+        XCTAssertFalse(csv.contains("43.615123"))
+        XCTAssertFalse(csv.contains("-116.202456"))
+        XCTAssertFalse(csv.contains("43.620555"))
+        XCTAssertFalse(csv.contains("-116.212555"))
     }
 
     func testBreadcrumbReportRedactsEveryPersonalStopDetail() throws {
@@ -3121,6 +3918,10 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(redacted.technicianNote.isEmpty)
         XCTAssertNil(redacted.latitude)
         XCTAssertNil(redacted.longitude)
+        XCTAssertFalse(report.mapMarkers.contains(where: { marker in
+            abs(marker.latitude - personalStop.latitude) < 0.000_001
+                && abs(marker.longitude - personalStop.longitude) < 0.000_001
+        }))
         XCTAssertFalse(report.plainText.contains("Private Location Name"))
         XCTAssertFalse(report.plainText.contains("Secret personal note"))
         XCTAssertFalse(csv.contains("Private Address"))

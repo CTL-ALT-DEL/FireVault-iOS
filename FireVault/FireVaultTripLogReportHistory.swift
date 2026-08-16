@@ -13,18 +13,14 @@ extension FireVaultBreadcrumbReportView {
         self.init(
             report: report,
             availableDays: FireVaultTripLogReportHistory.days(
-                containing: report.dayID,
-                fallback: report.sourceDay
+                containing: report.dayID
             )
         )
     }
 }
 
 private enum FireVaultTripLogReportHistory {
-    static func days(
-        containing selectedDayID: UUID,
-        fallback: FireVaultBreadcrumbDay
-    ) -> [FireVaultBreadcrumbDay] {
+    static func days(containing selectedDayID: UUID) -> [FireVaultBreadcrumbDay] {
         let fileManager = FileManager.default
         let root = fileManager.urls(
             for: .applicationSupportDirectory,
@@ -38,7 +34,7 @@ private enum FireVaultTripLogReportHistory {
                 includingPropertiesForKeys: nil,
                 options: [.skipsHiddenFiles]
               ) else {
-            return [fallback]
+            return []
         }
 
         let decoder = JSONDecoder()
@@ -61,6 +57,6 @@ private enum FireVaultTripLogReportHistory {
             return days.sorted { $0.startedAt > $1.startedAt }
         }
 
-        return [fallback]
+        return []
     }
 }

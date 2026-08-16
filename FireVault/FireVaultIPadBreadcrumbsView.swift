@@ -226,6 +226,12 @@ struct FireVaultIPadBreadcrumbsView: View {
 
     private var reportButton: some View {
         Button {
+            if let selectedDay {
+                breadcrumbs.prepareReportDays(
+                    anchorDayID: selectedDay.id,
+                    accounts: store.accounts
+                )
+            }
             showsReport = true
         } label: {
             VStack(spacing: 4) {
