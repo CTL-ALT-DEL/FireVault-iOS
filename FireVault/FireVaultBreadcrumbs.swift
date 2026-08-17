@@ -1682,12 +1682,15 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         }
 
         lastLocationReceivedAt = location.timestamp
+        // Any fresh, usable telemetry proves the receiver is delivering again.
+        // Keep the stricter navigation-quality timestamp below for route health,
+        // but do not hard-reset a receiver that is merely converging accuracy.
+        consecutiveLocationRecoveryCount = 0
         liveSpeedSnapshot = liveSpeedReducer.ingest(location, receivedAt: callbackAt)
         let navigationQualityAccepted = FireVaultBreadcrumbRules
             .hasNavigationQualityAccuracy(location)
         if navigationQualityAccepted {
             lastNavigationLocationReceivedAt = location.timestamp
-            consecutiveLocationRecoveryCount = 0
             if fromModernStream {
                 modernNavigationFixStreak += 1
             }
