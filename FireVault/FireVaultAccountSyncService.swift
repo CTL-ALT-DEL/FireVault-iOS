@@ -134,8 +134,8 @@ enum FireVaultAccountSyncService {
             try await SupabaseManager.client.storage
                 .from(bucket)
                 .upload(
-                    path: storagePath,
-                    file: data,
+                    storagePath,
+                    data: data,
                     options: FileOptions(contentType: "text/csv")
                 )
 
