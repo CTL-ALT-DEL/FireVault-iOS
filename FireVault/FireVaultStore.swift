@@ -918,6 +918,96 @@ final class FireVaultStore: ObservableObject {
         )
     }
 
+    func refreshAccountsFromCloud() async {
+        guard !demoMode else { return }
+        do {
+            let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
+            guard !demoMode else { return }
+            mergeCloudAccounts(cloudRows)
+        } catch {
+            // Offline-first: keep the last valid local vault when the network is unavailable.
+        }
+    }
+
+    func applyCSVImportAndSync(
+        _ analysis: FireVaultCSVAnalysis,
+        csvData: Data,
+        fileName: String
+    ) async -> FireVaultCSVImportResult {
+        let localResult = applyCSVImport(analysis)
+        guard !demoMode else { return localResult }
+
+        var messages = localResult.messages
+        do {
+            let cloudResult = try await FireVaultAccountSyncService.importCSV(
+                data: csvData,
+                fileName: fileName.isEmpty ? "accounts.csv" : fileName,
+                analysis: analysis,
+                localAccounts: accounts
+            )
+            let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
+            mergeCloudAccounts(cloudRows)
+            messages.insert(
+                "Synced \(cloudResult.importedRows) account\(cloudResult.importedRows == 1 ? "" : "s") to your FireVault account.",
+                at: 0
+            )
+        } catch {
+            messages.insert(
+                "Saved on this iPhone. Cloud sync could not finish: \(error.localizedDescription)",
+                at: 0
+            )
+        }
+
+        return .init(
+            added: localResult.added,
+            updated: localResult.updated,
+            skipped: localResult.skipped,
+            totalRows: localResult.totalRows,
+            messages: Array(messages.prefix(12))
+        )
+    }
+
+    private func mergeCloudAccounts(_ cloudRows: [FireVaultCloudAccountRow]) {
+        for row in cloudRows where !row.archived {
+            let cloud = row.workspaceAccount
+            let cloudAccountID = Self.canonicalAccountID(cloud.accountId)
+            let cloudIdentity = Self.csvIdentityKey(name: cloud.name, address: cloud.address)
+
+            let existingIndex = accounts.firstIndex {
+                $0.id.caseInsensitiveCompare(cloud.id) == .orderedSame
+            } ?? accounts.firstIndex {
+                !cloudAccountID.isEmpty && Self.canonicalAccountID($0.accountId) == cloudAccountID
+            } ?? accounts.firstIndex {
+                Self.csvIdentityKey(name: $0.name, address: $0.address) == cloudIdentity
+            }
+
+            guard let existingIndex else {
+                accounts.append(cloud)
+                continue
+            }
+
+            accounts[existingIndex].name = cloud.name
+            if cloud.address != "No address supplied" {
+                accounts[existingIndex].address = cloud.address
+            }
+            if !cloud.accountId.isEmpty {
+                accounts[existingIndex].accountId = cloud.accountId
+            }
+            if !cloud.phone.isEmpty {
+                accounts[existingIndex].phone = cloud.phone
+            }
+            if let latitude = cloud.latitude, let longitude = cloud.longitude {
+                accounts[existingIndex].latitude = latitude
+                accounts[existingIndex].longitude = longitude
+            }
+            if !accounts[existingIndex].tags.contains("Cloud Sync") {
+                accounts[existingIndex].tags.append("Cloud Sync")
+            }
+        }
+
+        persist()
+    }
+
     func applyCSVImport(_ analysis: FireVaultCSVAnalysis) -> FireVaultCSVImportResult {
         var added = 0
         var updated = 0
