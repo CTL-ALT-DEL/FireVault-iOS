@@ -2485,6 +2485,22 @@ struct NativeSettingsView: View {
                 }
             )) {
                 NavigationLink {
+                    FireVaultAccountSettingsView()
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Account & Sign-In")
+                            Text("View account or sign out")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "person.crop.circle.badge.checkmark")
+                            .foregroundStyle(NativeShellPalette.green)
+                    }
+                }
+
+                NavigationLink {
                     NativeTechnicianSettingsView(settings: settings)
                 } label: {
                     Label("Technician Profile", systemImage: "person.text.rectangle")
@@ -2786,6 +2802,7 @@ struct FireVaultIPadSettingsWorkspace: View {
                             symbol: "person.crop.circle.fill",
                             tint: NativeShellPalette.blue,
                             items: [
+                                ("account", "Account & Sign-In", "person.crop.circle.badge.checkmark"),
                                 ("tech", "Technician Profile", "person.text.rectangle"),
                                 ("settingsView", "Preferred Settings View", "rectangle.3.group"),
                                 ("appearance", "Appearance", "circle.lefthalf.filled")
@@ -2869,6 +2886,7 @@ struct FireVaultIPadSettingsWorkspace: View {
     @ViewBuilder
     private func destination(_ id: String) -> some View {
         switch id {
+        case "account": FireVaultAccountSettingsView()
         case "tech": NativeTechnicianSettingsView(settings: settings)
         case "settingsView": NativeSettingsViewPreferencesView(settings: settings)
         case "appearance": NativeAppearanceSettingsView(settings: settings)
