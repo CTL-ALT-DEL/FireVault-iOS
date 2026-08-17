@@ -1295,6 +1295,7 @@ struct NativeCSVImportView: View {
                     NativeCSVImportReviewView(
                         store: store,
                         data: importData,
+                        fileName: selectedFileName,
                         initialAnalysis: analysis
                     ) { importResult in
                         result = importResult
@@ -1383,6 +1384,7 @@ struct NativeCSVImportView: View {
 private struct NativeCSVImportReviewView: View {
     @ObservedObject var store: FireVaultStore
     let data: Data
+    let fileName: String
     let onImport: (FireVaultCSVImportResult) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -1396,11 +1398,13 @@ private struct NativeCSVImportReviewView: View {
     init(
         store: FireVaultStore,
         data: Data,
+        fileName: String,
         initialAnalysis: FireVaultCSVAnalysis,
         onImport: @escaping (FireVaultCSVImportResult) -> Void
     ) {
         self.store = store
         self.data = data
+        self.fileName = fileName
         self.onImport = onImport
         _analysis = State(initialValue: initialAnalysis)
         _mapping = State(initialValue: initialAnalysis.preview.mapping)
@@ -1492,7 +1496,7 @@ private struct NativeCSVImportReviewView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Importing Accounts")
                                 .font(.headline)
-                            Text("Updating the local vault and preserving existing field records…")
+                            Text("Saving on this iPhone and syncing to your FireVault account…")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -1518,7 +1522,11 @@ private struct NativeCSVImportReviewView: View {
                     isImporting = true
                     Task { @MainActor in
                         await Task.yield()
-                        let result = store.applyCSVImport(analysis)
+                        let result = await store.applyCSVImportAndSync(
+                            analysis,
+                            csvData: data,
+                            fileName: fileName
+                        )
                         UINotificationFeedbackGenerator().notificationOccurred(.success)
                         isImporting = false
                         onImport(result)
