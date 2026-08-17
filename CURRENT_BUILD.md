@@ -1,8 +1,8 @@
 # FireVault Current Build
 
-**Current development candidate: 1.08.57 (117)**
+**Current development candidate: 1.08.58 (118)**
 
-Build 1.08.57 (117) adds visible FireVault account status and sign-out controls
+Build 1.08.58 (118) adds visible FireVault account status and sign-out controls
 to Settings on iPhone and iPad. It must compile and pass the Xcode test suite
 before it replaces the latest tested build below.
 
