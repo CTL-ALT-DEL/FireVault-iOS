@@ -374,3 +374,70 @@ private struct FireVaultAuthenticationView: View {
         }
     }
 }
+
+struct FireVaultAccountSettingsView: View {
+    @EnvironmentObject private var authentication: FireVaultAuthentication
+    @State private var showsSignOutConfirmation = false
+
+    private var accountEmail: String {
+        let email = authentication.signedInEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        return email.isEmpty ? "Signed in" : email
+    }
+
+    var body: some View {
+        Form {
+            Section("FireVault Account") {
+                LabeledContent {
+                    Text(accountEmail)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                } label: {
+                    Label("Signed in as", systemImage: "person.crop.circle.fill")
+                }
+
+                Label {
+                    Text("This account securely connects your iPhone, CSV imports, and FireVault web portal.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } icon: {
+                    Image(systemName: "checkmark.shield.fill")
+                        .foregroundStyle(NativeShellPalette.green)
+                }
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    showsSignOutConfirmation = true
+                } label: {
+                    HStack {
+                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                        Spacer()
+                        if authentication.isWorking {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(authentication.isWorking)
+            } footer: {
+                Text("Signing out disconnects this device from your FireVault account. Local information remains on this device.")
+            }
+        }
+        .navigationTitle("Account & Sign-In")
+        .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Sign out of FireVault Pro?",
+            isPresented: $showsSignOutConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Sign Out", role: .destructive) {
+                Task {
+                    await authentication.signOut()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You will return to the Log In or Sign Up screen.")
+        }
+    }
+}
+
