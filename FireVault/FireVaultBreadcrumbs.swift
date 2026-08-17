@@ -421,6 +421,15 @@ enum FireVaultBreadcrumbRules {
     // than leaving every FireVault surface frozen for one or two minutes.
     static let maximumLocationSilenceBeforeRecovery: TimeInterval = 15
     static let minimumLocationRecoverySpacing: TimeInterval = 15
+    // A soft start call preserves a warm receiver, but it cannot recover every
+    // Core Location stall. Escalate after two unanswered attempts.
+    static let softLocationRecoveryAttemptsBeforeReset = 2
+
+    static func requiresHardLocationRecovery(
+        consecutiveRecoveryCount: Int
+    ) -> Bool {
+        consecutiveRecoveryCount >= softLocationRecoveryAttemptsBeforeReset
+    }
 
     static func isUsableLiveLocation(
         _ location: CLLocation,
@@ -1175,6 +1184,19 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         recoverLocationStream(force: true)
     }
 
+    /// Reassert the standard background-capable receiver before iOS suspends
+    /// the app. This is idempotent and keeps Trip Log independent from whether
+    /// the modern automotive sequence decides to enter a stationary state.
+    func prepareForBackgroundTracking() {
+        guard isRecording, sessionIsPrepared, activeDay?.isPaused == false else { return }
+        configureActiveLocationManager()
+        retainActiveLocationSessions()
+        manager.startMonitoringVisits()
+        startModernLocationUpdates()
+        startLegacyLocationFallback(reason: "background continuity")
+        startLocationWatchdog()
+    }
+
     init(
         archiveURL: URL? = nil,
         liveActivitiesEnabled: Bool? = nil
@@ -1690,8 +1712,10 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             if navigationQualityAccepted,
                modernNavigationFixStreak >= 3,
                !systemReportedStationary {
-                stopLegacyLocationFallback()
-                locationProviderText = "Automotive live"
+                // Keep the standard service alive for the entire workday. It
+                // is the only receiver guaranteed to retain background delivery
+                // if the modern automotive sequence silently stalls.
+                locationProviderText = "Automotive + continuity"
             }
         } else {
             locationProviderText = "Legacy GPS fallback"
@@ -1866,11 +1890,13 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
                 self.liveUpdateTask = nil
                 self.locationProviderDiagnostic = "Automotive stream ended unexpectedly"
                 self.startLegacyLocationFallback(reason: "automotive stream ended")
+                self.recoverLocationStream(force: true)
             } catch {
                 guard !Task.isCancelled, let self, self.isRecording else { return }
                 self.liveUpdateTask = nil
                 self.locationProviderDiagnostic = "Automotive stream error: \(error.localizedDescription)"
                 self.startLegacyLocationFallback(reason: "automotive stream error")
+                self.recoverLocationStream(force: true)
             }
         }
     }
@@ -1881,6 +1907,20 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         lastModernUpdateAt = nil
         modernNavigationFixStreak = 0
         startModernLocationUpdates()
+    }
+
+    private func hardRestartLocationReceiver(reason: String) {
+        configureActiveLocationManager()
+        retainActiveLocationSessions()
+        // A repeated start call is intentionally the first recovery tier. Once
+        // it has failed twice, perform a real stop/start so Core Location must
+        // rebuild the standard receiver instead of preserving a wedged state.
+        manager.stopUpdatingLocation()
+        legacyFallbackIsActive = false
+        systemReportedStationary = false
+        restartModernLocationUpdates()
+        startLegacyLocationFallback(reason: reason)
+        locationProviderDiagnostic = "Receiver rebuilt • \(reason)"
     }
 
     private func startLegacyLocationFallback(reason: String) {
@@ -1895,12 +1935,6 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         // stop the receiver during ordinary recovery because that discards its
         // warm GPS state and can lengthen reacquisition after a stop.
         manager.startUpdatingLocation()
-    }
-
-    private func stopLegacyLocationFallback() {
-        guard legacyFallbackIsActive else { return }
-        manager.stopUpdatingLocation()
-        legacyFallbackIsActive = false
     }
 
     private func record(_ location: CLLocation) {
@@ -2013,6 +2047,18 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         locationRecoveryCount += 1
         consecutiveLocationRecoveryCount += 1
         retainActiveLocationSessions()
+
+        if FireVaultBreadcrumbRules.requiresHardLocationRecovery(
+            consecutiveRecoveryCount: consecutiveLocationRecoveryCount
+        ) {
+            consecutiveLocationRecoveryCount = 0
+            hardRestartLocationReceiver(
+                reason: force ? "receiver interruption" : "repeated GPS silence"
+            )
+            statusText = "GPS receiver restarted • reacquiring position…"
+            return
+        }
+
         if telemetryIsSilent || force {
             statusText = "GPS signal delayed • continuity receiver active…"
             startLegacyLocationFallback(reason: force ? "receiver paused" : "live fixes delayed")
@@ -2034,8 +2080,15 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
         let now = Date()
         let lastUsableAge = lastNavigationLocationReceivedAt.map { now.timeIntervalSince($0) }
-        if lastUsableAge == nil
-            || lastUsableAge! >= FireVaultBreadcrumbRules.maximumLocationSilenceBeforeRecovery {
+        if let lastUsableAge,
+           lastUsableAge >= FireVaultBreadcrumbRules.maximumLocationSilenceBeforeRecovery * 2 {
+            lastLocationRecoveryAt = now
+            locationRecoveryCount += 1
+            consecutiveLocationRecoveryCount = 0
+            hardRestartLocationReceiver(reason: "restoring stale Trip Log")
+            statusText = "GPS receiver restarted • reacquiring position…"
+        } else if lastUsableAge == nil
+                    || lastUsableAge! >= FireVaultBreadcrumbRules.maximumLocationSilenceBeforeRecovery {
             startLegacyLocationFallback(reason: "restoring active Trip Log")
         }
     }
