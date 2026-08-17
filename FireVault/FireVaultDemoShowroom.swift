@@ -9,7 +9,7 @@ import Foundation
 
 @MainActor
 enum FireVaultDemoShowroom {
-    static let seedVersion = 3
+    static let seedVersion = 4
     static let accountCount = 30
     static let breadcrumbDayCount = 7
 
@@ -159,6 +159,13 @@ enum FireVaultDemoShowroom {
             makeNote(siteIndex: index, itemIndex: $0)
         }
         let documents = [
+            FireVaultWorkspaceDocument(
+                id: "demo-\(sequence)-photo-panel",
+                title: "Main panel field photo",
+                subtitle: "Sample account photo • DEMO",
+                kind: "photo",
+                date: "Jul 21"
+            ),
             FireVaultWorkspaceDocument(
                 id: "demo-\(sequence)-doc-riser",
                 title: "Fire alarm riser diagram",

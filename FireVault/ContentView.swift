@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import CoreLocation
 
 struct ContentView: View {
     @StateObject private var store = FireVaultStore()
@@ -149,8 +150,12 @@ struct ContentView: View {
             && !isLandscapeWindow
             && store.selectedAccount == nil
         let payload = store.appPayload(
-            userCoordinate: locationService.coordinate,
-            liveLocationStatus: locationService.statusText
+            userCoordinate: activeBreadcrumbs.isRecording
+                ? activeBreadcrumbs.latestLocation?.coordinate
+                : locationService.coordinate,
+            liveLocationStatus: activeBreadcrumbs.isRecording
+                ? activeBreadcrumbs.statusText
+                : locationService.statusText
         )
 
         return VStack(spacing: 0) {
@@ -172,6 +177,7 @@ struct ContentView: View {
                     FireVaultAdaptiveAccountDetailsView(
                         account: account,
                         store: store,
+                        settings: settings,
                         locationService: locationService,
                         returnTab: store.selectedTab,
                         returnTitle: store.selectedTab == .nearby ? "Nearby" : "Account List"
@@ -252,6 +258,7 @@ struct ContentView: View {
                 handlePendingWidgetDeepLink()
             }
         case .background:
+            activeBreadcrumbs.flushPendingRoutePersistence()
             privacyLock.enteredBackground()
         default:
             break

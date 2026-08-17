@@ -22,6 +22,8 @@ struct FireVaultTripLogPortraitView: View {
     @State private var editingStop: FireVaultTripLogPortraitStopSelection?
     @State private var confirmsEnd = false
     @State private var showsReport = false
+    @State private var showsHistory = false
+    @State private var showsHistoryReturn = false
     @State private var waypointPulse = false
     @State private var waypointPulseTask: Task<Void, Never>?
 
@@ -119,6 +121,16 @@ struct FireVaultTripLogPortraitView: View {
                 )
             }
         }
+        .sheet(isPresented: $showsHistory) {
+            FireVaultTripLogHistoryCalendarView(
+                breadcrumbs: breadcrumbs,
+                selectedDayID: selectedDayID
+            ) { dayID in
+                selectedDayID = dayID
+                showsHistory = false
+                showsHistoryReturn = true
+            }
+        }
     }
 
     private func flashWaypointLED() {
@@ -177,6 +189,8 @@ struct FireVaultTripLogPortraitView: View {
                                         .background(stopTint(stop), in: Circle())
                                         .overlay { Circle().stroke(.white.opacity(0.9), lineWidth: 2) }
                                         .shadow(radius: 4)
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Circle())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -188,6 +202,7 @@ struct FireVaultTripLogPortraitView: View {
                         }
                     }
                     .mapStyle(.standard(elevation: .realistic))
+                    .id(day.id)
                 }
             }
             .frame(width: width, height: height)
@@ -195,6 +210,24 @@ struct FireVaultTripLogPortraitView: View {
             .overlay(alignment: .topLeading) {
                 compactMapDate(day)
                     .padding(12)
+            }
+            .overlay(alignment: .topTrailing) {
+                if showsHistoryReturn {
+                    Button {
+                        showsHistory = true
+                    } label: {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(NativeShellPalette.blue)
+                            .frame(width: 42, height: 42)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay { Circle().stroke(.white.opacity(0.55), lineWidth: 1) }
+                            .shadow(color: .black.opacity(0.22), radius: 5, y: 3)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(12)
+                    .accessibilityLabel("Return to Trip Log History for this day")
+                }
             }
         }
         .accessibilityIdentifier("trip-log-portrait-static-map")
@@ -295,17 +328,9 @@ struct FireVaultTripLogPortraitView: View {
     }
 
     private var historyMenu: some View {
-        Menu {
-            ForEach(breadcrumbs.days) { day in
-                Button {
-                    selectedDayID = day.id
-                } label: {
-                    Label(
-                        day.startedAt.formatted(date: .abbreviated, time: .omitted),
-                        systemImage: day.isActive ? "record.circle" : "calendar"
-                    )
-                }
-            }
+        Button {
+            showsHistory = true
+            showsHistoryReturn = false
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: "calendar.badge.clock")
@@ -322,6 +347,12 @@ struct FireVaultTripLogPortraitView: View {
 
     private var reportButton: some View {
         Button {
+            if let selectedDay {
+                breadcrumbs.prepareReportDays(
+                    anchorDayID: selectedDay.id,
+                    accounts: store.accounts
+                )
+            }
             showsReport = true
         } label: {
             VStack(spacing: 3) {
@@ -345,9 +376,6 @@ struct FireVaultTripLogPortraitView: View {
                     selectedDayID = breadcrumbs.activeDay?.id
                 }
             } else if breadcrumbs.isRecording {
-                Button("Pause Recording", systemImage: "pause.fill") {
-                    breadcrumbs.pauseWorkday()
-                }
                 Button("Stop Trip Log", systemImage: "stop.fill", role: .destructive) {
                     confirmsEnd = true
                 }
@@ -569,7 +597,7 @@ struct FireVaultTripLogPortraitView: View {
                     Label("Trip Log Features", systemImage: "truck.box.fill")
                         .font(.headline)
                         .foregroundStyle(.primary)
-                    Label("Pause and resume route recording during the workday.", systemImage: "pause.circle")
+                    Label("Recording continues until you end the Trip Log.", systemImage: "location.fill")
                     Label("Review detected account stops and daily history.", systemImage: "calendar.badge.clock")
                     Label("Preview and export completed Trip Log reports.", systemImage: "doc.text")
                 }

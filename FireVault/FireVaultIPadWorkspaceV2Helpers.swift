@@ -60,7 +60,7 @@ struct FireVaultIPadPortraitWorkspace: View {
 
     private var portraitNavigation: some View {
         HStack(spacing: 0) {
-            ForEach(FireVaultShellTab.allCases) { tab in
+            ForEach(FireVaultShellTab.allCases.filter { $0.isVisible(in: settings) }) { tab in
                 let selected = tab == store.selectedTab
                 Button {
                     if tab == .nearby { store.requestNearbyReset() }

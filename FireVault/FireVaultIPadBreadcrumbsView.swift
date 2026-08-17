@@ -21,6 +21,7 @@ struct FireVaultIPadBreadcrumbsView: View {
     @State private var selectedStop: FireVaultIPadStopSelection?
     @State private var confirmsEnd = false
     @State private var showsReport = false
+    @State private var showsHistory = false
 
     private var selectedDay: FireVaultBreadcrumbDay? {
         if let selectedDayID {
@@ -118,6 +119,15 @@ struct FireVaultIPadBreadcrumbsView: View {
                 )
             }
         }
+        .sheet(isPresented: $showsHistory) {
+            FireVaultTripLogHistoryCalendarView(
+                breadcrumbs: breadcrumbs,
+                selectedDayID: selectedDayID
+            ) { dayID in
+                selectedDayID = dayID
+                showsHistory = false
+            }
+        }
         .accessibilityIdentifier("ipad-breadcrumbs-workspace")
     }
 
@@ -199,17 +209,8 @@ struct FireVaultIPadBreadcrumbsView: View {
     }
 
     private var historyMenu: some View {
-        Menu {
-            ForEach(breadcrumbs.days) { day in
-                Button {
-                    selectedDayID = day.id
-                } label: {
-                    Label(
-                        day.startedAt.formatted(date: .abbreviated, time: .omitted),
-                        systemImage: day.isActive ? "record.circle" : "calendar"
-                    )
-                }
-            }
+        Button {
+            showsHistory = true
         } label: {
             VStack(spacing: 4) {
                 Image(systemName: "calendar.badge.clock")
@@ -225,6 +226,12 @@ struct FireVaultIPadBreadcrumbsView: View {
 
     private var reportButton: some View {
         Button {
+            if let selectedDay {
+                breadcrumbs.prepareReportDays(
+                    anchorDayID: selectedDay.id,
+                    accounts: store.accounts
+                )
+            }
             showsReport = true
         } label: {
             VStack(spacing: 4) {
@@ -247,9 +254,6 @@ struct FireVaultIPadBreadcrumbsView: View {
                     selectedDayID = breadcrumbs.activeDay?.id
                 }
             } else if breadcrumbs.isRecording {
-                Button("Pause Recording", systemImage: "pause.fill") {
-                    breadcrumbs.pauseWorkday()
-                }
                 Button("Stop Trip Log", systemImage: "stop.fill", role: .destructive) {
                     confirmsEnd = true
                 }
@@ -317,6 +321,8 @@ struct FireVaultIPadBreadcrumbsView: View {
                                     Circle().stroke(.white.opacity(0.9), lineWidth: 2)
                                 }
                                 .shadow(radius: 5)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -328,6 +334,7 @@ struct FireVaultIPadBreadcrumbsView: View {
                 }
             }
             .mapStyle(.hybrid(elevation: .realistic))
+            .id(day.id)
             .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
             .shadow(
                 color: colorScheme == .light ? .black.opacity(0.22) : .clear,

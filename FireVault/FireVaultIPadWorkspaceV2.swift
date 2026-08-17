@@ -81,7 +81,7 @@ struct FireVaultIPadWorkspaceV2: View {
                     .foregroundStyle(.secondary)
                     .padding(.leading, 10)
 
-                ForEach(FireVaultShellTab.allCases) { tab in
+                ForEach(FireVaultShellTab.allCases.filter { $0.isVisible(in: settings) }) { tab in
                     sidebarButton(tab)
                 }
             }
@@ -195,6 +195,7 @@ struct FireVaultIPadWorkspaceV2: View {
                 FireVaultAdaptiveAccountDetailsView(
                     account: account,
                     store: store,
+                    settings: settings,
                     locationService: locationService,
                     returnTab: .nearby,
                     returnTitle: "Nearby"
@@ -214,6 +215,7 @@ struct FireVaultIPadWorkspaceV2: View {
                 FireVaultAdaptiveAccountDetailsView(
                     account: account,
                     store: store,
+                    settings: settings,
                     locationService: locationService,
                     returnTab: .accounts,
                     returnTitle: "Account List"
@@ -410,11 +412,6 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                 }
                 .buttonStyle(.borderedProminent)
             } else if breadcrumbs.isRecording {
-                Button("Pause", systemImage: "pause.fill") {
-                    breadcrumbs.pauseWorkday()
-                    closeTripLogControls()
-                }
-                .buttonStyle(.bordered)
                 Button("Stop", systemImage: "stop.fill", role: .destructive) {
                     confirmsTripLogEnd = true
                 }
@@ -614,6 +611,8 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                                         )
                                         .overlay { Circle().stroke(.white.opacity(0.88), lineWidth: 2) }
                                         .shadow(radius: 5)
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Circle())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -699,7 +698,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(row.account.name)
                             .font(.subheadline.bold())
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .lineLimit(2)
 
                         Text(row.account.address)

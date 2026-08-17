@@ -228,11 +228,13 @@ struct FireVaultGPSPreferences: Codable, Equatable {
     var addressAssistanceEnabled = true
     var hapticsEnabled: Bool? = true
     var defaultMapLayer: String?
+    var defaultMapIs3D: Bool?
     var tripLogMinimumUnknownStopMinutes: Int?
     var tripLogRejectPoorAccuracyStops: Bool?
     var tripLogMergeNearbyStops: Bool?
     var hapticsAreEnabled: Bool { hapticsEnabled ?? true }
     var resolvedDefaultMapLayer: String { defaultMapLayer ?? "standard" }
+    var opensMapsIn3D: Bool { defaultMapIs3D ?? false }
     var resolvedTripLogMinimumUnknownStopMinutes: Int {
         tripLogMinimumUnknownStopMinutes ?? 5
     }
@@ -279,7 +281,6 @@ struct FireVaultNotificationPreferences: Codable, Equatable {
     var liveActivitiesAreEnabled: Bool { liveActivitiesEnabled ?? true }
     var showsLiveActivityMetrics: Bool { liveActivityMetricsVisible ?? true }
     var recordingReminderEnabled: Bool { tripLogStillRecording ?? true }
-    var pausedReminderEnabled: Bool { tripLogPaused ?? true }
     var hidesSensitiveDetails: Bool { hideSensitiveDetails ?? true }
     var usesQuietHours: Bool { quietHoursEnabled ?? true }
     var resolvedQuietStart: Int { min(23, max(0, quietHoursStart ?? 20)) }
@@ -422,9 +423,9 @@ enum FireVaultDeveloperFeatureCatalog {
         .init(id: "account.brief", page: "Account Detail", title: "Generate Account Brief"),
         .init(id: "account.map", page: "Account Detail", title: "Arrival Map"),
         .init(id: "account.notes", page: "Account Detail", title: "Notes"),
-        .init(id: "account.files", page: "Account Detail", title: "Files & Scans"),
+        .init(id: "account.files", page: "Account Detail", title: "Photos & Documents"),
         .init(id: "account.equipment", page: "Account Detail", title: "Equipment"),
-        .init(id: "account.locations", page: "Account Detail", title: "Locations"),
+        .init(id: "account.locations", page: "Account Detail", title: "Saved Arrival Points"),
         .init(id: "account.action.scan", page: "Account Detail", title: "Scan Action"),
         .init(id: "account.action.note", page: "Account Detail", title: "Note Action"),
         .init(id: "account.action.camera", page: "Account Detail", title: "Camera Action"),

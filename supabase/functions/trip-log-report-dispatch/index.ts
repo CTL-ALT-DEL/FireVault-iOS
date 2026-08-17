@@ -35,7 +35,13 @@ type TripDay = {
     id: string;
     startedAt: string;
     endedAt?: string;
-    points?: Array<{ latitude: number; longitude: number; timestamp: string }>;
+    points?: Array<{
+      latitude: number;
+      longitude: number;
+      timestamp: string;
+      altitude?: number;
+      speedMetersPerSecond?: number;
+    }>;
     stops?: Array<{
       id: string;
       arrival: string;
@@ -44,10 +50,30 @@ type TripDay = {
       longitude: number;
       accountName?: string;
       accountAddress?: string;
+      accountCategory?: string;
+      customTitle?: string;
       technicianNote?: string;
       isPersonal?: boolean;
     }>;
+    reportEndpoints?: {
+      schemaVersion: number;
+      resolvedAt: string;
+      start: TripEndpoint;
+      end: TripEndpoint;
+    };
   };
+};
+
+type TripEndpoint = {
+  timestamp: string;
+  latitude?: number;
+  longitude?: number;
+  title: string;
+  address: string;
+  city: string;
+  category?: string;
+  source: string;
+  isPrivate: boolean;
 };
 
 const supabaseURL = requireEnv("SUPABASE_URL");
@@ -279,11 +305,11 @@ async function buildPDF(
   let page = document.addPage([612, 792]);
   let y = drawHeader(page, bold, regular, kind, preference, periodStart);
   y = drawSummary(page, bold, regular, days, y);
-  y = drawRoute(page, days, y);
+  y = drawRoute(page, days, y, preference.include_coordinates);
 
   for (const day of days) {
     const stops = day.payload.stops ?? [];
-    if (y < 145) {
+    if (y < 230) {
       page = document.addPage([612, 792]);
       y = drawContinuationHeader(page, bold, regular, kind, periodStart);
     }
@@ -291,16 +317,36 @@ async function buildPDF(
       x: 42, y, size: 12, font: bold, color: navy,
     });
     y -= 20;
+    const startEndpoint = endpointFor(day, "start", preference.include_coordinates);
+    const endEndpoint = endpointFor(day, "end", preference.include_coordinates);
+    y = drawEndpointRow(
+      page,
+      bold,
+      regular,
+      "START",
+      startEndpoint,
+      y,
+      rgb(0.16, 0.58, 0.31),
+      preference.time_zone,
+    );
     for (const [index, stop] of stops.entries()) {
       if (y < 72) {
         page = document.addPage([612, 792]);
         y = drawContinuationHeader(page, bold, regular, kind, periodStart);
       }
-      const title = stop.isPersonal ? "Personal Stop" : stop.accountName ?? "Unrecognized Stop";
-      const detail = stop.isPersonal ? "Private details redacted" : stop.accountAddress ?? "";
+      const title = stop.isPersonal ? "Personal Stop" : stop.accountName ?? stop.customTitle ?? "Unrecognized Stop";
+      const detail = stop.isPersonal
+        ? "Private details redacted"
+        : [stop.accountCategory, stop.accountAddress].filter(Boolean).join(" • ");
       const duration = durationText(stop.arrival, stop.departure);
       page.drawText(`${index + 1}`, { x: 42, y, size: 9, font: bold, color: blue });
-      page.drawText(formatTime(stop.arrival, preference.time_zone), { x: 64, y, size: 9, font: regular, color: navy });
+      page.drawText(stopTimeRange(stop, preference.time_zone), {
+        x: 64,
+        y,
+        size: 6.6,
+        font: regular,
+        color: navy,
+      });
       page.drawText(fit(title, 52), { x: 124, y, size: 9, font: bold, color: navy });
       page.drawText(duration, { x: 515, y, size: 9, font: regular, color: navy });
       y -= 13;
@@ -320,6 +366,21 @@ async function buildPDF(
       page.drawText("No logged stops for this workday.", { x: 64, y, size: 9, font: regular, color: gray });
       y -= 24;
     }
+    if (y < 92) {
+      page = document.addPage([612, 792]);
+      y = drawContinuationHeader(page, bold, regular, kind, periodStart);
+    }
+    y = drawEndpointRow(
+      page,
+      bold,
+      regular,
+      "END",
+      endEndpoint,
+      y,
+      red,
+      preference.time_zone,
+    );
+    y -= 10;
   }
   return document.save();
 }
@@ -363,14 +424,16 @@ function drawContinuationHeader(
 
 function drawSummary(page: PDFPage, bold: PDFFont, regular: PDFFont, days: TripDay[], y: number): number {
   const stops = days.flatMap((day) => day.payload.stops ?? []);
-  const points = days.flatMap((day) => day.payload.points ?? []);
-  const distance = routeDistance(points);
+  const distance = days.reduce(
+    (total, day) => total + routeDistance(day.payload.points ?? []),
+    0,
+  );
   const elapsed = days.reduce((sum, day) => sum + Math.max(0, Date.parse(day.ended_at) - Date.parse(day.started_at)), 0);
   const values = [
     ["DISTANCE", `${distance.toFixed(1)} mi`],
     ["TIME", compactDuration(elapsed)],
     ["STOPS", String(stops.length)],
-    ["WORKDAYS", String(days.length)],
+    ["TRIPS", String(days.length)],
   ];
   page.drawRectangle({ x: 42, y: y - 56, width: 528, height: 56, color: paleBlue });
   values.forEach(([label, value], index) => {
@@ -381,14 +444,28 @@ function drawSummary(page: PDFPage, bold: PDFFont, regular: PDFFont, days: TripD
   return y - 76;
 }
 
-function drawRoute(page: PDFPage, days: TripDay[], y: number): number {
-  const points = days.flatMap((day) => day.payload.points ?? []);
+function drawRoute(
+  page: PDFPage,
+  days: TripDay[],
+  y: number,
+  includeCoordinates: boolean,
+): number {
+  const points = includeCoordinates
+    ? days.flatMap((day) => day.payload.points ?? [])
+    : [];
+  const visibleMarkers = days.flatMap((day) => {
+    if (!includeCoordinates) return [];
+    const endpoints = [endpointFor(day, "start", true), endpointFor(day, "end", true)];
+    const stops = (day.payload.stops ?? []).filter((stop) => !stop.isPersonal);
+    return [...endpoints, ...stops].filter(hasVisibleCoordinate);
+  });
+  const plottedLocations = [...points, ...visibleMarkers];
   page.drawText("ROUTE OVERVIEW", { x: 42, y, size: 9, color: navy });
   const box = { x: 42, y: y - 150, width: 528, height: 136 };
   page.drawRectangle({ ...box, color: rgb(0.96, 0.97, 0.98), borderColor: line, borderWidth: 1 });
-  if (points.length > 1) {
-    const latitudes = points.map((p) => p.latitude);
-    const longitudes = points.map((p) => p.longitude);
+  if (plottedLocations.length) {
+    const latitudes = plottedLocations.map((p) => p.latitude);
+    const longitudes = plottedLocations.map((p) => p.longitude);
     const minLat = Math.min(...latitudes), maxLat = Math.max(...latitudes);
     const minLon = Math.min(...longitudes), maxLon = Math.max(...longitudes);
     const latSpan = Math.max(0.0001, maxLat - minLat);
@@ -397,13 +474,153 @@ function drawRoute(page: PDFPage, days: TripDay[], y: number): number {
       x: box.x + 12 + ((point.longitude - minLon) / lonSpan) * (box.width - 24),
       y: box.y + 12 + ((point.latitude - minLat) / latSpan) * (box.height - 24),
     });
-    for (let index = 1; index < points.length; index++) {
-      page.drawLine({ start: xy(points[index - 1]), end: xy(points[index]), thickness: 2.5, color: blue });
+    for (const day of days) {
+      const dayPoints = day.payload.points ?? [];
+      for (let index = 1; index < dayPoints.length; index++) {
+        page.drawLine({
+          start: xy(dayPoints[index - 1]),
+          end: xy(dayPoints[index]),
+          thickness: 2.5,
+          color: blue,
+        });
+      }
+    }
+    let stopSequence = 0;
+    for (const day of days) {
+      const start = endpointFor(day, "start");
+      const end = endpointFor(day, "end");
+      drawRouteMarker(page, bold, xy, start, "S", rgb(0.16, 0.58, 0.31));
+      for (const stop of day.payload.stops ?? []) {
+        if (stop.isPersonal) continue;
+        stopSequence += 1;
+        drawRouteMarker(page, bold, xy, stop, String(stopSequence), blue);
+      }
+      drawRouteMarker(page, bold, xy, end, "E", red);
     }
   } else {
-    page.drawText("No route geometry recorded.", { x: 210, y: box.y + 62, size: 10, color: gray });
+    const message = includeCoordinates
+      ? "No route geometry recorded."
+      : "Route geometry hidden by report privacy settings.";
+    page.drawText(message, { x: includeCoordinates ? 210 : 174, y: box.y + 62, size: 10, color: gray });
   }
   return y - 170;
+}
+
+function endpointFor(
+  day: TripDay,
+  role: "start" | "end",
+  includeCoordinates = true,
+): TripEndpoint {
+  const saved = day.payload.reportEndpoints?.[role];
+  if (saved) {
+    return saved.source === "coordinate" && !includeCoordinates
+      ? { ...saved, address: "Approximate recorded location" }
+      : saved;
+  }
+  const points = day.payload.points ?? [];
+  const point = role === "start" ? points[0] : points[points.length - 1];
+  const timestamp = role === "start" ? day.started_at : day.ended_at;
+  if (!point) {
+    const stops = day.payload.stops ?? [];
+    const nearbyStop = role === "start" ? stops[0] : stops[stops.length - 1];
+    if (nearbyStop) {
+      const isPrivate = nearbyStop.isPersonal ?? false;
+      return {
+        timestamp: role === "start" ? nearbyStop.arrival : nearbyStop.departure ?? timestamp,
+        latitude: isPrivate ? undefined : nearbyStop.latitude,
+        longitude: isPrivate ? undefined : nearbyStop.longitude,
+        title: isPrivate
+          ? "Personal location"
+          : nearbyStop.accountName ?? nearbyStop.customTitle ?? "Recorded stop",
+        address: isPrivate ? "Private details redacted" : nearbyStop.accountAddress ?? "Approximate endpoint",
+        city: "",
+        category: nearbyStop.accountCategory,
+        source: "recordedStop",
+        isPrivate,
+      };
+    }
+    return {
+      timestamp,
+      title: "Location unavailable",
+      address: "No reliable GPS endpoint was recorded",
+      city: "",
+      source: "unavailable",
+      isPrivate: false,
+    };
+  }
+  return {
+    timestamp: point.timestamp ?? timestamp,
+    latitude: point.latitude,
+    longitude: point.longitude,
+    title: "Recorded GPS location",
+    address: includeCoordinates
+      ? `Approx. ${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}`
+      : "Approximate recorded location",
+    city: "",
+    source: "coordinate",
+    isPrivate: false,
+  };
+}
+
+function drawEndpointRow(
+  page: PDFPage,
+  bold: PDFFont,
+  regular: PDFFont,
+  label: "START" | "END",
+  endpoint: TripEndpoint,
+  y: number,
+  color: ReturnType<typeof rgb>,
+  timeZone: string,
+): number {
+  page.drawRectangle({ x: 42, y: y - 29, width: 528, height: 29, color: paleBlue });
+  page.drawRectangle({ x: 49, y: y - 22, width: 42, height: 15, color });
+  page.drawText(label, { x: 56, y: y - 18, size: 6.5, font: bold, color: rgb(1, 1, 1) });
+  const endpointTime = isValidDate(endpoint.timestamp) ? formatTime(endpoint.timestamp, timeZone) : "Time unavailable";
+  page.drawText(fit(`${endpointTime} • ${endpoint.title || "Location unavailable"}`, 58), {
+    x: 101,
+    y: y - 13,
+    size: 8.5,
+    font: bold,
+    color: navy,
+  });
+  page.drawText(fit(endpoint.address || "Approximate location", 78), {
+    x: 101,
+    y: y - 24,
+    size: 7.3,
+    font: regular,
+    color: gray,
+  });
+  return y - 35;
+}
+
+function drawRouteMarker(
+  page: PDFPage,
+  bold: PDFFont,
+  xy: (point: { latitude: number; longitude: number }) => { x: number; y: number },
+  point: { latitude?: number; longitude?: number; isPrivate?: boolean },
+  label: string,
+  color: ReturnType<typeof rgb>,
+) {
+  if (point.isPrivate || point.latitude === undefined || point.longitude === undefined) return;
+  const marker = xy({ latitude: point.latitude, longitude: point.longitude });
+  page.drawCircle({ x: marker.x, y: marker.y, size: 7, color, borderColor: rgb(1, 1, 1), borderWidth: 1 });
+  page.drawText(label, {
+    x: marker.x - (label.length > 1 ? 4 : 2.3),
+    y: marker.y - 2.6,
+    size: label.length > 1 ? 5 : 6.5,
+    font: bold,
+    color: rgb(1, 1, 1),
+  });
+}
+
+function hasVisibleCoordinate<T extends {
+  latitude?: number;
+  longitude?: number;
+  isPrivate?: boolean;
+}>(point: T): point is T & { latitude: number; longitude: number } {
+  return point.isPrivate !== true &&
+    typeof point.latitude === "number" && Number.isFinite(point.latitude) &&
+    typeof point.longitude === "number" && Number.isFinite(point.longitude);
 }
 
 function emailHTML(kind: ReportKind, preference: Preference, days: TripDay[], periodStart: string): string {
@@ -437,6 +654,14 @@ function durationText(start: string, end?: string): string {
   if (!end) return "Open";
   return compactDuration(Math.max(0, Date.parse(end) - Date.parse(start)));
 }
+function stopTimeRange(
+  stop: { arrival: string; departure?: string },
+  timeZone: string,
+): string {
+  const arrival = formatTime(stop.arrival, timeZone).replace(" ", "");
+  if (!stop.departure) return `${arrival}–Open`;
+  return `${arrival}–${formatTime(stop.departure, timeZone).replace(" ", "")}`;
+}
 function compactDuration(milliseconds: number): string {
   const minutes = Math.round(milliseconds / 60000);
   return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
@@ -446,6 +671,9 @@ function formatDate(value: string, timeZone: string): string {
 }
 function formatTime(value: string, timeZone: string): string {
   return new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).format(new Date(value));
+}
+function isValidDate(value: string): boolean {
+  return Number.isFinite(Date.parse(value));
 }
 function fit(value: string, length: number): string {
   return value.length <= length ? value : `${value.slice(0, length - 1)}…`;

@@ -158,7 +158,7 @@ final class FireVaultAIService: FireVaultAIProviding {
             "Tags: \(account.tags.isEmpty ? "None" : account.tags.joined(separator: ", "))",
             "Notes:\n\(notes.isEmpty ? "- None" : notes.joined(separator: "\n"))",
             "Equipment:\n\(equipment.isEmpty ? "- None" : equipment.joined(separator: "\n"))",
-            "Files and scans:\n\(documents.isEmpty ? "- None" : documents.joined(separator: "\n"))",
+            "Photos and documents:\n\(documents.isEmpty ? "- None" : documents.joined(separator: "\n"))",
             "Recent activity:\n\(recent.isEmpty ? "- None" : recent.joined(separator: "\n"))"
         ]
 

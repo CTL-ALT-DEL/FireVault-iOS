@@ -1362,14 +1362,14 @@ struct NativeManualView: View {
             }
 
             Section("Accounts & Arrival Maps") {
-                manualItem("Account workspace", "Keep service notes, files and scans, equipment records, and arrival locations together.", "building.2")
+                manualItem("Account workspace", "Keep service notes, photos and documents, equipment records, and arrival locations together.", "building.2")
                 manualItem("Arrival Map", "Review parking and entrance points, edit saved locations, or start walking directions to a selected point.", "figure.walk")
                 manualItem("Category rules", "Create IF/THEN rules, run them immediately, and automatically apply category labels to matching accounts.", "tag.fill")
                 manualItem("CSV import", "Import account records, review the results, and map usable addresses before adding them to the vault.", "tablecells")
             }
 
             Section("Trip Log & Reports") {
-                manualItem("Record", "Start at the beginning of the workday. Pause when tracking should stop temporarily and finish the session when the day is complete.", "record.circle")
+                manualItem("Record", "Start at the beginning of the workday and end the Trip Log when the route is complete. Recording continues between stops so accidental gaps do not split the day.", "record.circle")
                 manualItem("Live details", "Choose Speed, Trip, Direction, Elevation, or GPS. Auto Rotate can cycle through any selected combination.", "gauge.with.dots.needle.50percent")
                 manualItem("History", "Open a saved day to review route geometry, account visits, detected stops, and recorded times.", "clock.arrow.circlepath")
                 manualItem("Reports", "Export clean daily or weekly PDFs with route maps, stop summaries, mileage, elapsed time, and elevation information.", "doc.richtext")

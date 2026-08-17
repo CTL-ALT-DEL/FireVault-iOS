@@ -172,6 +172,7 @@ struct FireVaultWorkspaceRecent: Codable, Identifiable, Equatable {
     var subtitle: String
     var kind: String
     var date: String
+    var sourceID: String? = nil
 }
 
 private extension FireVaultWorkspaceLocation {
@@ -199,6 +200,10 @@ struct FieldWorkspaceView: View {
         account.coordinate ?? account.locations.compactMap(\.coordinate).first
     }
 
+    private var returnTitle: String {
+        store.selectedTab == .nearby ? "Nearby" : "Accounts"
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -206,7 +211,8 @@ struct FieldWorkspaceView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         identity
-                        if settings.isFeatureVisible("account.map") {
+                        if settings.isFeatureVisible("account.map")
+                            || settings.isFeatureVisible("account.locations") {
                             mapPreview
                         }
                         destinations
@@ -226,11 +232,11 @@ struct FieldWorkspaceView: View {
                     Button {
                         store.closeAccount()
                     } label: {
-                        Label("Accounts", systemImage: "chevron.left")
+                        Label(returnTitle, systemImage: "chevron.left")
                     }
                     .buttonStyle(.glass)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
                         store.toggleFavorite(account.id)
                     } label: {
@@ -239,6 +245,14 @@ struct FieldWorkspaceView: View {
                     }
                     .buttonStyle(.glass)
                     .accessibilityLabel(account.favorite ? "Remove Favorite" : "Add Favorite")
+
+                    Button {
+                        isShowingAccountEditor = true
+                    } label: {
+                        Image(systemName: "pencil")
+                    }
+                    .buttonStyle(.glass)
+                    .accessibilityLabel("Edit account")
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -340,19 +354,13 @@ struct FieldWorkspaceView: View {
             ) {
                 store.openRoute(for: account)
             }
+            WorkspaceCaptureMenu(accountID: account.id, store: store)
             WorkspaceQuickAction(
                 title: "Note",
                 symbol: "square.and.pencil",
                 tint: FieldWorkspacePalette.amber
             ) {
                 isShowingNoteEditor = true
-            }
-            WorkspaceQuickAction(
-                title: "Edit",
-                symbol: "pencil",
-                tint: FieldWorkspacePalette.purple
-            ) {
-                isShowingAccountEditor = true
             }
         }
     }
@@ -394,7 +402,7 @@ struct FieldWorkspaceView: View {
                                 .foregroundStyle(FieldWorkspacePalette.blue)
                             Text(account.locations.isEmpty ? "Account location" : "\(account.locations.count) precise locations")
                                 .font(.headline)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                         }
                         Spacer()
                         Image(systemName: "chevron.right")
@@ -411,9 +419,16 @@ struct FieldWorkspaceView: View {
 
     private var destinations: some View {
         VStack(alignment: .leading, spacing: 9) {
-            WorkspaceSectionTitle(title: "FIELD WORKSPACE", subtitle: "Everything for this location")
+            WorkspaceSectionTitle(title: "ACCOUNT CONTENT", subtitle: "Saved field information")
+            NavigationLink {
+                FireVaultAccountMediaLibraryView(accountID: account.id, store: store)
+            } label: {
+                WorkspaceMediaDestinationCard(account: account, store: store)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("account-media-tile")
+
             LazyVGrid(columns: columns, spacing: 9) {
-                if settings.isFeatureVisible("account.notes") {
                     NavigationLink {
                         NotesWorkspaceView(account: account, store: store)
                     } label: {
@@ -422,20 +437,7 @@ struct FieldWorkspaceView: View {
                             symbol: "note.text", color: FieldWorkspacePalette.amber
                         )
                     }
-                }
 
-                if settings.isFeatureVisible("account.files") {
-                    NavigationLink {
-                        FilesScansView(account: account, store: store)
-                    } label: {
-                        WorkspaceDestinationTile(
-                            title: "Files & Scans", count: account.documents.count,
-                            symbol: "doc.viewfinder", color: FieldWorkspacePalette.blue
-                        )
-                    }
-                }
-
-                if settings.isFeatureVisible("account.equipment") {
                     NavigationLink {
                         EquipmentWorkspaceView(
                             account: account,
@@ -448,18 +450,6 @@ struct FieldWorkspaceView: View {
                             symbol: "wrench.and.screwdriver", color: FieldWorkspacePalette.green
                         )
                     }
-                }
-
-                if settings.isFeatureVisible("account.locations") {
-                    NavigationLink {
-                        MapArrivalView(account: account, store: store, settings: settings, locationService: locationService)
-                    } label: {
-                        WorkspaceDestinationTile(
-                            title: "Locations", count: account.locations.count,
-                            symbol: "map.fill", color: FieldWorkspacePalette.purple
-                        )
-                    }
-                }
             }
             .buttonStyle(.plain)
         }
@@ -1148,7 +1138,7 @@ private struct MapArrivalView: View {
     }
 }
 
-private struct ArrivalPointDetailView: View {
+struct ArrivalPointDetailView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
     @ObservedObject var locationService: FireVaultLocationService
@@ -1931,74 +1921,6 @@ struct FireVaultNoteEditorSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
-    }
-}
-
-private struct FilesScansView: View {
-    let account: FireVaultWorkspaceAccount
-    @ObservedObject var store: FireVaultStore
-
-    var body: some View {
-        List {
-            if account.documents.isEmpty {
-                ContentUnavailableView(
-                    "No Files or Scans",
-                    systemImage: "doc.viewfinder",
-                    description: Text("Scan a document or add a saved field file.")
-                )
-            } else {
-                ForEach(account.documents) { document in
-                    NavigationLink {
-                        NativeRecordDetailView(
-                            title: document.title,
-                            subtitle: document.subtitle,
-                            symbol: documentSymbol(document.kind)
-                        )
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: documentSymbol(document.kind))
-                                .font(.headline)
-                                .foregroundStyle(documentTint(document.kind))
-                                .frame(width: 38, height: 38)
-                                .background(documentTint(document.kind).opacity(0.14), in: RoundedRectangle(cornerRadius: 11))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(document.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
-                                Text([document.subtitle, document.date].filter { !$0.isEmpty }.joined(separator: " • "))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .scrollContentBackground(.hidden)
-        .background(FieldWorkspacePalette.background)
-        .navigationTitle("Files & Scans")
-        .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom) {
-            HStack(spacing: 10) {
-                Button("Add File", systemImage: "plus") { store.addDocument(to: account.id, scan: false) }
-                    .buttonStyle(.glass)
-                Button("Scan Document", systemImage: "doc.viewfinder") { store.addDocument(to: account.id, scan: true) }
-                    .buttonStyle(.glassProminent)
-            }
-            .padding(12)
-            .glassEffect()
-        }
-    }
-
-    private func documentSymbol(_ kind: String) -> String {
-        switch kind { case "scan": return "doc.viewfinder"; case "photo": return "photo"; default: return "doc" }
-    }
-
-    private func documentTint(_ kind: String) -> Color {
-        switch kind { case "scan": return FieldWorkspacePalette.blue; case "photo": return FieldWorkspacePalette.purple; default: return FieldWorkspacePalette.green }
     }
 }
 
@@ -2823,6 +2745,89 @@ private struct WorkspaceDestinationTile: View {
     }
 }
 
+private struct WorkspaceMediaDestinationCard: View {
+    let account: FireVaultWorkspaceAccount
+    @ObservedObject var store: FireVaultStore
+
+    private var photoCount: Int {
+        account.documents.filter { $0.kind.lowercased() == "photo" }.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "photo.on.rectangle.angled")
+                    .font(.headline.bold())
+                    .foregroundStyle(FieldWorkspacePalette.blue)
+                    .frame(width: 38, height: 38)
+                    .background(FieldWorkspacePalette.blue.opacity(0.14), in: RoundedRectangle(cornerRadius: 11))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Photos & Documents")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text("\(photoCount) photo\(photoCount == 1 ? "" : "s") • \(account.documents.count - photoCount) document\((account.documents.count - photoCount) == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold())
+                    .foregroundStyle(.tertiary)
+            }
+
+            if account.documents.isEmpty {
+                Label("Take a photo or scan a document", systemImage: "plus.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(FieldWorkspacePalette.blue)
+                    .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .background(FieldWorkspacePalette.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            } else {
+                HStack(spacing: 8) {
+                    ForEach(Array(account.documents.prefix(4))) { document in
+                        mediaPreview(document)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(FieldWorkspacePalette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(FieldWorkspacePalette.blue.opacity(0.18), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 7, y: 4)
+    }
+
+    private func mediaPreview(_ document: FireVaultWorkspaceDocument) -> some View {
+        let url = store.mediaURL(accountID: account.id, documentID: document.id)
+        return Group {
+            if document.kind.lowercased() == "photo",
+               let url {
+                FireVaultMediaThumbnailView(url: url)
+            } else {
+                Image(systemName: document.kind.lowercased() == "photo" ? "photo.fill" : (document.kind.lowercased() == "scan" ? "doc.viewfinder.fill" : "doc.fill"))
+                    .font(.title3.bold())
+                    .foregroundStyle(FieldWorkspacePalette.blue)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(FieldWorkspacePalette.blue.opacity(0.08))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 58)
+        .background(FieldWorkspacePalette.surfaceRaised)
+        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+        }
+        .clipped()
+    }
+}
+
 private struct WorkspaceRecentRow: View {
     let item: FireVaultWorkspaceRecent
 
@@ -2885,6 +2890,51 @@ private struct WorkspaceQuickAction: View {
         .disabled(disabled)
         .opacity(disabled ? 0.42 : 1)
         .contentShape(Rectangle())
+    }
+}
+
+private struct WorkspaceCaptureMenu: View {
+    let accountID: String
+    @ObservedObject var store: FireVaultStore
+
+    var body: some View {
+        Menu {
+            Button("Take Photo", systemImage: "camera.fill") {
+                open(.photo)
+            }
+            Button("Scan Document", systemImage: "doc.viewfinder") {
+                open(.scan)
+            }
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 17, weight: .bold))
+                    .frame(width: 32, height: 32)
+                    .background(FieldWorkspacePalette.purple.opacity(0.14), in: Circle())
+                Text("Capture")
+                    .font(.caption2.bold())
+                    .lineLimit(1)
+            }
+            .foregroundStyle(FieldWorkspacePalette.purple)
+            .frame(maxWidth: .infinity)
+            .frame(height: 64)
+            .background(
+                FieldWorkspacePalette.surfaceRaised.opacity(0.48),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(FieldWorkspacePalette.purple.opacity(0.16), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Capture photo or scan for this account")
+    }
+
+    private func open(_ action: FireVaultCaptureQuickAction) {
+        store.selectCaptureAccount(accountID)
+        store.requestCapture(action)
+        store.closeAccount(to: .photo)
     }
 }
 

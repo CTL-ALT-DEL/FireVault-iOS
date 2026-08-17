@@ -257,11 +257,6 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                 }
                 .buttonStyle(.borderedProminent)
             } else if breadcrumbs.isRecording {
-                Button("Pause", systemImage: "pause.fill") {
-                    breadcrumbs.pauseWorkday()
-                    closeTripLogControls()
-                }
-                .buttonStyle(.bordered)
                 Button("Stop", systemImage: "stop.fill", role: .destructive) {
                     confirmsTripLogEnd = true
                 }
@@ -743,7 +738,7 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(row.account.name)
                         .font(.subheadline.bold())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                     Text(row.account.address)
                         .font(.caption)
