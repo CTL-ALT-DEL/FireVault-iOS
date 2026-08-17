@@ -157,7 +157,9 @@ final class FireVaultAppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
-        FireVaultBreadcrumbStore.shared.flushPendingRoutePersistence()
+        let tripLog = FireVaultBreadcrumbStore.shared
+        tripLog.prepareForBackgroundTracking()
+        tripLog.flushPendingRoutePersistence()
     }
 
     func application(
