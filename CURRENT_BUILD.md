@@ -1,10 +1,12 @@
 # FireVault Current Build
 
-**Current development candidate: 1.08.58 (118)**
+**Current development candidate: 1.08.59 (119)**
 
-Build 1.08.58 (118) adds visible FireVault account status and sign-out controls
-to Settings on iPhone and iPad. It must compile, run, and pass the Xcode test
-suite before replacing the latest tested build below.
+Build 1.08.59 (119) hardens Trip Log against repeated Core Location stalls. It
+keeps the background continuity receiver active for the full workday, reasserts
+that receiver before app suspension, and performs a true receiver rebuild after
+two unanswered soft recovery attempts. It must compile, run, and pass the Xcode
+test suite before replacing the latest tested build below.
 
 **Latest tested build: 1.08.57 (117)**
 
@@ -15,6 +17,14 @@ candidates must compile, run, and pass validation before replacing it.
 This is the only number to use when deciding whether an installed copy is current.
 In FireVault, open **Settings → About FireVault** and compare the displayed version
 and build with the number above.
+
+## Included in 1.08.59 (119)
+
+- Keeps the standard background-capable location receiver active while Trip Log records
+- Reasserts location and background sessions before iOS suspends the app
+- Escalates repeated 15-second GPS stalls from a soft rearm to a true receiver rebuild
+- Restarts an unexpectedly ended modern automotive stream through the recovery path
+- Adds a regression test for the two-attempt recovery escalation
 
 ## Included in 1.08.57 (117)
 
