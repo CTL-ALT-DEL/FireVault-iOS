@@ -174,7 +174,7 @@ enum FireVaultAccountSyncService {
             return .init(importedRows: importedRows, skippedRows: skippedRows)
         } catch {
             let remainingRows = max(0, acceptedRecords.count - importedRows)
-            try? await SupabaseManager.client
+            _ = try? await SupabaseManager.client
                 .from("csv_import_jobs")
                 .update(
                     CSVImportJobCompletion(
