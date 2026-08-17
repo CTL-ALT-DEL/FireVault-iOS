@@ -103,9 +103,15 @@ struct ContentView: View {
 
     private var workspaceObservationView: some View {
         settingsObservationView
-        .onChange(of: store.demoMode) { _, _ in
+        .onChange(of: store.demoMode) { _, isDemoMode in
             prepareActiveVault()
             updateWidgetSnapshot()
+            if !isDemoMode {
+                Task {
+                    await store.refreshAccountsFromCloud()
+                    updateWidgetSnapshot()
+                }
+            }
         }
         .onChange(of: store.selectedAccountID) { _, _ in
             updateWidgetSnapshot()
@@ -211,6 +217,7 @@ struct ContentView: View {
 
     private func performInitialSetup() async {
         prepareActiveVault()
+        await store.refreshAccountsFromCloud()
         await refreshAndReconcileFeatureControls()
         store.configureCategoryRules(settings.preferences.categoryRules ?? [])
         privacyLock.configure(enabled: settings.preferences.privacy.enabled)
@@ -232,7 +239,11 @@ struct ContentView: View {
         switch newPhase {
         case .active:
             prepareActiveVault()
-            Task { await refreshAndReconcileFeatureControls() }
+            Task {
+                await store.refreshAccountsFromCloud()
+                await refreshAndReconcileFeatureControls()
+                updateWidgetSnapshot()
+            }
             privacyLock.lockIfNeeded(settings.preferences.privacy)
             if isPrivacyLocked {
                 privacyLock.authenticate()

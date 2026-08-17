@@ -2070,6 +2070,19 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(updated.notes.isEmpty, "CSV updates must preserve native field notes")
     }
 
+    func testCSVAnalysisPreservesStructuredAddressFieldsForCloudSync() throws {
+        let csv = "Account Name,Address,City,State,ZipCode,Account Id\nCloud Customer,100 Main St,Boise,ID,83702,CLOUD-1"
+
+        let analysis = try FireVaultCSVImporter.analyze(Data(csv.utf8))
+        let record = try XCTUnwrap(analysis.records.first)
+
+        XCTAssertEqual(record.addressLine1, "100 Main St")
+        XCTAssertEqual(record.city, "Boise")
+        XCTAssertEqual(record.state, "ID")
+        XCTAssertEqual(record.postalCode, "83702")
+        XCTAssertEqual(record.address, "100 Main St, Boise, ID, 83702")
+    }
+
     func testDemoAndProductionVaultsStaySeparate() throws {
         let suite = "FireVaultTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

@@ -98,6 +98,10 @@ struct FireVaultCSVParsedRecord: Equatable {
     let rowNumber: Int
     let name: String
     let address: String
+    let addressLine1: String
+    let city: String
+    let state: String
+    let postalCode: String
     let category: String
     let accountID: String
     let phone: String
@@ -177,7 +181,10 @@ struct FireVaultCSVImporter {
             let name = value(.accountName)
             let accountID = canonicalAccountID(value(.accountID))
             let street = value(.address)
-            let address = [street, value(.city), value(.state), value(.postalCode)]
+            let city = value(.city)
+            let state = value(.state)
+            let postalCode = value(.postalCode)
+            let address = [street, city, state, postalCode]
                 .filter { !$0.isEmpty }
                 .joined(separator: ", ")
 
@@ -236,6 +243,10 @@ struct FireVaultCSVImporter {
                     rowNumber: rowNumber,
                     name: name,
                     address: address,
+                    addressLine1: street,
+                    city: city,
+                    state: state,
+                    postalCode: postalCode,
                     category: value(.category),
                     accountID: accountID,
                     phone: value(.phone),
