@@ -1,15 +1,21 @@
 # FireVault Current Build
 
-**Latest tested build: 1.08.56 (116)**
+**Latest tested build: 1.08.57 (117)**
 
-Build 1.08.56 (116) became the latest tested corrective build after the iPhone
-target compiled, launched on a connected iPhone, and the FireVault unit-test
-suite passed locally. Future build
-candidates must meet the same build-and-test requirement before replacing it.
+Build 1.08.57 (117) is the current working TestFlight build. Its clean source
+branch was preserved and promoted to GitHub `main` through PR #21. Future build
+candidates must compile, run, and pass validation before replacing it.
 
 This is the only number to use when deciding whether an installed copy is current.
 In FireVault, open **Settings → About FireVault** and compare the displayed version
 and build with the number above.
+
+## Included in 1.08.57 (117)
+
+- Promoted the exact source used for the working TestFlight build to `main`
+- Preserved the account-details and field-workflow redesign
+- Preserved the Trip Log, report, media, Nearby, CarPlay, privacy, and test improvements
+- Retained the newer Supabase CSV-import integration already validated after the TestFlight upload
 
 ## Included in 1.08.56 (116)
 
