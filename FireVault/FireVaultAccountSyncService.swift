@@ -85,9 +85,7 @@ struct FireVaultCloudAccountRow: Decodable {
 
 enum FireVaultAccountSyncService {
     private static let bucket = "csv-imports"
-    private static let accountSelect = """
-        id,account_name,account_number,address_line_1,address_line_2,city,state,postal_code,country,latitude,longitude,phone,archived
-        """
+    private static let accountSelect = "id,account_name,account_number,address_line_1,address_line_2,city,state,postal_code,country,latitude,longitude,phone,archived"
 
     static func fetchAccounts() async throws -> [FireVaultCloudAccountRow] {
         try await SupabaseManager.client
