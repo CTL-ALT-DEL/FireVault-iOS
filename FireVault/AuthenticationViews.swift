@@ -418,19 +418,19 @@ struct FireVaultAccountSettingsView: View {
             }
 
             Section("Cloud Sync") {
-                LabeledContent {
+                HStack {
+                    Text("Status")
+                    Spacer()
                     Label(store.cloudSyncStatusText, systemImage: cloudSyncSymbol)
                         .foregroundStyle(cloudSyncTint)
-                } label: {
-                    Text("Status")
                 }
 
-                LabeledContent {
+                HStack {
+                    Text("Last successful sync")
+                    Spacer()
                     Text(lastSyncText)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.trailing)
-                } label: {
-                    Text("Last successful sync")
                 }
 
                 Button {
