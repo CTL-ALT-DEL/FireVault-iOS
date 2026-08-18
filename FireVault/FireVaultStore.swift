@@ -67,7 +67,7 @@ final class FireVaultStore: ObservableObject {
     @Published private(set) var nearbyResetRequestID = UUID()
     @Published private(set) var pendingCaptureQuickAction: FireVaultCaptureQuickAction?
     @Published private(set) var cloudLastSyncedAt: Date?
-    @Published private(set) var cloudSyncErrorMessage: String?
+    @Published private(set) var cloudSyncErrorMessage: String? = nil
     @Published private(set) var isCloudSyncing = false
 
     private let defaults: UserDefaults
