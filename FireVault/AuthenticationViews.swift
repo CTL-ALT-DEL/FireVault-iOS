@@ -433,6 +433,15 @@ struct FireVaultAccountSettingsView: View {
                         .multilineTextAlignment(.trailing)
                 }
 
+                if store.pendingCloudAccountCount > 0 {
+                    HStack {
+                        Text("Waiting to upload")
+                        Spacer()
+                        Text(store.pendingCloudAccountCount.formatted())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Button {
                     Task {
                         await store.syncAccountsNow()
@@ -462,7 +471,7 @@ struct FireVaultAccountSettingsView: View {
                 Text(
                     store.demoMode
                         ? "Demo data stays on this iPhone."
-                        : "FireVault checks your account data when the app opens or becomes active. Tap Sync Now after website changes to refresh immediately."
+                        : "FireVault uploads iPhone account changes and downloads website changes when the app opens, becomes active, or you tap Sync Now."
                 )
             }
 
