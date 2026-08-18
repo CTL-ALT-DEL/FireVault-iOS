@@ -369,11 +369,31 @@ private struct FireVaultAuthenticationView: View {
 
 struct FireVaultAccountSettingsView: View {
     @EnvironmentObject private var authentication: FireVaultAuthentication
+    @ObservedObject var store: FireVaultStore
     @State private var showsSignOutConfirmation = false
 
     private var accountEmail: String {
         let email = authentication.signedInEmail.trimmingCharacters(in: .whitespacesAndNewlines)
         return email.isEmpty ? "Signed in" : email
+    }
+
+    private var cloudSyncTint: Color {
+        if store.cloudSyncErrorMessage != nil { return .orange }
+        if store.isCloudSyncing { return NativeShellPalette.blue }
+        if store.cloudLastSyncedAt == nil { return .secondary }
+        return NativeShellPalette.green
+    }
+
+    private var cloudSyncSymbol: String {
+        if store.isCloudSyncing { return "arrow.triangle.2.circlepath" }
+        if store.cloudSyncErrorMessage != nil { return "exclamationmark.icloud.fill" }
+        if store.cloudLastSyncedAt == nil { return "icloud.slash" }
+        return "checkmark.icloud.fill"
+    }
+
+    private var lastSyncText: String {
+        guard let date = store.cloudLastSyncedAt else { return "Not yet" }
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 
     var body: some View {
@@ -395,6 +415,51 @@ struct FireVaultAccountSettingsView: View {
                     Image(systemName: "checkmark.shield.fill")
                         .foregroundStyle(NativeShellPalette.green)
                 }
+            }
+
+            Section("Cloud Sync") {
+                LabeledContent {
+                    Label(store.cloudSyncStatusText, systemImage: cloudSyncSymbol)
+                        .foregroundStyle(cloudSyncTint)
+                } label: {
+                    Text("Status")
+                }
+
+                LabeledContent("Last successful sync") {
+                    Text(lastSyncText)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+
+                Button {
+                    Task {
+                        await store.syncAccountsNow()
+                    }
+                } label: {
+                    HStack {
+                        Label(
+                            store.isCloudSyncing ? "Syncing…" : "Sync Now",
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                        Spacer()
+                        if store.isCloudSyncing {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(store.isCloudSyncing || store.demoMode)
+
+                if let message = store.cloudSyncErrorMessage {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            } footer: {
+                Text(
+                    store.demoMode
+                        ? "Demo data stays on this iPhone."
+                        : "FireVault checks your account data when the app opens or becomes active. Tap Sync Now after website changes to refresh immediately."
+                )
             }
 
             Section {
