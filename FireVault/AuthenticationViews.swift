@@ -417,7 +417,7 @@ struct FireVaultAccountSettingsView: View {
                 }
             }
 
-            Section("Cloud Sync") {
+            Section {
                 HStack {
                     Text("Status")
                     Spacer()
@@ -456,6 +456,8 @@ struct FireVaultAccountSettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.orange)
                 }
+            } header: {
+                Text("Cloud Sync")
             } footer: {
                 Text(
                     store.demoMode
