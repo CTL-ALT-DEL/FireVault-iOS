@@ -364,6 +364,19 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(store.cloudSyncStatusText, "Up to date")
     }
 
+    func testAddingDemoAccountDoesNotQueueCloudUpload() throws {
+        let suite = "FireVaultTests.DemoAccountCloudQueue.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+
+        _ = store.addAccount()
+
+        XCTAssertEqual(store.pendingCloudAccountCount, 0)
+        XCTAssertEqual(store.cloudSyncStatusText, "Demo data")
+    }
+
     func testAddingProductionAccountSelectsItWithoutFakeLocationData() throws {
         let suite = "FireVaultTests.AddProductionAccount.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -380,6 +393,12 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(account.accountId, "")
         XCTAssertNil(account.latitude)
         XCTAssertNil(account.longitude)
+        XCTAssertEqual(store.pendingCloudAccountCount, 1)
+        XCTAssertEqual(store.cloudSyncStatusText, "Changes waiting")
+
+        let restored = FireVaultStore(defaults: defaults)
+        XCTAssertEqual(restored.pendingCloudAccountCount, 1)
+        XCTAssertEqual(restored.cloudSyncStatusText, "Changes waiting")
     }
 
     func testUpdatingAccountDetailsPreservesFieldDataAndPersists() throws {
