@@ -399,12 +399,12 @@ struct FireVaultAccountSettingsView: View {
     var body: some View {
         Form {
             Section("FireVault Account") {
-                LabeledContent {
+                HStack {
+                    Label("Signed in as", systemImage: "person.crop.circle.fill")
+                    Spacer()
                     Text(accountEmail)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.trailing)
-                } label: {
-                    Label("Signed in as", systemImage: "person.crop.circle.fill")
                 }
 
                 Label {
