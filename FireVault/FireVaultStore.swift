@@ -1084,7 +1084,7 @@ final class FireVaultStore: ObservableObject {
             let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
             guard !demoMode else { return }
             mergeCloudAccounts(cloudRows)
-            recordSuccessfulCloudSync(accountCount: cloudRows.filter { !$0.archived }.count)
+            recordSuccessfulCloudSync()
         } catch {
             recordCloudSyncFailure()
         }
@@ -1112,7 +1112,7 @@ final class FireVaultStore: ObservableObject {
             )
             let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
             mergeCloudAccounts(cloudRows)
-            recordSuccessfulCloudSync(accountCount: cloudRows.filter { !$0.archived }.count)
+            recordSuccessfulCloudSync()
             messages.insert(
                 "Synced \(cloudResult.importedRows) account\(cloudResult.importedRows == 1 ? "" : "s") to your FireVault account.",
                 at: 0
@@ -1134,7 +1134,7 @@ final class FireVaultStore: ObservableObject {
         )
     }
 
-    private func recordSuccessfulCloudSync(accountCount: Int) {
+    private func recordSuccessfulCloudSync() {
         let timestamp = Date()
         cloudLastSyncedAt = timestamp
         defaults.set(timestamp, forKey: Key.cloudLastSyncedAt)
