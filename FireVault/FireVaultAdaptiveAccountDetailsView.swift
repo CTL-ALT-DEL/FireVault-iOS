@@ -85,6 +85,8 @@ struct FireVaultAdaptiveAccountDetailsView: View {
     @State private var isLoadingAccountBrief = false
     @State private var accountBrief: String?
     @State private var accountBriefError: String?
+    @State private var isConfirmingAccountDeletion = false
+    @State private var accountDeletionError: String?
 
     private var visibleSections: [FireVaultAccountDetailSection] {
         FireVaultAccountDetailSection.allCases.filter { section in
@@ -324,6 +326,32 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 ) != nil
             }
         }
+        .confirmationDialog(
+            "Permanently delete \(account.name)?",
+            isPresented: $isConfirmingAccountDeletion,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Account Permanently", role: .destructive) {
+                Task {
+                    do {
+                        try await store.deleteAccount(id: account.id)
+                    } catch {
+                        accountDeletionError = error.localizedDescription
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the account and its local photos and documents. Recorded Trip Logs remain available. This cannot be undone.")
+        }
+        .alert("Account Could Not Be Deleted", isPresented: .init(
+            get: { accountDeletionError != nil },
+            set: { if !$0 { accountDeletionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { accountDeletionError = nil }
+        } message: {
+            Text(accountDeletionError ?? "Please try again.")
+        }
     }
 
     private func header(isLandscape: Bool) -> some View {
@@ -354,6 +382,10 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                         Button("Call", systemImage: "phone") {
                             store.call(account.phone)
                         }
+                    }
+                    Divider()
+                    Button("Delete Account", systemImage: "trash", role: .destructive) {
+                        isConfirmingAccountDeletion = true
                     }
                 } label: {
                     Image(systemName: "ellipsis")
