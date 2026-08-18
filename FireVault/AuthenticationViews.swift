@@ -369,6 +369,7 @@ private struct FireVaultAuthenticationView: View {
 
 struct FireVaultAccountSettingsView: View {
     @EnvironmentObject private var authentication: FireVaultAuthentication
+    @ObservedObject var store: FireVaultStore
     @State private var showsSignOutConfirmation = false
 
     private var accountEmail: String {
@@ -376,15 +377,34 @@ struct FireVaultAccountSettingsView: View {
         return email.isEmpty ? "Signed in" : email
     }
 
+    private var cloudSyncTint: Color {
+        if store.cloudSyncErrorMessage != nil { return .orange }
+        if store.isCloudSyncing { return NativeShellPalette.blue }
+        if store.cloudLastSyncedAt == nil { return .secondary }
+        return NativeShellPalette.green
+    }
+
+    private var cloudSyncSymbol: String {
+        if store.isCloudSyncing { return "arrow.triangle.2.circlepath" }
+        if store.cloudSyncErrorMessage != nil { return "exclamationmark.icloud.fill" }
+        if store.cloudLastSyncedAt == nil { return "icloud.slash" }
+        return "checkmark.icloud.fill"
+    }
+
+    private var lastSyncText: String {
+        guard let date = store.cloudLastSyncedAt else { return "Not yet" }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
     var body: some View {
         Form {
             Section("FireVault Account") {
-                LabeledContent {
+                HStack {
+                    Label("Signed in as", systemImage: "person.crop.circle.fill")
+                    Spacer()
                     Text(accountEmail)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.trailing)
-                } label: {
-                    Label("Signed in as", systemImage: "person.crop.circle.fill")
                 }
 
                 Label {
@@ -395,6 +415,64 @@ struct FireVaultAccountSettingsView: View {
                     Image(systemName: "checkmark.shield.fill")
                         .foregroundStyle(NativeShellPalette.green)
                 }
+            }
+
+            Section {
+                HStack {
+                    Text("Status")
+                    Spacer()
+                    Label(store.cloudSyncStatusText, systemImage: cloudSyncSymbol)
+                        .foregroundStyle(cloudSyncTint)
+                }
+
+                HStack {
+                    Text("Last successful sync")
+                    Spacer()
+                    Text(lastSyncText)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+
+                if store.pendingCloudAccountCount > 0 {
+                    HStack {
+                        Text("Waiting to upload")
+                        Spacer()
+                        Text(store.pendingCloudAccountCount.formatted())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Button {
+                    Task {
+                        await store.syncAccountsNow()
+                    }
+                } label: {
+                    HStack {
+                        Label(
+                            store.isCloudSyncing ? "Syncing…" : "Sync Now",
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                        Spacer()
+                        if store.isCloudSyncing {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(store.isCloudSyncing || store.demoMode)
+
+                if let message = store.cloudSyncErrorMessage {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            } header: {
+                Text("Cloud Sync")
+            } footer: {
+                Text(
+                    store.demoMode
+                        ? "Demo data stays on this iPhone."
+                        : "FireVault uploads iPhone account changes and downloads website changes when the app opens, becomes active, or you tap Sync Now."
+                )
             }
 
             Section {

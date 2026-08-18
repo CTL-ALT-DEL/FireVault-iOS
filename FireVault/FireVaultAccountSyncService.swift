@@ -97,6 +97,43 @@ enum FireVaultAccountSyncService {
             .value
     }
 
+    static func upsertAccounts(
+        _ accounts: [FireVaultWorkspaceAccount],
+        userID: UUID
+    ) async throws {
+        guard !accounts.isEmpty else { return }
+
+        let updatedAt = ISO8601DateFormatter().string(from: Date())
+        let rows = try accounts.map { account -> ManualCloudAccountUpsert in
+            guard let id = UUID(uuidString: account.id) else {
+                throw FireVaultAccountSyncError.invalidAccountIdentifier
+            }
+
+            let address = FireVaultPostalAddress(combinedAddress: account.address)
+            return .init(
+                id: id,
+                userID: userID,
+                accountName: account.name,
+                accountNumber: account.accountId.nilIfEmpty,
+                addressLine1: address?.street.nilIfEmpty,
+                city: address?.city.nilIfEmpty,
+                state: address?.state.nilIfEmpty,
+                postalCode: address?.zip.nilIfEmpty,
+                country: "US",
+                latitude: account.latitude,
+                longitude: account.longitude,
+                phone: account.phone.nilIfEmpty,
+                archived: false,
+                updatedAt: updatedAt
+            )
+        }
+
+        try await SupabaseManager.client
+            .from("accounts")
+            .upsert(rows)
+            .execute()
+    }
+
     static func importCSV(
         data: Data,
         fileName: String,
@@ -268,6 +305,44 @@ enum FireVaultAccountSyncService {
 
     private static func identityKey(name: String, address: String) -> String {
         "\(name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())|\(address.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+    }
+}
+
+private enum FireVaultAccountSyncError: Error {
+    case invalidAccountIdentifier
+}
+
+private struct ManualCloudAccountUpsert: Encodable {
+    let id: UUID
+    let userID: UUID
+    let accountName: String
+    let accountNumber: String?
+    let addressLine1: String?
+    let city: String?
+    let state: String?
+    let postalCode: String?
+    let country: String
+    let latitude: Double?
+    let longitude: Double?
+    let phone: String?
+    let archived: Bool
+    let updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userID = "user_id"
+        case accountName = "account_name"
+        case accountNumber = "account_number"
+        case addressLine1 = "address_line_1"
+        case city
+        case state
+        case postalCode = "postal_code"
+        case country
+        case latitude
+        case longitude
+        case phone
+        case archived
+        case updatedAt = "updated_at"
     }
 }
 

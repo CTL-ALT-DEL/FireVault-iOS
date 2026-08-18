@@ -1,11 +1,11 @@
 # FireVault Current Build
 
-**Current development candidate: 1.08.59 (119)**
+**Current development candidate: 1.08.60 (120)**
 
-Build 1.08.59 (119) hardens Trip Log against repeated Core Location stalls. It
-keeps the background continuity receiver active for the full workday, reasserts
-that receiver before app suspension, and performs a true receiver rebuild after
-two unanswered soft recovery attempts. It must compile, run, and pass the Xcode
+Build 1.08.60 (120) makes FireVault Cloud account sync visible,
+controllable, and two-way. Sync Now uploads iPhone-created or edited account
+fields, downloads website changes, saves the last successful sync time, and
+preserves a retry queue when offline. It must compile, run, and pass the Xcode
 test suite before replacing the latest tested build below.
 
 **Latest tested build: 1.08.57 (117)**
@@ -17,6 +17,19 @@ candidates must compile, run, and pass validation before replacing it.
 This is the only number to use when deciding whether an installed copy is current.
 In FireVault, open **Settings → About FireVault** and compare the displayed version
 and build with the number above.
+
+## Included in 1.08.60 (120)
+
+- Added Cloud Sync status and last successful sync time in Account & Sign-In
+- Added Sync Now for immediate two-way account synchronization
+- Uploads iPhone-created and edited account fields to the signed-in user's website
+- Downloads website account changes after pending iPhone changes are confirmed
+- Persists unsent iPhone account changes for safe retry after offline failures
+- Shows the number of iPhone account changes waiting to upload
+- Saves the most recent successful cloud sync time across app restarts
+- Shows a safe offline/retry message while retaining all local accounts
+- Verifies the authenticated Supabase session before reading user-owned accounts
+- Added regression tests for initial and restored cloud sync status
 
 ## Included in 1.08.59 (119)
 

@@ -337,6 +337,46 @@ final class FireVaultTests: XCTestCase {
         )
     }
 
+    func testProductionVaultShowsCloudSyncPendingBeforeFirstSync() throws {
+        let suite = "FireVaultTests.CloudSyncPending.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+
+        let store = FireVaultStore(defaults: defaults)
+
+        XCTAssertNil(store.cloudLastSyncedAt)
+        XCTAssertNil(store.cloudSyncErrorMessage)
+        XCTAssertEqual(store.cloudSyncStatusText, "Not synced yet")
+    }
+
+    func testProductionVaultRestoresLastSuccessfulCloudSyncTime() throws {
+        let suite = "FireVaultTests.CloudSyncRestore.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let lastSync = Date(timeIntervalSince1970: 1_700_000_000)
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defaults.set(lastSync, forKey: "firevault.native.cloud-last-synced-at.v1")
+
+        let store = FireVaultStore(defaults: defaults)
+
+        XCTAssertEqual(store.cloudLastSyncedAt, lastSync)
+        XCTAssertEqual(store.cloudSyncStatusText, "Up to date")
+    }
+
+    func testAddingDemoAccountDoesNotQueueCloudUpload() throws {
+        let suite = "FireVaultTests.DemoAccountCloudQueue.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+
+        _ = store.addAccount()
+
+        XCTAssertEqual(store.pendingCloudAccountCount, 0)
+        XCTAssertEqual(store.cloudSyncStatusText, "Demo data")
+    }
+
     func testAddingProductionAccountSelectsItWithoutFakeLocationData() throws {
         let suite = "FireVaultTests.AddProductionAccount.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -353,6 +393,12 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(account.accountId, "")
         XCTAssertNil(account.latitude)
         XCTAssertNil(account.longitude)
+        XCTAssertEqual(store.pendingCloudAccountCount, 1)
+        XCTAssertEqual(store.cloudSyncStatusText, "Changes waiting")
+
+        let restored = FireVaultStore(defaults: defaults)
+        XCTAssertEqual(restored.pendingCloudAccountCount, 1)
+        XCTAssertEqual(restored.cloudSyncStatusText, "Changes waiting")
     }
 
     func testUpdatingAccountDetailsPreservesFieldDataAndPersists() throws {

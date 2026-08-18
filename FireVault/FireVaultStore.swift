@@ -10,6 +10,8 @@ import Combine
 import CoreLocation
 import MapKit
 import UIKit
+import Supabase
+import Auth
 
 struct FireVaultCSVImportResult: Equatable {
     let added: Int
@@ -66,6 +68,10 @@ final class FireVaultStore: ObservableObject {
     @Published private(set) var geocodingProgress: FireVaultGeocodingProgress?
     @Published private(set) var nearbyResetRequestID = UUID()
     @Published private(set) var pendingCaptureQuickAction: FireVaultCaptureQuickAction?
+    @Published private(set) var cloudLastSyncedAt: Date?
+    @Published private(set) var cloudSyncErrorMessage: String? = nil
+    @Published private(set) var isCloudSyncing = false
+    @Published private(set) var pendingCloudAccountCount = 0
 
     private let defaults: UserDefaults
     private let mediaRootURL: URL?
@@ -73,6 +79,7 @@ final class FireVaultStore: ObservableObject {
     private var geocodingTask: Task<Void, Never>?
     private var categoryRules: [FireVaultCategoryRule] = []
     private var categoryRuleSuppressedAccountIDs: Set<String>
+    private var pendingCloudAccountIDs: Set<String>
 
     private enum Key {
         static let demoMode = "firevault.native.demo-mode.v1"
@@ -82,11 +89,16 @@ final class FireVaultStore: ObservableObject {
         static let productionAccountsBackup = "firevault.native.production-accounts.backup.v1"
         static let demoCategoryRuleSuppressions = "firevault.native.demo-category-rule-suppressions.v1"
         static let productionCategoryRuleSuppressions = "firevault.native.production-category-rule-suppressions.v1"
+        static let cloudLastSyncedAt = "firevault.native.cloud-last-synced-at.v1"
+        static let pendingCloudAccountIDs = "firevault.native.pending-cloud-account-ids.v1"
     }
 
     init(defaults: UserDefaults = .standard, mediaRootURL: URL? = nil) {
         self.defaults = defaults
         self.mediaRootURL = mediaRootURL ?? Self.defaultMediaRootURL()
+        cloudLastSyncedAt = defaults.object(forKey: Key.cloudLastSyncedAt) as? Date
+        pendingCloudAccountIDs = Set(defaults.stringArray(forKey: Key.pendingCloudAccountIDs) ?? [])
+        pendingCloudAccountCount = pendingCloudAccountIDs.count
         let activeDemoMode = defaults.object(forKey: Key.demoMode) as? Bool ?? true
         demoMode = activeDemoMode
         let suppressionKey = activeDemoMode
@@ -385,6 +397,7 @@ final class FireVaultStore: ObservableObject {
             guard let match = matchByAccountID[accounts[index].id] else { continue }
             accounts[index].latitude = match.latitude
             accounts[index].longitude = match.longitude
+            markAccountForCloudSync(accounts[index].id)
         }
         persist()
     }
@@ -454,6 +467,7 @@ final class FireVaultStore: ObservableObject {
         accounts[index].phone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
         accounts[index].latitude = latitude
         accounts[index].longitude = longitude
+        markAccountForCloudSync(id)
         persist()
         return true
     }
@@ -479,6 +493,7 @@ final class FireVaultStore: ObservableObject {
             recent: []
         )
         accounts.append(account)
+        markAccountForCloudSync(account.id)
         openAccount(account.id)
         persist()
         return account
@@ -528,6 +543,7 @@ final class FireVaultStore: ObservableObject {
             ]
         )
         accounts.append(account)
+        markAccountForCloudSync(account.id)
         persist()
         return account
     }
@@ -1017,14 +1033,47 @@ final class FireVaultStore: ObservableObject {
         )
     }
 
+    var cloudSyncStatusText: String {
+        if demoMode { return "Demo data" }
+        if isCloudSyncing { return "Syncing" }
+        if cloudSyncErrorMessage != nil { return "Needs attention" }
+        if pendingCloudAccountCount > 0 { return "Changes waiting" }
+        return cloudLastSyncedAt == nil ? "Not synced yet" : "Up to date"
+    }
+
+    func syncAccountsNow() async {
+        await refreshAccountsFromCloud()
+    }
+
     func refreshAccountsFromCloud() async {
-        guard !demoMode else { return }
+        guard !demoMode, !isCloudSyncing else { return }
+        isCloudSyncing = true
+        cloudSyncErrorMessage = nil
+        defer { isCloudSyncing = false }
+
         do {
+            // Reading session refreshes an expired token when needed, so Sync
+            // Now verifies the saved sign-in before reading user-owned accounts.
+            let session = try await SupabaseManager.client.auth.session
+            let pendingIDs = pendingCloudAccountIDs
+            let pendingAccounts = accounts.filter { pendingIDs.contains($0.id) }
+
+            if !pendingIDs.isEmpty {
+                if !pendingAccounts.isEmpty {
+                    try await FireVaultAccountSyncService.upsertAccounts(
+                        pendingAccounts,
+                        userID: session.user.id
+                    )
+                }
+                clearPendingCloudAccounts(pendingIDs)
+            }
+
             let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
             guard !demoMode else { return }
             mergeCloudAccounts(cloudRows)
+            recordSuccessfulCloudSync()
         } catch {
-            // Offline-first: keep the last valid local vault when the network is unavailable.
+            recordCloudSyncFailure()
         }
     }
 
@@ -1036,6 +1085,10 @@ final class FireVaultStore: ObservableObject {
         let localResult = applyCSVImport(analysis)
         guard !demoMode else { return localResult }
 
+        isCloudSyncing = true
+        cloudSyncErrorMessage = nil
+        defer { isCloudSyncing = false }
+
         var messages = localResult.messages
         do {
             let cloudResult = try await FireVaultAccountSyncService.importCSV(
@@ -1046,13 +1099,15 @@ final class FireVaultStore: ObservableObject {
             )
             let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
             mergeCloudAccounts(cloudRows)
+            recordSuccessfulCloudSync()
             messages.insert(
                 "Synced \(cloudResult.importedRows) account\(cloudResult.importedRows == 1 ? "" : "s") to your FireVault account.",
                 at: 0
             )
         } catch {
+            recordCloudSyncFailure()
             messages.insert(
-                "Saved on this iPhone. Cloud sync could not finish: \(error.localizedDescription)",
+                "Saved on this iPhone. Cloud sync could not finish. Tap Sync Now in Settings to retry.",
                 at: 0
             )
         }
@@ -1064,6 +1119,34 @@ final class FireVaultStore: ObservableObject {
             totalRows: localResult.totalRows,
             messages: Array(messages.prefix(12))
         )
+    }
+
+    private func markAccountForCloudSync(_ accountID: String) {
+        guard !demoMode else { return }
+        pendingCloudAccountIDs.insert(accountID)
+        pendingCloudAccountCount = pendingCloudAccountIDs.count
+        defaults.set(Array(pendingCloudAccountIDs).sorted(), forKey: Key.pendingCloudAccountIDs)
+        cloudSyncErrorMessage = nil
+    }
+
+    private func clearPendingCloudAccounts(_ accountIDs: Set<String>) {
+        pendingCloudAccountIDs.subtract(accountIDs)
+        pendingCloudAccountCount = pendingCloudAccountIDs.count
+        defaults.set(Array(pendingCloudAccountIDs).sorted(), forKey: Key.pendingCloudAccountIDs)
+    }
+
+    private func recordSuccessfulCloudSync() {
+        let timestamp = Date()
+        cloudLastSyncedAt = timestamp
+        defaults.set(timestamp, forKey: Key.cloudLastSyncedAt)
+        cloudSyncErrorMessage = nil
+    }
+
+    private func recordCloudSyncFailure() {
+        // Offline-first behavior is intentional: the last valid on-device vault
+        // stays available. Keep the customer message actionable and avoid
+        // exposing low-level network or authentication details.
+        cloudSyncErrorMessage = "FireVault Cloud could not be reached. Your saved accounts remain available."
     }
 
     private func mergeCloudAccounts(_ cloudRows: [FireVaultCloudAccountRow]) {
