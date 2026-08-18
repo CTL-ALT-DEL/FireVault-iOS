@@ -2630,7 +2630,7 @@ struct NativeSettingsView: View {
                 }
             )) {
                 NavigationLink {
-                    FireVaultAccountSettingsView()
+                    FireVaultAccountSettingsView(store: store)
                 } label: {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
