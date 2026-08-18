@@ -71,6 +71,7 @@ final class FireVaultStore: ObservableObject {
     @Published private(set) var cloudLastSyncedAt: Date?
     @Published private(set) var cloudSyncErrorMessage: String? = nil
     @Published private(set) var isCloudSyncing = false
+    @Published private(set) var pendingCloudAccountCount = 0
 
     private let defaults: UserDefaults
     private let mediaRootURL: URL?
@@ -78,6 +79,7 @@ final class FireVaultStore: ObservableObject {
     private var geocodingTask: Task<Void, Never>?
     private var categoryRules: [FireVaultCategoryRule] = []
     private var categoryRuleSuppressedAccountIDs: Set<String>
+    private var pendingCloudAccountIDs: Set<String>
 
     private enum Key {
         static let demoMode = "firevault.native.demo-mode.v1"
@@ -88,12 +90,15 @@ final class FireVaultStore: ObservableObject {
         static let demoCategoryRuleSuppressions = "firevault.native.demo-category-rule-suppressions.v1"
         static let productionCategoryRuleSuppressions = "firevault.native.production-category-rule-suppressions.v1"
         static let cloudLastSyncedAt = "firevault.native.cloud-last-synced-at.v1"
+        static let pendingCloudAccountIDs = "firevault.native.pending-cloud-account-ids.v1"
     }
 
     init(defaults: UserDefaults = .standard, mediaRootURL: URL? = nil) {
         self.defaults = defaults
         self.mediaRootURL = mediaRootURL ?? Self.defaultMediaRootURL()
         cloudLastSyncedAt = defaults.object(forKey: Key.cloudLastSyncedAt) as? Date
+        pendingCloudAccountIDs = Set(defaults.stringArray(forKey: Key.pendingCloudAccountIDs) ?? [])
+        pendingCloudAccountCount = pendingCloudAccountIDs.count
         let activeDemoMode = defaults.object(forKey: Key.demoMode) as? Bool ?? true
         demoMode = activeDemoMode
         let suppressionKey = activeDemoMode
@@ -392,6 +397,7 @@ final class FireVaultStore: ObservableObject {
             guard let match = matchByAccountID[accounts[index].id] else { continue }
             accounts[index].latitude = match.latitude
             accounts[index].longitude = match.longitude
+            markAccountForCloudSync(accounts[index].id)
         }
         persist()
     }
@@ -461,6 +467,7 @@ final class FireVaultStore: ObservableObject {
         accounts[index].phone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
         accounts[index].latitude = latitude
         accounts[index].longitude = longitude
+        markAccountForCloudSync(id)
         persist()
         return true
     }
@@ -486,6 +493,7 @@ final class FireVaultStore: ObservableObject {
             recent: []
         )
         accounts.append(account)
+        markAccountForCloudSync(account.id)
         openAccount(account.id)
         persist()
         return account
@@ -535,6 +543,7 @@ final class FireVaultStore: ObservableObject {
             ]
         )
         accounts.append(account)
+        markAccountForCloudSync(account.id)
         persist()
         return account
     }
@@ -1028,6 +1037,7 @@ final class FireVaultStore: ObservableObject {
         if demoMode { return "Demo data" }
         if isCloudSyncing { return "Syncing" }
         if cloudSyncErrorMessage != nil { return "Needs attention" }
+        if pendingCloudAccountCount > 0 { return "Changes waiting" }
         return cloudLastSyncedAt == nil ? "Not synced yet" : "Up to date"
     }
 
@@ -1044,7 +1054,18 @@ final class FireVaultStore: ObservableObject {
         do {
             // Reading session refreshes an expired token when needed, so Sync
             // Now verifies the saved sign-in before reading user-owned accounts.
-            _ = try await SupabaseManager.client.auth.session
+            let session = try await SupabaseManager.client.auth.session
+            let pendingIDs = pendingCloudAccountIDs
+            let pendingAccounts = accounts.filter { pendingIDs.contains($0.id) }
+
+            if !pendingAccounts.isEmpty {
+                try await FireVaultAccountSyncService.upsertAccounts(
+                    pendingAccounts,
+                    userID: session.user.id
+                )
+                clearPendingCloudAccounts(pendingIDs)
+            }
+
             let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
             guard !demoMode else { return }
             mergeCloudAccounts(cloudRows)
@@ -1096,6 +1117,20 @@ final class FireVaultStore: ObservableObject {
             totalRows: localResult.totalRows,
             messages: Array(messages.prefix(12))
         )
+    }
+
+    private func markAccountForCloudSync(_ accountID: String) {
+        guard !demoMode else { return }
+        pendingCloudAccountIDs.insert(accountID)
+        pendingCloudAccountCount = pendingCloudAccountIDs.count
+        defaults.set(Array(pendingCloudAccountIDs).sorted(), forKey: Key.pendingCloudAccountIDs)
+        cloudSyncErrorMessage = nil
+    }
+
+    private func clearPendingCloudAccounts(_ accountIDs: Set<String>) {
+        pendingCloudAccountIDs.subtract(accountIDs)
+        pendingCloudAccountCount = pendingCloudAccountIDs.count
+        defaults.set(Array(pendingCloudAccountIDs).sorted(), forKey: Key.pendingCloudAccountIDs)
     }
 
     private func recordSuccessfulCloudSync() {
