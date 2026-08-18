@@ -2363,6 +2363,29 @@ final class FireVaultTests: XCTestCase {
         )
     }
 
+    func testTripLogEscalatesToHardReceiverResetAfterTwoSoftAttempts() {
+        XCTAssertFalse(
+            FireVaultBreadcrumbRules.requiresHardLocationRecovery(
+                consecutiveRecoveryCount: 0
+            )
+        )
+        XCTAssertFalse(
+            FireVaultBreadcrumbRules.requiresHardLocationRecovery(
+                consecutiveRecoveryCount: 1
+            )
+        )
+        XCTAssertTrue(
+            FireVaultBreadcrumbRules.requiresHardLocationRecovery(
+                consecutiveRecoveryCount: 2
+            )
+        )
+        XCTAssertTrue(
+            FireVaultBreadcrumbRules.requiresHardLocationRecovery(
+                consecutiveRecoveryCount: 3
+            )
+        )
+    }
+
     func testBreadcrumbDepartureRequiresConsistentEvidence() {
         let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
         let origin = CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)
