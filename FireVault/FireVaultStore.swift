@@ -1058,11 +1058,13 @@ final class FireVaultStore: ObservableObject {
             let pendingIDs = pendingCloudAccountIDs
             let pendingAccounts = accounts.filter { pendingIDs.contains($0.id) }
 
-            if !pendingAccounts.isEmpty {
-                try await FireVaultAccountSyncService.upsertAccounts(
-                    pendingAccounts,
-                    userID: session.user.id
-                )
+            if !pendingIDs.isEmpty {
+                if !pendingAccounts.isEmpty {
+                    try await FireVaultAccountSyncService.upsertAccounts(
+                        pendingAccounts,
+                        userID: session.user.id
+                    )
+                }
                 clearPendingCloudAccounts(pendingIDs)
             }
 
