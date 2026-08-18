@@ -337,6 +337,33 @@ final class FireVaultTests: XCTestCase {
         )
     }
 
+    func testProductionVaultShowsCloudSyncPendingBeforeFirstSync() throws {
+        let suite = "FireVaultTests.CloudSyncPending.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+
+        let store = FireVaultStore(defaults: defaults)
+
+        XCTAssertNil(store.cloudLastSyncedAt)
+        XCTAssertNil(store.cloudSyncErrorMessage)
+        XCTAssertEqual(store.cloudSyncStatusText, "Not synced yet")
+    }
+
+    func testProductionVaultRestoresLastSuccessfulCloudSyncTime() throws {
+        let suite = "FireVaultTests.CloudSyncRestore.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let lastSync = Date(timeIntervalSince1970: 1_700_000_000)
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defaults.set(lastSync, forKey: "firevault.native.cloud-last-synced-at.v1")
+
+        let store = FireVaultStore(defaults: defaults)
+
+        XCTAssertEqual(store.cloudLastSyncedAt, lastSync)
+        XCTAssertEqual(store.cloudSyncStatusText, "Up to date")
+    }
+
     func testAddingProductionAccountSelectsItWithoutFakeLocationData() throws {
         let suite = "FireVaultTests.AddProductionAccount.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
