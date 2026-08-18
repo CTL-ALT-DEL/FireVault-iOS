@@ -97,6 +97,25 @@ enum FireVaultAccountSyncService {
             .value
     }
 
+    static func deleteAccount(id: UUID, name: String) async throws {
+        let session = try await SupabaseManager.client.auth.session
+        try await SupabaseManager.client
+            .from("accounts")
+            .delete()
+            .eq("id", value: id)
+            .eq("user_id", value: session.user.id)
+            .execute()
+
+        _ = try? await SupabaseManager.client
+            .from("account_activity")
+            .insert(AccountDeletionActivity(
+                userID: session.user.id,
+                accountName: name,
+                metadata: ["deleted_account_id": id.uuidString.lowercased()]
+            ))
+            .execute()
+    }
+
     static func importCSV(
         data: Data,
         fileName: String,
@@ -268,6 +287,24 @@ enum FireVaultAccountSyncService {
 
     private static func identityKey(name: String, address: String) -> String {
         "\(name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())|\(address.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+    }
+}
+
+private struct AccountDeletionActivity: Encodable {
+    let userID: UUID
+    let accountName: String
+    let eventType = "deleted"
+    let source = "ios_app"
+    let summary = "Account permanently deleted from iPhone"
+    let metadata: [String: String]
+
+    enum CodingKeys: String, CodingKey {
+        case userID = "user_id"
+        case accountName = "account_name"
+        case eventType = "event_type"
+        case source
+        case summary
+        case metadata
     }
 }
 

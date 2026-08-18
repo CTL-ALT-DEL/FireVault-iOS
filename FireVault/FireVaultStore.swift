@@ -395,6 +395,24 @@ final class FireVaultStore: ObservableObject {
         persist()
     }
 
+    func deleteAccount(id: String) async throws {
+        guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+        let account = accounts[index]
+
+        if !demoMode, let cloudID = UUID(uuidString: id) {
+            try await FireVaultAccountSyncService.deleteAccount(id: cloudID, name: account.name)
+        }
+
+        accounts.remove(at: index)
+        categoryRuleSuppressedAccountIDs.remove(id)
+        if selectedAccountID == id { selectedAccountID = nil }
+        if captureAccountID == id { captureAccountID = nil }
+        if let directory = mediaDirectoryURL(accountID: id) {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        persist()
+    }
+
     @discardableResult
     func updateAccount(
         id: String,

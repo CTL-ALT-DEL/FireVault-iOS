@@ -194,6 +194,8 @@ struct FieldWorkspaceView: View {
 
     @State private var isShowingAccountEditor = false
     @State private var isShowingNoteEditor = false
+    @State private var isConfirmingAccountDeletion = false
+    @State private var accountDeletionError: String?
 
     private let columns = [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)]
     private var previewCoordinate: CLLocationCoordinate2D? {
@@ -246,13 +248,18 @@ struct FieldWorkspaceView: View {
                     .buttonStyle(.glass)
                     .accessibilityLabel(account.favorite ? "Remove Favorite" : "Add Favorite")
 
-                    Button {
-                        isShowingAccountEditor = true
+                    Menu {
+                        Button("Edit Account", systemImage: "pencil") {
+                            isShowingAccountEditor = true
+                        }
+                        Button("Delete Account", systemImage: "trash", role: .destructive) {
+                            isConfirmingAccountDeletion = true
+                        }
                     } label: {
-                        Image(systemName: "pencil")
+                        Image(systemName: "ellipsis")
                     }
                     .buttonStyle(.glass)
-                    .accessibilityLabel("Edit account")
+                    .accessibilityLabel("Account actions")
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -279,6 +286,32 @@ struct FieldWorkspaceView: View {
             FireVaultNoteEditorSheet(accountName: account.name, note: nil) { draft in
                 store.addNote(to: account.id, title: draft.title, text: draft.text) != nil
             }
+        }
+        .confirmationDialog(
+            "Permanently delete \(account.name)?",
+            isPresented: $isConfirmingAccountDeletion,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Account Permanently", role: .destructive) {
+                Task {
+                    do {
+                        try await store.deleteAccount(id: account.id)
+                    } catch {
+                        accountDeletionError = error.localizedDescription
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the account and its local photos and documents. Recorded Trip Logs remain available. This cannot be undone.")
+        }
+        .alert("Account Could Not Be Deleted", isPresented: .init(
+            get: { accountDeletionError != nil },
+            set: { if !$0 { accountDeletionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { accountDeletionError = nil }
+        } message: {
+            Text(accountDeletionError ?? "Please try again.")
         }
     }
 
