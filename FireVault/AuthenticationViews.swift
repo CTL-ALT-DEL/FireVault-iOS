@@ -425,10 +425,12 @@ struct FireVaultAccountSettingsView: View {
                     Text("Status")
                 }
 
-                LabeledContent("Last successful sync") {
+                LabeledContent {
                     Text(lastSyncText)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.trailing)
+                } label: {
+                    Text("Last successful sync")
                 }
 
                 Button {
