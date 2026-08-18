@@ -10,6 +10,8 @@ import Combine
 import CoreLocation
 import MapKit
 import UIKit
+import Supabase
+import Auth
 
 struct FireVaultCSVImportResult: Equatable {
     let added: Int
