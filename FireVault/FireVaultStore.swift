@@ -1139,9 +1139,6 @@ final class FireVaultStore: ObservableObject {
         cloudLastSyncedAt = timestamp
         defaults.set(timestamp, forKey: Key.cloudLastSyncedAt)
         cloudSyncErrorMessage = nil
-        locationStatus = accountCount == 1
-            ? "Cloud synced • 1 account"
-            : "Cloud synced • \(accountCount) accounts"
     }
 
     private func recordCloudSyncFailure() {
