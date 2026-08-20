@@ -526,7 +526,18 @@ final class FireVaultTests: XCTestCase {
         store.accounts[index].notes = [.init(id: "note-1", title: "Panel", text: "Lobby", date: "Today")]
         store.accounts[index].documents = [.init(id: "doc-1", title: "Report", subtitle: "Annual", kind: "PDF", date: "Today")]
         store.accounts[index].equipment = [.init(id: "equipment-1", title: "FACP", subtitle: "Lobby", status: "Normal")]
-        store.accounts[index].locations = [.init(id: "location-1", label: "Panel", subtitle: "Lobby", type: "Equipment", plusCode: "", latitude: 43.615, longitude: -116.202)]
+        let locationCoordinate = CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)
+        store.accounts[index].locations = [
+            .init(
+                id: "location-1",
+                label: "Panel",
+                subtitle: "Lobby",
+                type: "Equipment",
+                plusCode: FireVaultPlusCode.encode(locationCoordinate, length: 11),
+                latitude: locationCoordinate.latitude,
+                longitude: locationCoordinate.longitude
+            )
+        ]
         store.accounts[index].recent = [.init(id: "recent-1", title: "Created", subtitle: "Test", kind: "account", date: "Today")]
 
         XCTAssertTrue(
@@ -2751,7 +2762,11 @@ final class FireVaultTests: XCTestCase {
 
         let store = FireVaultStore(defaults: defaults, accountArchiveURL: archiveURL)
         let account = store.addAccount()
-        try await Task.sleep(for: .milliseconds(450))
+        let persistenceDeadline = ContinuousClock.now + .seconds(2)
+        while ContinuousClock.now < persistenceDeadline,
+              FireVaultAccountArchive.load(from: archiveURL)?.contains(where: { $0.id == account.id }) != true {
+            try await Task.sleep(for: .milliseconds(50))
+        }
         defaults.removeObject(forKey: "firevault.native.production-accounts.v1")
 
         let reloaded = FireVaultStore(defaults: defaults, accountArchiveURL: archiveURL)
