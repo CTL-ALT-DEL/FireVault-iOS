@@ -27,6 +27,11 @@ struct FireVaultWorkspaceAccount: Codable, Identifiable, Equatable {
     var equipment: [FireVaultWorkspaceEquipment]
     var locations: [FireVaultWorkspaceLocation]
     var recent: [FireVaultWorkspaceRecent]
+    /// Added after the original on-device vault shipped. Optional fields keep
+    /// existing archives decodable and identify records needing backfill.
+    var cloudID: String? = nil
+    var cloudSyncedAt: Date? = nil
+    var cloudSyncError: String? = nil
 
     var coordinate: CLLocationCoordinate2D? {
         guard let latitude, let longitude,

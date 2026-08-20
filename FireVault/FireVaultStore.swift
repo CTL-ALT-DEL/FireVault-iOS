@@ -78,6 +78,8 @@ final class FireVaultStore: ObservableObject {
     @Published private(set) var cloudLastSyncedAt: Date?
     @Published private(set) var cloudSyncErrorMessage: String? = nil
     @Published private(set) var isCloudSyncing = false
+    @Published private(set) var cloudSyncCompleted = 0
+    @Published private(set) var cloudSyncTotal = 0
 
     private let defaults: UserDefaults
     private let accountArchiveURLOverride: URL?
@@ -1070,7 +1072,44 @@ final class FireVaultStore: ObservableObject {
     }
 
     func syncAccountsNow() async {
-        await refreshAccountsFromCloud()
+        guard !demoMode, !isCloudSyncing else { return }
+        isCloudSyncing = true
+        cloudSyncErrorMessage = nil
+        cloudSyncCompleted = 0
+        cloudSyncTotal = accounts.filter { $0.cloudID == nil || $0.cloudSyncedAt == nil }.count
+        defer { isCloudSyncing = false }
+        do {
+            let result = try await FireVaultAccountSyncService.backfillLegacyAccounts(accounts) { [weak self] completed, total in
+                await MainActor.run {
+                    self?.cloudSyncCompleted = completed
+                    self?.cloudSyncTotal = total
+                }
+            }
+            let timestamp = Date()
+            for index in accounts.indices {
+                guard let remoteID = result.mappings[accounts[index].id] else { continue }
+                accounts[index].cloudID = remoteID.uuidString
+                accounts[index].cloudSyncedAt = timestamp
+                accounts[index].cloudSyncError = nil
+            }
+            persist()
+            let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
+            mergeCloudAccounts(cloudRows)
+            recordSuccessfulCloudSync()
+        } catch {
+            cloudSyncErrorMessage = error.localizedDescription.isEmpty
+                ? "Cloud sync failed. Your accounts remain saved on this iPhone."
+                : error.localizedDescription
+        }
+    }
+
+    func eraseLocalAccountDataAfterCloudDeletion() {
+        accounts.removeAll()
+        selectedAccountID = nil
+        captureAccountID = nil
+        cloudLastSyncedAt = nil
+        defaults.removeObject(forKey: Key.cloudLastSyncedAt)
+        persistAccounts()
     }
 
     func refreshAccountsFromCloud() async {

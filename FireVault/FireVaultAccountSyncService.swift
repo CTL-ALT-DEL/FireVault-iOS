@@ -6,6 +6,12 @@ struct FireVaultCloudImportResult: Equatable {
     let skippedRows: Int
 }
 
+struct FireVaultLegacyBackfillResult: Equatable {
+    let uploaded: Int
+    let matched: Int
+    let mappings: [String: UUID]
+}
+
 struct FireVaultCloudAccountRow: Decodable {
     let id: UUID
     let accountName: String
@@ -95,6 +101,74 @@ enum FireVaultAccountSyncService {
             .order("account_name", ascending: true)
             .execute()
             .value
+    }
+
+    static func backfillLegacyAccounts(
+        _ accounts: [FireVaultWorkspaceAccount],
+        progress: @escaping (Int, Int) async -> Void
+    ) async throws -> FireVaultLegacyBackfillResult {
+        let session = try await SupabaseManager.client.auth.session
+        let remote = try await fetchAccounts()
+        var byNumber: [String: FireVaultCloudAccountRow] = [:]
+        var byIdentity: [String: FireVaultCloudAccountRow] = [:]
+        for row in remote {
+            let number = canonicalAccountID(row.accountNumber ?? "")
+            if !number.isEmpty, byNumber[number] == nil { byNumber[number] = row }
+            if byIdentity[row.identityKey] == nil { byIdentity[row.identityKey] = row }
+        }
+        var mappings: [String: UUID] = [:]
+        var uploaded = 0
+        var matched = 0
+        let candidates = accounts.filter { $0.cloudID == nil || $0.cloudSyncedAt == nil }
+
+        for (offset, account) in candidates.enumerated() {
+            try Task.checkCancellation()
+            let number = canonicalAccountID(account.accountId)
+            let identity = identityKey(name: account.name, address: account.address)
+            let existing = account.cloudID.flatMap(UUID.init(uuidString:)).flatMap { id in
+                remote.first { $0.id == id }
+            } ?? (!number.isEmpty ? byNumber[number] : nil) ?? byIdentity[identity]
+            let remoteID = existing?.id ?? UUID(uuidString: account.id) ?? UUID()
+
+            if existing == nil {
+                let row = CloudAccountUpsert(
+                    id: remoteID, userID: session.user.id, importID: nil,
+                    accountName: account.name, accountNumber: number.nilIfEmpty,
+                    addressLine1: account.address.nilIfEmpty, addressLine2: nil,
+                    city: nil, state: nil, postalCode: nil, country: "US",
+                    latitude: account.latitude, longitude: account.longitude,
+                    phone: account.phone.nilIfEmpty, archived: false
+                )
+                try await withRetry {
+                    try await SupabaseManager.client.from("accounts").upsert(row).execute()
+                }
+                uploaded += 1
+                let synthesized = FireVaultCloudAccountRow(
+                    id: remoteID, accountName: account.name, accountNumber: number.nilIfEmpty,
+                    addressLine1: account.address.nilIfEmpty, addressLine2: nil, city: nil,
+                    state: nil, postalCode: nil, country: "US", latitude: account.latitude,
+                    longitude: account.longitude, phone: account.phone.nilIfEmpty, archived: false
+                )
+                if !number.isEmpty { byNumber[number] = synthesized }
+                byIdentity[identity] = synthesized
+            } else {
+                matched += 1
+            }
+            mappings[account.id] = remoteID
+            await progress(offset + 1, candidates.count)
+        }
+        return .init(uploaded: uploaded, matched: matched, mappings: mappings)
+    }
+
+    private static func withRetry(_ operation: () async throws -> Void) async throws {
+        var lastError: Error?
+        for attempt in 0..<3 {
+            do { try await operation(); return } catch {
+                lastError = error
+                if attempt < 2 { try await Task.sleep(for: .milliseconds(400 * (attempt + 1))) }
+            }
+        }
+        throw lastError!
     }
 
     static func importCSV(
@@ -312,7 +386,7 @@ private struct CSVImportJobCompletion: Encodable {
 private struct CloudAccountUpsert: Encodable {
     let id: UUID
     let userID: UUID
-    let importID: UUID
+    let importID: UUID?
     let accountName: String
     let accountNumber: String?
     let addressLine1: String?

@@ -97,6 +97,22 @@ final class FireVaultAuthentication: ObservableObject {
         }
     }
 
+    func deleteAccount(store: FireVaultStore) async {
+        guard !isWorking else { return }
+        clearMessages()
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            _ = try await SupabaseManager.client.functions.invoke("delete-account")
+            store.eraseLocalAccountDataAfterCloudDeletion()
+            try? await SupabaseManager.client.auth.signOut()
+            signedInEmail = ""
+            phase = .signedOut
+        } catch {
+            errorMessage = friendlyMessage(for: error)
+        }
+    }
+
     func clearMessages() {
         errorMessage = nil
         confirmationMessage = nil
@@ -379,6 +395,7 @@ struct FireVaultAccountSettingsView: View {
     @EnvironmentObject private var authentication: FireVaultAuthentication
     @ObservedObject var store: FireVaultStore
     @State private var showsSignOutConfirmation = false
+    @State private var showsDeleteConfirmation = false
 
     private var accountEmail: String {
         let email = authentication.signedInEmail.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -425,7 +442,7 @@ struct FireVaultAccountSettingsView: View {
                 }
             }
 
-            Section("Cloud Sync") {
+            Section {
                 LabeledContent {
                     Label(store.cloudSyncStatusText, systemImage: cloudSyncSymbol)
                         .foregroundStyle(cloudSyncTint)
@@ -444,7 +461,7 @@ struct FireVaultAccountSettingsView: View {
                         await store.syncAccountsNow()
                     }
                 } label: {
-                    HStack {
+                HStack {
                         Label(
                             store.isCloudSyncing ? "Syncing…" : "Sync Now",
                             systemImage: "arrow.triangle.2.circlepath"
@@ -457,11 +474,20 @@ struct FireVaultAccountSettingsView: View {
                 }
                 .disabled(store.isCloudSyncing || store.demoMode)
 
+                if store.isCloudSyncing, store.cloudSyncTotal > 0 {
+                    ProgressView(value: Double(store.cloudSyncCompleted), total: Double(store.cloudSyncTotal)) {
+                        Text("Backing up legacy accounts")
+                    } currentValueLabel: {
+                        Text("\(store.cloudSyncCompleted) of \(store.cloudSyncTotal)")
+                    }
+                }
                 if let message = store.cloudSyncErrorMessage {
                     Label(message, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
                         .foregroundStyle(.orange)
                 }
+            } header: {
+                Text("Cloud Sync")
             } footer: {
                 Text(
                     store.demoMode
@@ -486,6 +512,14 @@ struct FireVaultAccountSettingsView: View {
             } footer: {
                 Text("Signing out disconnects this device from your FireVault account. Local information remains on this device.")
             }
+            Section {
+                Button("Delete Account", role: .destructive) {
+                    showsDeleteConfirmation = true
+                }
+                .disabled(authentication.isWorking || store.isCloudSyncing)
+            } footer: {
+                Text("Permanently deletes your FireVault cloud account and its data, then removes local account records from this iPhone.")
+            }
         }
         .navigationTitle("Account & Sign-In")
         .navigationBarTitleDisplayMode(.inline)
@@ -503,6 +537,17 @@ struct FireVaultAccountSettingsView: View {
         } message: {
             Text("You will return to the Log In or Sign Up screen.")
         }
+        .confirmationDialog(
+            "Permanently delete your FireVault account?",
+            isPresented: $showsDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Account and Data", role: .destructive) {
+                Task { await authentication.deleteAccount(store: store) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This cannot be undone. If cloud deletion fails, local data will remain on this iPhone.")
+        }
     }
 }
-

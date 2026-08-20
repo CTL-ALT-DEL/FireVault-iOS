@@ -22,6 +22,7 @@ struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showsSplash = true
     @State private var widgetSnapshotTask: Task<Void, Never>?
+    @State private var hasStartedLegacyBackfill = false
 
     init() {
         _demoBreadcrumbs = State(initialValue: FireVaultDemoShowroom.makeBreadcrumbStore())
@@ -59,6 +60,7 @@ struct ContentView: View {
         .preferredColorScheme(preferredColorScheme)
         .task {
             prepareActiveVault()
+            startLegacyBackfillIfNeeded()
             store.configureCategoryRules(settings.preferences.categoryRules ?? [])
             privacyLock.configure(enabled: settings.preferences.privacy.enabled)
             handlePendingQuickAction()
@@ -110,8 +112,9 @@ struct ContentView: View {
         .onChange(of: settings.preferences.categoryRules) { _, rules in
             store.configureCategoryRules(rules ?? [])
         }
-        .onChange(of: store.demoMode) { _, _ in
+        .onChange(of: store.demoMode) { _, isDemoMode in
             prepareActiveVault()
+            if !isDemoMode { startLegacyBackfillIfNeeded() }
             scheduleWidgetSnapshotUpdate()
         }
         .onChange(of: store.selectedAccountID) { _, _ in
@@ -214,6 +217,12 @@ struct ContentView: View {
             FireVaultDemoShowroom.installAccountsIfNeeded(into: store)
         }
         activeBreadcrumbs.restoreActiveWorkday(accounts: store.accounts)
+    }
+
+    private func startLegacyBackfillIfNeeded() {
+        guard !store.demoMode, !hasStartedLegacyBackfill else { return }
+        hasStartedLegacyBackfill = true
+        Task { await store.syncAccountsNow() }
     }
 
     private var isPrivacyLocked: Bool {

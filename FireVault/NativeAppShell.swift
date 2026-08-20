@@ -2922,7 +2922,7 @@ struct FireVaultIPadSettingsWorkspace: View {
     @ViewBuilder
     private func destination(_ id: String) -> some View {
         switch id {
-        case "account": FireVaultAccountSettingsView()
+        case "account": FireVaultAccountSettingsView(store: store)
         case "tech": NativeTechnicianSettingsView(settings: settings)
         case "settingsView": NativeSettingsViewPreferencesView(settings: settings)
         case "appearance": NativeAppearanceSettingsView(settings: settings)
