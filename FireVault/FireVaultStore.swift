@@ -64,6 +64,17 @@ enum FireVaultCaptureQuickAction: Equatable {
     case scan
 }
 
+enum FireVaultCloudVaultAccessError: LocalizedError, Equatable {
+    case linkedToDifferentLogin
+
+    var errorDescription: String? {
+        switch self {
+        case .linkedToDifferentLogin:
+            "This iPhone's local vault is linked to another FireVault login. Sign out and use the original account. No local or cloud data was changed."
+        }
+    }
+}
+
 @MainActor
 final class FireVaultStore: ObservableObject {
     @Published var accounts: [FireVaultWorkspaceAccount]
@@ -76,6 +87,7 @@ final class FireVaultStore: ObservableObject {
     @Published private(set) var nearbyResetRequestID = UUID()
     @Published private(set) var pendingCaptureQuickAction: FireVaultCaptureQuickAction?
     @Published private(set) var cloudLastSyncedAt: Date?
+    @Published private(set) var cloudLastCheckedAt: Date?
     @Published private(set) var cloudSyncErrorMessage: String? = nil
     @Published private(set) var isCloudSyncing = false
     @Published private(set) var cloudSyncCompleted = 0
@@ -103,11 +115,14 @@ final class FireVaultStore: ObservableObject {
         static let demoCategoryRuleSuppressions = "firevault.native.demo-category-rule-suppressions.v1"
         static let productionCategoryRuleSuppressions = "firevault.native.production-category-rule-suppressions.v1"
         static let cloudLastSyncedAt = "firevault.native.cloud-last-synced-at.v1"
+        static let cloudLastCheckedAt = "firevault.native.cloud-last-checked-at.v1"
+        static let cloudVaultOwnerUserID = "firevault.native.cloud-vault-owner-user-id.v1"
     }
 
     init(defaults: UserDefaults = .standard, accountArchiveURL: URL? = nil) {
         self.defaults = defaults
         cloudLastSyncedAt = defaults.object(forKey: Key.cloudLastSyncedAt) as? Date
+        cloudLastCheckedAt = defaults.object(forKey: Key.cloudLastCheckedAt) as? Date
         let activeDemoMode = defaults.object(forKey: Key.demoMode) as? Bool ?? true
         demoMode = activeDemoMode
         usesFileArchive = defaults === UserDefaults.standard || accountArchiveURL != nil
@@ -1079,6 +1094,9 @@ final class FireVaultStore: ObservableObject {
         cloudSyncTotal = accounts.filter { $0.cloudID == nil || $0.cloudSyncedAt == nil }.count
         defer { isCloudSyncing = false }
         do {
+            let session = try await SupabaseManager.client.auth.session
+            let visibleCloudRows = try await FireVaultAccountSyncService.fetchAccounts()
+            try validateCloudVaultOwnership(userID: session.user.id, cloudRows: visibleCloudRows)
             let result = try await FireVaultAccountSyncService.backfillLegacyAccounts(accounts) { [weak self] completed, total in
                 await MainActor.run {
                     self?.cloudSyncCompleted = completed
@@ -1095,21 +1113,29 @@ final class FireVaultStore: ObservableObject {
             persist()
             let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
             mergeCloudAccounts(cloudRows)
+            recordCloudCheck()
             recordSuccessfulCloudSync()
         } catch {
+            recordCloudCheck()
             cloudSyncErrorMessage = error.localizedDescription.isEmpty
                 ? "Cloud sync failed. Your accounts remain saved on this iPhone."
                 : error.localizedDescription
         }
     }
 
-    func eraseLocalAccountDataAfterCloudDeletion() {
+    @discardableResult
+    func eraseLocalAccountDataAfterCloudDeletion(for userID: UUID) -> Bool {
+        guard cloudVaultOwnerUserID == userID else { return false }
         accounts.removeAll()
         selectedAccountID = nil
         captureAccountID = nil
         cloudLastSyncedAt = nil
+        cloudLastCheckedAt = nil
         defaults.removeObject(forKey: Key.cloudLastSyncedAt)
+        defaults.removeObject(forKey: Key.cloudLastCheckedAt)
+        defaults.removeObject(forKey: Key.cloudVaultOwnerUserID)
         persistAccounts()
+        return true
     }
 
     func refreshAccountsFromCloud() async {
@@ -1121,13 +1147,16 @@ final class FireVaultStore: ObservableObject {
         do {
             // Reading session refreshes an expired token when needed, so Sync
             // Now verifies the saved sign-in before reading user-owned accounts.
-            _ = try await SupabaseManager.client.auth.session
+            let session = try await SupabaseManager.client.auth.session
             let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
+            try validateCloudVaultOwnership(userID: session.user.id, cloudRows: cloudRows)
             guard !demoMode else { return }
             mergeCloudAccounts(cloudRows)
+            recordCloudCheck()
             recordSuccessfulCloudSync()
         } catch {
-            recordCloudSyncFailure()
+            recordCloudCheck()
+            recordCloudSyncFailure(error)
         }
     }
 
@@ -1145,6 +1174,9 @@ final class FireVaultStore: ObservableObject {
 
         var messages = localResult.messages
         do {
+            let session = try await SupabaseManager.client.auth.session
+            let visibleCloudRows = try await FireVaultAccountSyncService.fetchAccounts()
+            try validateCloudVaultOwnership(userID: session.user.id, cloudRows: visibleCloudRows)
             let cloudResult = try await FireVaultAccountSyncService.importCSV(
                 data: csvData,
                 fileName: fileName.isEmpty ? "accounts.csv" : fileName,
@@ -1153,13 +1185,15 @@ final class FireVaultStore: ObservableObject {
             )
             let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
             mergeCloudAccounts(cloudRows)
+            recordCloudCheck()
             recordSuccessfulCloudSync()
             messages.insert(
                 "Synced \(cloudResult.importedRows) account\(cloudResult.importedRows == 1 ? "" : "s") to your FireVault account.",
                 at: 0
             )
         } catch {
-            recordCloudSyncFailure()
+            recordCloudCheck()
+            recordCloudSyncFailure(error)
             messages.insert(
                 "Saved on this iPhone. Cloud sync could not finish. Tap Sync Now in Settings to retry.",
                 at: 0
@@ -1182,7 +1216,45 @@ final class FireVaultStore: ObservableObject {
         cloudSyncErrorMessage = nil
     }
 
-    private func recordCloudSyncFailure() {
+    private var cloudVaultOwnerUserID: UUID? {
+        defaults.string(forKey: Key.cloudVaultOwnerUserID).flatMap(UUID.init(uuidString:))
+    }
+
+    func validateCloudVaultOwnership(
+        userID: UUID,
+        cloudRows: [FireVaultCloudAccountRow]
+    ) throws {
+        if let ownerID = cloudVaultOwnerUserID {
+            guard ownerID == userID else {
+                throw FireVaultCloudVaultAccessError.linkedToDifferentLogin
+            }
+            return
+        }
+
+        let linkedCloudIDs = Set(accounts.compactMap { account in
+            account.cloudID.flatMap(UUID.init(uuidString:))
+        })
+        if !linkedCloudIDs.isEmpty {
+            let visibleCloudIDs = Set(cloudRows.map(\.id))
+            guard !linkedCloudIDs.isDisjoint(with: visibleCloudIDs) else {
+                throw FireVaultCloudVaultAccessError.linkedToDifferentLogin
+            }
+        }
+
+        defaults.set(userID.uuidString.lowercased(), forKey: Key.cloudVaultOwnerUserID)
+    }
+
+    private func recordCloudCheck() {
+        let timestamp = Date()
+        cloudLastCheckedAt = timestamp
+        defaults.set(timestamp, forKey: Key.cloudLastCheckedAt)
+    }
+
+    private func recordCloudSyncFailure(_ error: Error? = nil) {
+        if let accessError = error as? FireVaultCloudVaultAccessError {
+            cloudSyncErrorMessage = accessError.localizedDescription
+            return
+        }
         // Offline-first behavior is intentional: the last valid on-device vault
         // stays available. Keep the customer message actionable and avoid
         // exposing low-level network or authentication details.

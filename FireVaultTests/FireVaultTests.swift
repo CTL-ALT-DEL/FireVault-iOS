@@ -493,6 +493,105 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(store.cloudSyncStatusText, "Up to date")
     }
 
+    func testProductionVaultRestoresLastCloudCheckTime() throws {
+        let suite = "FireVaultTests.CloudCheckRestore.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let lastCheck = Date(timeIntervalSince1970: 1_700_000_123)
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defaults.set(lastCheck, forKey: "firevault.native.cloud-last-checked-at.v1")
+
+        let store = FireVaultStore(defaults: defaults)
+
+        XCTAssertEqual(store.cloudLastCheckedAt, lastCheck)
+    }
+
+    func testCloudVaultOwnershipRejectsDifferentLogin() throws {
+        let suite = "FireVaultTests.CloudOwnerMismatch.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let ownerID = UUID()
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defaults.set(ownerID.uuidString, forKey: "firevault.native.cloud-vault-owner-user-id.v1")
+        let store = FireVaultStore(defaults: defaults)
+        _ = store.addAccount()
+
+        XCTAssertThrowsError(
+            try store.validateCloudVaultOwnership(userID: UUID(), cloudRows: [])
+        ) { error in
+            XCTAssertEqual(error as? FireVaultCloudVaultAccessError, .linkedToDifferentLogin)
+        }
+        XCTAssertEqual(store.accounts.count, 1)
+        XCTAssertEqual(
+            defaults.string(forKey: "firevault.native.cloud-vault-owner-user-id.v1"),
+            ownerID.uuidString
+        )
+    }
+
+    func testCloudVaultOwnershipIsInferredFromVisibleLinkedRow() throws {
+        let suite = "FireVaultTests.CloudOwnerInference.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let account = store.addAccount()
+        let index = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        let cloudID = UUID()
+        let userID = UUID()
+        store.accounts[index].cloudID = cloudID.uuidString
+        let visibleRow = FireVaultCloudAccountRow(
+            id: cloudID,
+            accountName: account.name,
+            accountNumber: nil,
+            addressLine1: nil,
+            addressLine2: nil,
+            city: nil,
+            state: nil,
+            postalCode: nil,
+            country: "US",
+            latitude: nil,
+            longitude: nil,
+            phone: nil,
+            archived: false
+        )
+
+        XCTAssertNoThrow(
+            try store.validateCloudVaultOwnership(userID: userID, cloudRows: [visibleRow])
+        )
+        XCTAssertEqual(
+            defaults.string(forKey: "firevault.native.cloud-vault-owner-user-id.v1"),
+            userID.uuidString.lowercased()
+        )
+    }
+
+    func testDeletingDifferentCloudLoginPreservesLocalVault() throws {
+        let suite = "FireVaultTests.CloudDeleteMismatch.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defaults.set(UUID().uuidString, forKey: "firevault.native.cloud-vault-owner-user-id.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let account = store.addAccount()
+
+        XCTAssertFalse(store.eraseLocalAccountDataAfterCloudDeletion(for: UUID()))
+        XCTAssertEqual(store.accounts.map(\.id), [account.id])
+    }
+
+    func testDeletingOwningCloudLoginClearsLocalVaultBinding() throws {
+        let suite = "FireVaultTests.CloudDeleteOwner.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let ownerID = UUID()
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defaults.set(ownerID.uuidString, forKey: "firevault.native.cloud-vault-owner-user-id.v1")
+        let store = FireVaultStore(defaults: defaults)
+        _ = store.addAccount()
+
+        XCTAssertTrue(store.eraseLocalAccountDataAfterCloudDeletion(for: ownerID))
+        XCTAssertTrue(store.accounts.isEmpty)
+        XCTAssertNil(defaults.string(forKey: "firevault.native.cloud-vault-owner-user-id.v1"))
+    }
+
     func testAddingProductionAccountSelectsItWithoutFakeLocationData() throws {
         let suite = "FireVaultTests.AddProductionAccount.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

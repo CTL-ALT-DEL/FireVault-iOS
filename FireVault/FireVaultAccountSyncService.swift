@@ -128,7 +128,12 @@ enum FireVaultAccountSyncService {
             let existing = account.cloudID.flatMap(UUID.init(uuidString:)).flatMap { id in
                 remote.first { $0.id == id }
             } ?? (!number.isEmpty ? byNumber[number] : nil) ?? byIdentity[identity]
-            let remoteID = existing?.id ?? UUID(uuidString: account.id) ?? UUID()
+            // Supabase uses one global primary-key namespace for this table.
+            // Never reuse the device-local UUID when creating a cloud row: an
+            // older vault may already have uploaded that UUID under another
+            // user, and an upsert would then attempt a forbidden cross-user
+            // update instead of a safe insert.
+            let remoteID = existing?.id ?? UUID()
 
             if existing == nil {
                 let row = CloudAccountUpsert(

@@ -103,10 +103,15 @@ final class FireVaultAuthentication: ObservableObject {
         isWorking = true
         defer { isWorking = false }
         do {
+            let session = try await SupabaseManager.client.auth.session
+            let userID = session.user.id
             _ = try await SupabaseManager.client.functions.invoke("delete-account")
-            store.eraseLocalAccountDataAfterCloudDeletion()
+            let removedLocalVault = store.eraseLocalAccountDataAfterCloudDeletion(for: userID)
             try? await SupabaseManager.client.auth.signOut()
             signedInEmail = ""
+            confirmationMessage = removedLocalVault
+                ? "Your FireVault account and its local account records were deleted."
+                : "Your cloud account was deleted. This iPhone's local vault belongs to a different login and was kept safely on the device."
             phase = .signedOut
         } catch {
             errorMessage = friendlyMessage(for: error)
@@ -421,6 +426,11 @@ struct FireVaultAccountSettingsView: View {
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 
+    private var lastCheckedText: String {
+        guard let date = store.cloudLastCheckedAt else { return "Not yet" }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
     var body: some View {
         Form {
             Section("FireVault Account") {
@@ -452,6 +462,12 @@ struct FireVaultAccountSettingsView: View {
 
                 LabeledContent("Last successful sync") {
                     Text(lastSyncText)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+
+                LabeledContent("Last checked") {
+                    Text(lastCheckedText)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.trailing)
                 }

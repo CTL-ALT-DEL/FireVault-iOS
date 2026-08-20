@@ -412,7 +412,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = FireVaultWidgets/FireVaultWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 126;
+				CURRENT_PROJECT_VERSION = 127;
 				DEVELOPMENT_TEAM = 44K72272WR;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FireVaultWidgets/Info.plist;
@@ -421,7 +421,7 @@
 					"$(inherited)",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.08.66;
+				MARKETING_VERSION = 1.08.67;
 				PRODUCT_BUNDLE_IDENTIFIER = us.bannerman.firevault.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -438,7 +438,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = FireVaultWidgets/FireVaultWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 126;
+				CURRENT_PROJECT_VERSION = 127;
 				DEVELOPMENT_TEAM = 44K72272WR;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FireVaultWidgets/Info.plist;
@@ -447,7 +447,7 @@
 					"$(inherited)",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.08.66;
+				MARKETING_VERSION = 1.08.67;
 				PRODUCT_BUNDLE_IDENTIFIER = us.bannerman.firevault.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -586,7 +586,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = FireVault/FireVault.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 126;
+				CURRENT_PROJECT_VERSION = 127;
 				DEVELOPMENT_TEAM = 44K72272WR;
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = 44K72272WR;
 				ENABLE_PREVIEWS = YES;
@@ -608,7 +608,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.08.66;
+				MARKETING_VERSION = 1.08.67;
 				PRODUCT_BUNDLE_IDENTIFIER = us.bannerman.firevault;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -632,7 +632,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = FireVault/FireVault.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 126;
+				CURRENT_PROJECT_VERSION = 127;
 				DEVELOPMENT_TEAM = 44K72272WR;
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = 44K72272WR;
 				ENABLE_PREVIEWS = YES;
@@ -654,7 +654,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.08.66;
+				MARKETING_VERSION = 1.08.67;
 				PRODUCT_BUNDLE_IDENTIFIER = us.bannerman.firevault;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
