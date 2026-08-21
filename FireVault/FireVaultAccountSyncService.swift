@@ -12,6 +12,28 @@ struct FireVaultLegacyBackfillResult: Equatable {
     let mappings: [String: UUID]
 }
 
+enum FireVaultRemoteAccountDeletionResult: Equatable {
+    case noCloudRecord
+    case deleted(UUID)
+}
+
+enum FireVaultRemoteAccountDeletionError: LocalizedError, Equatable {
+    case linkedToDifferentLogin
+    case cloudRecordUnavailable
+    case deletionNotConfirmed
+
+    var errorDescription: String? {
+        switch self {
+        case .linkedToDifferentLogin:
+            "This iPhone's vault belongs to a different FireVault login. Nothing was deleted."
+        case .cloudRecordUnavailable:
+            "FireVault could not confirm that this cloud record belongs to the signed-in user. Nothing was deleted."
+        case .deletionNotConfirmed:
+            "FireVault Cloud did not confirm the deletion. The account remains saved on this iPhone."
+        }
+    }
+}
+
 struct FireVaultCloudAccountRow: Decodable {
     let id: UUID
     let accountName: String
@@ -67,7 +89,9 @@ struct FireVaultCloudAccountRow: Decodable {
             documents: [],
             equipment: [],
             locations: [],
-            recent: []
+            recent: [],
+            cloudID: id.uuidString,
+            cloudSyncedAt: Date()
         )
     }
 
@@ -101,6 +125,73 @@ enum FireVaultAccountSyncService {
             .order("account_name", ascending: true)
             .execute()
             .value
+    }
+
+    /// Permanently deletes one user-owned customer account. The explicit
+    /// `user_id` filter supplements RLS, and the verification query prevents a
+    /// successful-looking zero-row delete from removing the on-device copy.
+    static func deleteCustomerAccount(
+        _ account: FireVaultWorkspaceAccount,
+        expectedOwnerUserID: UUID?
+    ) async throws -> FireVaultRemoteAccountDeletionResult {
+        let session = try await SupabaseManager.client.auth.session
+        if let expectedOwnerUserID, expectedOwnerUserID != session.user.id {
+            throw FireVaultRemoteAccountDeletionError.linkedToDifferentLogin
+        }
+
+        let visibleRows: [FireVaultCloudAccountRow] = try await SupabaseManager.client
+            .from("accounts")
+            .select(accountSelect)
+            .order("account_name", ascending: true)
+            .execute()
+            .value
+        let number = canonicalAccountID(account.accountId)
+        let identity = identityKey(name: account.name, address: account.address)
+        let linkedID = account.cloudID.flatMap(UUID.init(uuidString:))
+        let remote: FireVaultCloudAccountRow?
+        if let linkedID {
+            remote = visibleRows.first { $0.id == linkedID }
+            // A linked UUID that is invisible may belong to another login, or
+            // the DELETE policy may not permit access. Preserve the local copy.
+            if remote == nil {
+                throw FireVaultRemoteAccountDeletionError.cloudRecordUnavailable
+            }
+        } else if let localUUID = UUID(uuidString: account.id),
+                  let exact = visibleRows.first(where: { $0.id == localUUID }) {
+            remote = exact
+        } else {
+            let numberMatches = number.isEmpty
+                ? []
+                : visibleRows.filter { canonicalAccountID($0.accountNumber ?? "") == number }
+            let identityMatches = visibleRows.filter { $0.identityKey == identity }
+            if numberMatches.count > 1 || (numberMatches.isEmpty && identityMatches.count > 1) {
+                throw FireVaultRemoteAccountDeletionError.cloudRecordUnavailable
+            }
+            remote = numberMatches.first ?? identityMatches.first
+        }
+
+        guard let remote else { return .noCloudRecord }
+
+        try await withRetry {
+            try await SupabaseManager.client
+                .from("accounts")
+                .delete()
+                .eq("id", value: remote.id)
+                .eq("user_id", value: session.user.id)
+                .execute()
+        }
+
+        let remaining: [CloudAccountIdentity] = try await SupabaseManager.client
+            .from("accounts")
+            .select("id")
+            .eq("id", value: remote.id)
+            .eq("user_id", value: session.user.id)
+            .execute()
+            .value
+        guard remaining.isEmpty else {
+            throw FireVaultRemoteAccountDeletionError.deletionNotConfirmed
+        }
+        return .deleted(remote.id)
     }
 
     static func backfillLegacyAccounts(
@@ -348,6 +439,10 @@ enum FireVaultAccountSyncService {
     private static func identityKey(name: String, address: String) -> String {
         "\(name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())|\(address.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
     }
+}
+
+private struct CloudAccountIdentity: Decodable {
+    let id: UUID
 }
 
 private struct CSVImportJobInsert: Encodable {

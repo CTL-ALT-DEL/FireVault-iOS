@@ -75,6 +75,25 @@ enum FireVaultCloudVaultAccessError: LocalizedError, Equatable {
     }
 }
 
+enum FireVaultCustomerAccountDeletionError: LocalizedError, Equatable {
+    case accountUnavailable
+    case syncInProgress
+
+    var errorDescription: String? {
+        switch self {
+        case .accountUnavailable:
+            "This customer account is no longer available."
+        case .syncInProgress:
+            "Wait for the current cloud sync to finish, then try deleting this customer account again."
+        }
+    }
+}
+
+typealias FireVaultRemoteAccountDelete = (
+    FireVaultWorkspaceAccount,
+    UUID?
+) async throws -> FireVaultRemoteAccountDeletionResult
+
 @MainActor
 final class FireVaultStore: ObservableObject {
     @Published var accounts: [FireVaultWorkspaceAccount]
@@ -96,6 +115,7 @@ final class FireVaultStore: ObservableObject {
     private let defaults: UserDefaults
     private let accountArchiveURLOverride: URL?
     private let usesFileArchive: Bool
+    private let remoteAccountDelete: FireVaultRemoteAccountDelete
     private var accountPersistenceGeneration = 0
     private var accountArchiveURL: URL? {
         accountArchiveURLOverride
@@ -119,8 +139,13 @@ final class FireVaultStore: ObservableObject {
         static let cloudVaultOwnerUserID = "firevault.native.cloud-vault-owner-user-id.v1"
     }
 
-    init(defaults: UserDefaults = .standard, accountArchiveURL: URL? = nil) {
+    init(
+        defaults: UserDefaults = .standard,
+        accountArchiveURL: URL? = nil,
+        remoteAccountDelete: @escaping FireVaultRemoteAccountDelete = FireVaultAccountSyncService.deleteCustomerAccount
+    ) {
         self.defaults = defaults
+        self.remoteAccountDelete = remoteAccountDelete
         cloudLastSyncedAt = defaults.object(forKey: Key.cloudLastSyncedAt) as? Date
         cloudLastCheckedAt = defaults.object(forKey: Key.cloudLastCheckedAt) as? Date
         let activeDemoMode = defaults.object(forKey: Key.demoMode) as? Bool ?? true
@@ -330,6 +355,56 @@ final class FireVaultStore: ObservableObject {
     func closeAccount(to tab: FireVaultShellTab? = nil) {
         selectedAccountID = nil
         if let tab { selectedTab = tab }
+    }
+
+    /// Deletes one customer/site record, not the signed-in FireVault user.
+    /// Production records are removed locally only after Supabase confirms the
+    /// user-owned cloud row is gone (or that no matching cloud row exists).
+    func deleteCustomerAccount(id: String) async throws {
+        guard let account = accounts.first(where: { $0.id == id }) else {
+            throw FireVaultCustomerAccountDeletionError.accountUnavailable
+        }
+        guard !isCloudSyncing else {
+            throw FireVaultCustomerAccountDeletionError.syncInProgress
+        }
+
+        if !demoMode {
+            isCloudSyncing = true
+            defer { isCloudSyncing = false }
+            do {
+                _ = try await remoteAccountDelete(account, cloudVaultOwnerUserID)
+                recordCloudCheck()
+                recordSuccessfulCloudSync()
+            } catch {
+                recordCloudCheck()
+                cloudSyncErrorMessage = error.localizedDescription.isEmpty
+                    ? "The customer account could not be deleted from FireVault Cloud. Nothing was removed from this iPhone."
+                    : error.localizedDescription
+                throw error
+            }
+        }
+
+        removeCustomerAccountFromDevice(id: id)
+    }
+
+    private func removeCustomerAccountFromDevice(id: String) {
+        guard accounts.contains(where: { $0.id == id }) else { return }
+        if let root = try? mediaRootURL() {
+            let safeAccountID = id.replacingOccurrences(
+                of: "[^A-Za-z0-9_-]",
+                with: "_",
+                options: .regularExpression
+            )
+            let directory = root.appendingPathComponent(safeAccountID, isDirectory: true)
+            if FileManager.default.fileExists(atPath: directory.path) {
+                try? FileManager.default.removeItem(at: directory)
+            }
+        }
+        accounts.removeAll { $0.id == id }
+        categoryRuleSuppressedAccountIDs.remove(id)
+        if selectedAccountID == id { selectedAccountID = nil }
+        if captureAccountID == id { captureAccountID = nil }
+        persistAccounts()
     }
 
     func refreshNearby() {
@@ -1297,6 +1372,9 @@ final class FireVaultStore: ObservableObject {
             if !accounts[existingIndex].tags.contains("Cloud Sync") {
                 accounts[existingIndex].tags.append("Cloud Sync")
             }
+            accounts[existingIndex].cloudID = row.id.uuidString
+            accounts[existingIndex].cloudSyncedAt = Date()
+            accounts[existingIndex].cloudSyncError = nil
         }
 
         persist()

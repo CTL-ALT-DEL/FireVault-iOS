@@ -506,6 +506,96 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(store.cloudLastCheckedAt, lastCheck)
     }
 
+    func testDeletingDemoCustomerAccountRemovesOnlySelectedLocalRecord() async throws {
+        let suite = "FireVaultTests.DeleteDemoCustomer.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var remoteDeleteWasCalled = false
+        let store = FireVaultStore(defaults: defaults) { _, _ in
+            remoteDeleteWasCalled = true
+            return .noCloudRecord
+        }
+        let account = store.addAccount()
+        let originalCount = store.accounts.count
+
+        try await store.deleteCustomerAccount(id: account.id)
+
+        XCTAssertFalse(remoteDeleteWasCalled)
+        XCTAssertEqual(store.accounts.count, originalCount - 1)
+        XCTAssertFalse(store.accounts.contains(where: { $0.id == account.id }))
+        XCTAssertNil(store.selectedAccountID)
+    }
+
+    func testDeletingLocalOnlyProductionCustomerRemovesItAfterCloudReportsNoMatch() async throws {
+        let suite = "FireVaultTests.DeleteLocalCustomer.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        var deletedLocalID: String?
+        let store = FireVaultStore(defaults: defaults) { account, _ in
+            deletedLocalID = account.id
+            return .noCloudRecord
+        }
+        let account = store.addAccount()
+
+        try await store.deleteCustomerAccount(id: account.id)
+
+        XCTAssertEqual(deletedLocalID, account.id)
+        XCTAssertTrue(store.accounts.isEmpty)
+        let reloaded = FireVaultStore(defaults: defaults) { _, _ in .noCloudRecord }
+        XCTAssertTrue(reloaded.accounts.isEmpty)
+    }
+
+    func testDeletingCloudLinkedCustomerPassesCloudIDAndExpectedOwner() async throws {
+        let suite = "FireVaultTests.DeleteCloudCustomer.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let ownerID = UUID()
+        let cloudID = UUID()
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defaults.set(ownerID.uuidString, forKey: "firevault.native.cloud-vault-owner-user-id.v1")
+        var receivedCloudID: String?
+        var receivedOwnerID: UUID?
+        let store = FireVaultStore(defaults: defaults) { account, expectedOwnerID in
+            receivedCloudID = account.cloudID
+            receivedOwnerID = expectedOwnerID
+            return .deleted(cloudID)
+        }
+        let account = store.addAccount()
+        let index = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        store.accounts[index].cloudID = cloudID.uuidString
+
+        try await store.deleteCustomerAccount(id: account.id)
+
+        XCTAssertEqual(receivedCloudID, cloudID.uuidString)
+        XCTAssertEqual(receivedOwnerID, ownerID)
+        XCTAssertTrue(store.accounts.isEmpty)
+        XCTAssertNotNil(store.cloudLastSyncedAt)
+        XCTAssertNotNil(store.cloudLastCheckedAt)
+    }
+
+    func testCloudDeletionFailurePreservesCustomerAccountAndSelection() async throws {
+        let suite = "FireVaultTests.DeleteCloudFailure.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults) { _, _ in
+            throw FireVaultRemoteAccountDeletionError.deletionNotConfirmed
+        }
+        let account = store.addAccount()
+
+        do {
+            try await store.deleteCustomerAccount(id: account.id)
+            XCTFail("Expected the cloud deletion to fail")
+        } catch {
+            XCTAssertEqual(error as? FireVaultRemoteAccountDeletionError, .deletionNotConfirmed)
+        }
+
+        XCTAssertTrue(store.accounts.contains(where: { $0.id == account.id }))
+        XCTAssertEqual(store.selectedAccountID, account.id)
+        XCTAssertNotNil(store.cloudSyncErrorMessage)
+    }
+
     func testCloudVaultOwnershipRejectsDifferentLogin() throws {
         let suite = "FireVaultTests.CloudOwnerMismatch.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

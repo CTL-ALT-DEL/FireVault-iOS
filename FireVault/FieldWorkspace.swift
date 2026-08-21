@@ -225,6 +225,9 @@ struct FieldWorkspaceView: View {
 
     @State private var isShowingAccountEditor = false
     @State private var isShowingNoteEditor = false
+    @State private var isConfirmingAccountDeletion = false
+    @State private var isDeletingAccount = false
+    @State private var accountDeletionError: String?
 
     private let columns = [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)]
     private var previewCoordinate: CLLocationCoordinate2D? {
@@ -243,6 +246,7 @@ struct FieldWorkspaceView: View {
                         }
                         destinations
                         recentActivity
+                        customerAccountDeletion
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
@@ -272,6 +276,22 @@ struct FieldWorkspaceView: View {
                     .buttonStyle(.glass)
                     .accessibilityLabel(account.favorite ? "Remove Favorite" : "Add Favorite")
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("Edit Customer Account", systemImage: "pencil") {
+                            isShowingAccountEditor = true
+                        }
+                        Divider()
+                        Button("Delete Customer Account", systemImage: "trash", role: .destructive) {
+                            isConfirmingAccountDeletion = true
+                        }
+                        .disabled(isDeletingAccount)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .buttonStyle(.glass)
+                    .accessibilityLabel("Customer account actions")
+                }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 appNavigation
@@ -297,6 +317,22 @@ struct FieldWorkspaceView: View {
             FireVaultNoteEditorSheet(accountName: account.name, note: nil) { draft in
                 store.addNote(to: account.id, title: draft.title, text: draft.text) != nil
             }
+        }
+        .alert("Delete Customer Account?", isPresented: $isConfirmingAccountDeletion) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete Customer Account", role: .destructive) {
+                deleteCustomerAccount()
+            }
+        } message: {
+            Text("This permanently deletes \(account.name) and its notes, files, equipment, and saved locations from this iPhone and FireVault Cloud. This cannot be undone.")
+        }
+        .alert("Customer Account Not Deleted", isPresented: Binding(
+            get: { accountDeletionError != nil },
+            set: { if !$0 { accountDeletionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { accountDeletionError = nil }
+        } message: {
+            Text(accountDeletionError ?? "Nothing was deleted.")
         }
     }
 
@@ -386,6 +422,49 @@ struct FieldWorkspaceView: View {
             ) {
                 isShowingAccountEditor = true
             }
+        }
+    }
+
+    private var customerAccountDeletion: some View {
+        Button(role: .destructive) {
+            isConfirmingAccountDeletion = true
+        } label: {
+            HStack(spacing: 10) {
+                if isDeletingAccount {
+                    ProgressView()
+                        .tint(.red)
+                } else {
+                    Image(systemName: "trash")
+                }
+                Text(isDeletingAccount ? "Deleting Customer Account…" : "Delete Customer Account")
+                    .font(.headline)
+                Spacer()
+            }
+            .foregroundStyle(.red)
+            .padding(15)
+            .background(.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(.red.opacity(0.25), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(isDeletingAccount)
+        .accessibilityIdentifier("delete-customer-account")
+    }
+
+    private func deleteCustomerAccount() {
+        guard !isDeletingAccount else { return }
+        isDeletingAccount = true
+        Task {
+            do {
+                try await store.deleteCustomerAccount(id: account.id)
+            } catch {
+                accountDeletionError = error.localizedDescription.isEmpty
+                    ? "Nothing was deleted. Check your connection and try again."
+                    : error.localizedDescription
+            }
+            isDeletingAccount = false
         }
     }
 
