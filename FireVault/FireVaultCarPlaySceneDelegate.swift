@@ -449,11 +449,11 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
     private func makeTripLogTemplate() -> CPInformationTemplate {
         let template = CPInformationTemplate(
-            // The persistent Trip Log tab already names this screen. An empty
-            // template title recovers a full row on compact CarPlay displays
-            // so all dashboard details remain visible without scrolling.
+            // The persistent Trip Log tab already names this screen. Keeping
+            // the navigation title empty leaves room for the native dashboard
+            // and its driving controls on compact CarPlay displays.
             title: "",
-            layout: .leading,
+            layout: .twoColumn,
             items: makeTripLogInformationItems(),
             actions: makeTripLogActions()
         )
@@ -473,14 +473,20 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         let speed = store.demoMode ? "64 mph" : currentSpeedText
         let elevation = store.demoMode ? "5,284 ft" : currentElevationText(location, day: day)
         let trip = store.demoMode ? "42.6 mi" : distanceText(day)
-        let stops = store.demoMode ? "2 stops" : stopSummaryText(day)
+        // Keep the driving dashboard factual and glanceable. Active-stop
+        // duration belongs in the completed Trip Log, where its meaning is
+        // clear, rather than implying that the driver is currently onsite.
+        let stops = store.demoMode ? "2 stops" : stopCountText(day)
         let time = store.demoMode ? "00:48:17" : elapsedText(day?.elapsedTime ?? 0)
         let accuracy = store.demoMode ? "±10 ft" : currentGPSAccuracyText(location)
 
         return [
-            CPInformationItem(title: "SPEED  \(speed)", detail: "ELEVATION  \(elevation)"),
-            CPInformationItem(title: "TRIP  \(trip)", detail: "STOPS  \(stops)"),
-            CPInformationItem(title: "TIME  \(time)", detail: "GPS ACCURACY  \(accuracy)")
+            CPInformationItem(title: "STATUS", detail: "\(tripLogStatus) • \(time)"),
+            CPInformationItem(title: "SPEED", detail: speed),
+            CPInformationItem(title: "TRIP", detail: trip),
+            CPInformationItem(title: "STOPS", detail: stops),
+            CPInformationItem(title: "GPS ACCURACY", detail: accuracy),
+            CPInformationItem(title: "ELEVATION", detail: elevation)
         ]
     }
 
@@ -716,9 +722,6 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     }
 
     private var tripLogStatus: String {
-        if breadcrumbs.activeDay?.stops.contains(where: { $0.departure == nil }) == true {
-            return "On Site"
-        }
         if breadcrumbs.isRecording { return "Recording" }
         if breadcrumbs.activeDay?.isPaused == true { return "Paused" }
         if breadcrumbs.activeDay == nil { return "Ready" }
@@ -781,23 +784,6 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private func stopCountText(_ day: FireVaultBreadcrumbDay?) -> String {
         let count = day?.stops.count ?? 0
         return count == 1 ? "1 stop" : "\(count) stops"
-    }
-
-    private func stopSummaryText(_ day: FireVaultBreadcrumbDay?) -> String {
-        guard let day,
-              let activeStop = day.stops.last(where: { $0.departure == nil }) else {
-            return stopCountText(day)
-        }
-        return "\(stopCountText(day)) • \(compactDuration(activeStop.duration)) onsite"
-    }
-
-    private func compactDuration(_ duration: TimeInterval) -> String {
-        let seconds = max(0, Int(duration.rounded()))
-        let minutes = seconds / 60
-        if minutes >= 60 {
-            return "\(minutes / 60)h \(minutes % 60)m"
-        }
-        return "\(minutes)m"
     }
 
     private func elapsedText(_ elapsedTime: TimeInterval) -> String {
