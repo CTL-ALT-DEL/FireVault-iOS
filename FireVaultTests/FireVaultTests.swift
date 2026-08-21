@@ -1482,6 +1482,28 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(sortedLabels, ["Service Parking", "Front Entrance", "Main FACP", "North Riser"])
     }
 
+    func testCarPlayDrivingHeadingUsesGlanceableCardinalLabels() {
+        XCTAssertEqual(FireVaultCarPlayPresentation.heading(course: -1), "Unavailable")
+        XCTAssertEqual(FireVaultCarPlayPresentation.heading(course: 0), "N • 0°")
+        XCTAssertEqual(FireVaultCarPlayPresentation.heading(course: 44), "NE • 44°")
+        XCTAssertEqual(FireVaultCarPlayPresentation.heading(course: 181), "S • 181°")
+        XCTAssertEqual(FireVaultCarPlayPresentation.heading(course: 359.8), "N • 0°")
+    }
+
+    func testCarPlayLocationAgeStaysCompact() {
+        XCTAssertEqual(FireVaultCarPlayPresentation.locationAge(seconds: 0.6), "Just now")
+        XCTAssertEqual(FireVaultCarPlayPresentation.locationAge(seconds: 12), "12 sec ago")
+        XCTAssertEqual(FireVaultCarPlayPresentation.locationAge(seconds: 60), "1 min ago")
+        XCTAssertEqual(FireVaultCarPlayPresentation.locationAge(seconds: 82), "1m 22s ago")
+    }
+
+    func testCarPlayDetailsOmitEmptySeparators() {
+        XCTAssertEqual(
+            FireVaultCarPlayPresentation.joined(["#A-104", " ", nil, "120 Main St"]),
+            "#A-104 • 120 Main St"
+        )
+    }
+
     func testLiveSpeedRejectsPoorAccuracyEvenWhenCoreLocationReportsSpeed() {
         let now = Date(timeIntervalSince1970: 1_700_000_100)
         let location = testLocation(
