@@ -1460,6 +1460,28 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(speed, 8)
     }
 
+    func testCarPlayArrivalUsesQuarterMileEntryAndHalfMileResetHysteresis() {
+        XCTAssertTrue(FireVaultCarPlayArrivalPolicy.hasArrived(distanceMeters: 402.336))
+        XCTAssertFalse(FireVaultCarPlayArrivalPolicy.hasArrived(distanceMeters: 402.337))
+        XCTAssertFalse(FireVaultCarPlayArrivalPolicy.shouldClearArrival(distanceMeters: 804.672))
+        XCTAssertTrue(FireVaultCarPlayArrivalPolicy.shouldClearArrival(distanceMeters: 804.673))
+    }
+
+    func testCarPlayArrivalPinsPutDrivingDestinationsFirst() {
+        let pins = [
+            (label: "North Riser", type: "Riser"),
+            (label: "Main FACP", type: "Panel"),
+            (label: "Service Parking", type: "POI"),
+            (label: "Front Entrance", type: "Entrance")
+        ]
+        let sortedLabels = pins.sorted {
+            FireVaultCarPlayArrivalPolicy.pinPriority(label: $0.label, type: $0.type)
+                < FireVaultCarPlayArrivalPolicy.pinPriority(label: $1.label, type: $1.type)
+        }.map(\.label)
+
+        XCTAssertEqual(sortedLabels, ["Service Parking", "Front Entrance", "Main FACP", "North Riser"])
+    }
+
     func testLiveSpeedRejectsPoorAccuracyEvenWhenCoreLocationReportsSpeed() {
         let now = Date(timeIntervalSince1970: 1_700_000_100)
         let location = testLocation(

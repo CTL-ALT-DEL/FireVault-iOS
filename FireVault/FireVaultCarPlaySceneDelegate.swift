@@ -11,6 +11,29 @@ import CoreLocation
 import MapKit
 import UIKit
 
+enum FireVaultCarPlayArrivalPolicy {
+    static let arrivalRadiusMeters: CLLocationDistance = 402.336
+    static let resetRadiusMeters: CLLocationDistance = 804.672
+
+    static func hasArrived(distanceMeters: CLLocationDistance) -> Bool {
+        distanceMeters >= 0 && distanceMeters <= arrivalRadiusMeters
+    }
+
+    static func shouldClearArrival(distanceMeters: CLLocationDistance) -> Bool {
+        distanceMeters > resetRadiusMeters
+    }
+
+    static func pinPriority(label: String, type: String) -> Int {
+        let value = "\(label) \(type)".lowercased()
+        if value.contains("parking") || value.contains("park here") { return 0 }
+        if value.contains("front entrance") || value.contains("main entrance") { return 1 }
+        if value.contains("entrance") || value.contains("door") { return 2 }
+        if value.contains("panel") { return 3 }
+        if value.contains("riser") { return 4 }
+        return 5
+    }
+}
+
 @MainActor
 final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private weak var interfaceController: CPInterfaceController?
@@ -26,7 +49,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
     private var nearbyTemplate: CPListTemplate?
     private var favoritesTemplate: CPListTemplate?
-    private var recentsTemplate: CPListTemplate?
+    private var arrivedTemplate: CPListTemplate?
     private var tripLogTemplate: CPInformationTemplate?
     private var gpsDiagnosticsTemplate: CPInformationTemplate?
     private var rootTabTemplate: CPTabBarTemplate?
@@ -35,6 +58,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private var tripLogLocationObservation: AnyCancellable?
     private var tripLogRecordingObservation: AnyCancellable?
     private var announcedArrivalAccountID: String?
+    private var arrivedAccountID: String?
 
     private let demoLocation = CLLocation(latitude: 43.6150, longitude: -116.2023)
     private let recentAccountIDsKey = "firevault.carplay.recentAccountIDs"
@@ -71,11 +95,12 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         locationService.stopLiveNearbyUpdates(consumer: .carPlay)
         nearbyTemplate = nil
         favoritesTemplate = nil
-        recentsTemplate = nil
+        arrivedTemplate = nil
         tripLogTemplate = nil
         gpsDiagnosticsTemplate = nil
         rootTabTemplate = nil
         announcedArrivalAccountID = nil
+        arrivedAccountID = nil
         self.interfaceController = nil
     }
 
@@ -99,11 +124,11 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         configureTab(favorites, title: "Favorites", symbol: "star.fill", color: .systemYellow)
         favoritesTemplate = favorites
 
-        let recents = makeRecentsTemplate()
-        configureTab(recents, title: "Recent", symbol: "clock.arrow.circlepath", color: .systemPurple)
-        recentsTemplate = recents
+        let arrived = makeArrivedTemplate()
+        configureTab(arrived, title: "Arrived", symbol: "mappin.and.ellipse", color: .systemGreen)
+        arrivedTemplate = arrived
 
-        let tabs = CPTabBarTemplate(templates: [nearby, tripLog, favorites, recents])
+        let tabs = CPTabBarTemplate(templates: [nearby, tripLog, favorites, arrived])
         rootTabTemplate = tabs
         return tabs
     }
@@ -177,21 +202,62 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         })]
     }
 
-    private func makeRecentsTemplate() -> CPListTemplate {
-        CPListTemplate(title: "Recent", sections: makeRecentSections())
+    private func makeArrivedTemplate() -> CPListTemplate {
+        CPListTemplate(title: "Arrived", sections: makeArrivedSections())
     }
 
-    private func makeRecentSections() -> [CPListSection] {
-        let accounts = Array(recentAccounts.prefix(4))
-        guard !accounts.isEmpty else {
+    private func makeArrivedSections() -> [CPListSection] {
+        guard let account = arrivedAccount else {
             return [CPListSection(items: [emptyAccountItem(
-                title: "No recent sites",
-                detail: "Open a site from Nearby or Favorites."
+                title: "No arrival detected",
+                detail: "This screen updates when you reach a mapped account."
             )])]
         }
-        return [CPListSection(items: accounts.map { account in
-            makeAccountItem(account, isNearest: false)
-        })]
+
+        let accountID = account.accountId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let accountDetail = accountID.isEmpty ? account.address : "#\(accountID) • \(account.address)"
+        let accountItem = CPListItem(
+            text: account.name,
+            detailText: accountDetail,
+            image: carPlayIcon("checkmark.circle.fill", color: .systemGreen)
+        )
+        accountItem.isEnabled = false
+
+        let locations = Array(arrivalPoints(in: account).prefix(6))
+        guard !locations.isEmpty else {
+            return [
+                CPListSection(items: [accountItem], header: "Arrived", sectionIndexTitle: nil),
+                CPListSection(items: [emptyAccountItem(
+                    title: "No drop-pin locations",
+                    detail: "Add parking, entrance, panel, or riser pins on iPhone."
+                )], header: "Drop-pin locations", sectionIndexTitle: nil)
+            ]
+        }
+
+        let pinItems = locations.map { location in
+            let item = CPListItem(
+                text: location.label,
+                detailText: "\(displayLocationType(location.type)) • Directions",
+                image: carPlayIcon(arrivalSymbol(for: location), color: arrivalColor(for: location)),
+                accessoryImage: nil,
+                accessoryType: .disclosureIndicator
+            )
+            item.handler = { [weak self] _, completion in
+                if let coordinate = location.coordinate {
+                    self?.openDrivingDirections(
+                        to: coordinate,
+                        name: "\(account.name) • \(location.label)"
+                    )
+                }
+                completion()
+            }
+            return item
+        }
+
+        return [
+            CPListSection(items: [accountItem], header: "Arrived", sectionIndexTitle: nil),
+            CPListSection(items: pinItems, header: "Drop-pin locations", sectionIndexTitle: nil)
+        ]
     }
 
     private func makeAccountItem(
@@ -308,42 +374,6 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         }
     }
 
-    private func showArrivalPoints(for account: FireVaultWorkspaceAccount) {
-        let items = arrivalPoints(in: account).prefix(6).map { location in
-            let item = CPListItem(
-                text: location.label,
-                detailText: displayLocationType(location.type),
-                image: carPlayIcon(
-                    arrivalSymbol(for: location),
-                    color: arrivalColor(for: location)
-                ),
-                accessoryImage: nil,
-                accessoryType: .disclosureIndicator
-            )
-            item.handler = { [weak self] _, completion in
-                if let coordinate = location.coordinate {
-                    self?.openDrivingDirections(
-                        to: coordinate,
-                        name: "\(account.name) • \(location.label)"
-                    )
-                }
-                completion()
-            }
-            return item
-        }
-
-        guard !items.isEmpty else { return }
-        let template = CPListTemplate(
-            title: "Arrival",
-            sections: [CPListSection(
-                items: Array(items),
-                header: account.name,
-                sectionIndexTitle: nil
-            )]
-        )
-        interfaceController?.pushTemplate(template, animated: true, completion: nil)
-    }
-
     private func arrivalPoints(in account: FireVaultWorkspaceAccount) -> [FireVaultWorkspaceLocation] {
         account.locations
             .filter { $0.coordinate != nil }
@@ -351,13 +381,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     }
 
     private func arrivalPriority(for location: FireVaultWorkspaceLocation) -> Int {
-        let value = "\(location.label) \(location.type)".lowercased()
-        if value.contains("parking") || value.contains("park here") { return 0 }
-        if value.contains("front entrance") || value.contains("main entrance") { return 1 }
-        if value.contains("entrance") || value.contains("door") { return 2 }
-        if value.contains("panel") { return 3 }
-        if value.contains("riser") { return 4 }
-        return 5
+        FireVaultCarPlayArrivalPolicy.pinPriority(label: location.label, type: location.type)
     }
 
     private func arrivalSymbol(for location: FireVaultWorkspaceLocation) -> String {
@@ -383,49 +407,35 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private func checkForArrival() {
         guard let location = effectiveLocation,
               let account = sortedMappedAccounts(favoritesOnly: false).first else {
-            announcedArrivalAccountID = nil
+            clearArrivalState()
             return
         }
 
         let distanceMeters = distance(from: location, to: account)
-        if distanceMeters > 804.672 {
-            announcedArrivalAccountID = nil
+        if FireVaultCarPlayArrivalPolicy.shouldClearArrival(distanceMeters: distanceMeters) {
+            clearArrivalState()
             return
         }
 
-        guard distanceMeters <= 402.336,
-              announcedArrivalAccountID != account.id,
-              !arrivalPoints(in: account).isEmpty,
-              let interfaceController else { return }
+        guard FireVaultCarPlayArrivalPolicy.hasArrived(distanceMeters: distanceMeters),
+              announcedArrivalAccountID != account.id else { return }
 
         announcedArrivalAccountID = account.id
-        let viewPoints = CPAlertAction(title: "View", style: .default) { [weak self] _ in
-            self?.dismissArrivalPrompt {
-                self?.showArrivalPoints(for: account)
-            }
+        arrivedAccountID = account.id
+        arrivedTemplate?.updateSections(makeArrivedSections())
+        arrivedTemplate?.showsTabBadge = true
+
+        if let arrivedTemplate {
+            rootTabTemplate?.select(arrivedTemplate)
         }
-        let dismiss = CPAlertAction(title: "Later", style: .cancel) { [weak self] _ in
-            self?.dismissArrivalPrompt()
-        }
-        interfaceController.presentTemplate(
-            CPAlertTemplate(
-                titleVariants: ["Arrival points available"],
-                actions: [viewPoints, dismiss]
-            ),
-            animated: true,
-            completion: nil
-        )
     }
 
-    private func dismissArrivalPrompt(then action: (@MainActor () -> Void)? = nil) {
-        guard let interfaceController else {
-            action?()
-            return
-        }
-        interfaceController.dismissTemplate(animated: true) { success, _ in
-            guard success else { return }
-            action?()
-        }
+    private func clearArrivalState() {
+        announcedArrivalAccountID = nil
+        guard arrivedAccountID != nil else { return }
+        arrivedAccountID = nil
+        arrivedTemplate?.showsTabBadge = false
+        arrivedTemplate?.updateSections(makeArrivedSections())
     }
 
     private func displayLocationType(_ value: String) -> String {
@@ -660,7 +670,6 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private func refreshCarPlayState() {
         nearbyTemplate?.updateSections(makeNearbySections())
         favoritesTemplate?.updateSections(makeFavoriteSections())
-        recentsTemplate?.updateSections(makeRecentSections())
         tripLogTemplate?.items = makeTripLogInformationItems()
         tripLogTemplate?.actions = makeTripLogActions()
         gpsDiagnosticsTemplate?.items = makeGPSDiagnosticItems()
@@ -728,10 +737,9 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         return "Complete"
     }
 
-    private var recentAccounts: [FireVaultWorkspaceAccount] {
-        let ids = UserDefaults.standard.stringArray(forKey: recentAccountIDsKey) ?? []
-        let accountsByID = Dictionary(uniqueKeysWithValues: store.accounts.map { ($0.id, $0) })
-        return ids.compactMap { accountsByID[$0] }
+    private var arrivedAccount: FireVaultWorkspaceAccount? {
+        guard let arrivedAccountID else { return nil }
+        return store.accounts.first { $0.id == arrivedAccountID }
     }
 
     private func rememberRecentAccount(_ account: FireVaultWorkspaceAccount) {
@@ -739,7 +747,6 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         ids.removeAll { $0 == account.id }
         ids.insert(account.id, at: 0)
         UserDefaults.standard.set(Array(ids.prefix(8)), forKey: recentAccountIDsKey)
-        recentsTemplate?.updateSections(makeRecentSections())
     }
 
     private var currentSpeedText: String {
