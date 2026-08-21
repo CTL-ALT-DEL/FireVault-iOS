@@ -1695,8 +1695,6 @@ private struct NativeAccountsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var search = ""
     @State private var sort: NativeAccountSort = .alphabetic
-    @State private var topAccountID: String?
-    @State private var accountScrollIsActive = false
 
     private var accounts: [FireVaultNativeAccount] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1747,7 +1745,6 @@ private struct NativeAccountsView: View {
 
                             ForEach(accounts) { account in
                                 Button {
-                                    topAccountID = account.id
                                     store.openAccount(account.id)
                                 } label: {
                                     NativeAccountRow(account: account)
@@ -1755,14 +1752,12 @@ private struct NativeAccountsView: View {
                                         .nativeSurfaceCard(cornerRadius: NativeShellMetrics.cardRadius)
                                 }
                                 .buttonStyle(.plain)
-                                .id(account.id)
                             }
 
                             Color.clear
                                 .frame(height: max(0, geometry.size.height - 92))
                                 .allowsHitTesting(false)
                         }
-                        .scrollTargetLayout()
                         .padding(.horizontal, 16)
                         .padding(.bottom, 18)
                     }
@@ -1771,19 +1766,7 @@ private struct NativeAccountsView: View {
                         store.reloadAccounts()
                         try? await Task.sleep(for: .milliseconds(350))
                     }
-                    .scrollPosition(id: $topAccountID, anchor: .top)
-                    .scrollTargetBehavior(.viewAligned(limitBehavior: .never, anchor: .top))
-                    .onScrollPhaseChange { _, phase in
-                        accountScrollIsActive = phase.isScrolling
-                    }
-                    .onChange(of: topAccountID) { _, newID in
-                        guard accountScrollIsActive, newID != nil,
-                              settings.gps.hapticsAreEnabled else { return }
-                        let feedback = UISelectionFeedbackGenerator()
-                        feedback.prepare()
-                        feedback.selectionChanged()
-                    }
-                    .accessibilityIdentifier("accounts-snapping-scroll")
+                    .accessibilityIdentifier("accounts-scroll")
                 }
             }
             .background(NativeShellPalette.background)
@@ -2510,6 +2493,22 @@ struct NativeSettingsView: View {
 
     private var profileSection: some View {
         Section {
+            NavigationLink {
+                FireVaultAccountSettingsView(store: store)
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Account & Sign-In")
+                        Text("Sync, sign out, or delete your account")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "person.crop.circle.badge.checkmark")
+                        .foregroundStyle(NativeShellPalette.green)
+                }
+            }
+
             DisclosureGroup(isExpanded: Binding(
                 get: { isTechnicianGroupExpanded },
                 set: { isExpanded in
@@ -2519,22 +2518,6 @@ struct NativeSettingsView: View {
                     }
                 }
             )) {
-                NavigationLink {
-                    FireVaultAccountSettingsView(store: store)
-                } label: {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Account & Sign-In")
-                            Text("View account or sign out")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: "person.crop.circle.badge.checkmark")
-                            .foregroundStyle(NativeShellPalette.green)
-                    }
-                }
-
                 NavigationLink {
                     NativeTechnicianSettingsView(settings: settings)
                 } label: {

@@ -533,6 +533,8 @@ struct FireVaultAccountSettingsView: View {
                     showsDeleteConfirmation = true
                 }
                 .disabled(authentication.isWorking || store.isCloudSyncing)
+            } header: {
+                Text("Delete FireVault Account")
             } footer: {
                 Text("Permanently deletes your FireVault cloud account and its data, then removes local account records from this iPhone.")
             }
