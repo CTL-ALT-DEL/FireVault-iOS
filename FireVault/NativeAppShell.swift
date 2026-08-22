@@ -103,6 +103,16 @@ struct FireVaultVersionInfo: Equatable {
     var displayText: String { "Version \(version) (\(build))" }
 }
 
+enum FireVaultPublisherInfo {
+    static let name = "Bannerman US LLC"
+    static let role = "Creator, Developer & Publisher"
+    static let supportEmail = "David@Bannerman.us"
+
+    static var supportEmailURL: URL {
+        URL(string: "mailto:\(supportEmail)")!
+    }
+}
+
 enum FireVaultShellTab: String, CaseIterable, Identifiable {
     case nearby, accounts, trip, photo, settings
     var id: String { rawValue }
@@ -3672,19 +3682,19 @@ private struct NativeAboutFireVaultView: View {
                         .accessibilityHidden(true)
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("David Bannerman")
+                        Text(FireVaultPublisherInfo.name)
                             .font(.headline)
                             .foregroundStyle(.primary)
-                        Text("Creator & Developer")
+                        Text(FireVaultPublisherInfo.role)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("David Bannerman, creator and developer")
+                    .accessibilityLabel("Bannerman US LLC, creator, developer, and publisher")
 
                     Spacer(minLength: 8)
 
-                    Link(destination: URL(string: "mailto:David@Bannerman.us")!) {
+                    Link(destination: FireVaultPublisherInfo.supportEmailURL) {
                         Image(systemName: "envelope.fill")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(.white)
@@ -3692,7 +3702,7 @@ private struct NativeAboutFireVaultView: View {
                             .background(NativeShellPalette.blue, in: Circle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Email David Bannerman")
+                    .accessibilityLabel("Email Bannerman US LLC")
                 }
                 .padding(.vertical, 5)
             }

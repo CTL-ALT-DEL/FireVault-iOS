@@ -34,7 +34,7 @@ enum NativeSettingsCatalog {
             item("security", "Security", "Face ID, app privacy, and data protection", "shield.checkered")
         ]),
         group("help", "Help & About", "Documentation and application information", "questionmark.circle", "red", [
-            item("manual", "Help & User Manual", "Quick-start instructions", "book.closed"),
+            item("manual", "Help Center", "Task guides and troubleshooting", "questionmark.bubble"),
             item("demo", "Demo Mode", "Enter, exit, or reset the fictional vault", "theatermasks"),
             item("about", "About FireVault Pro", "Version and application information", "info.circle")
         ])

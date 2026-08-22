@@ -1610,59 +1610,483 @@ struct NativeDemoSettingsView: View {
 }
 
 struct NativeManualView: View {
+    @State private var search = ""
+
+    private var topics: [FireVaultHelpTopic] {
+        FireVaultHelpCatalog.matching(search)
+    }
+
     var body: some View {
-        List {
-            Section("Getting Around") {
-                manualItem("Nearby", "Review mapped accounts, select a site, call it, open its details, or begin a route.", "location.fill")
-                manualItem("Accounts", "Search the vault by name, address, account ID, category, or saved information. Pull down to refresh.", "magnifyingglass")
-                manualItem("Trip Log", "Record a workday, review detected stops, and create daily or weekly PDF reports.", "truck.box.fill")
-                manualItem("Photo", "Capture field images with optional live account information and logo overlays.", "camera.fill")
-            }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                if search.isEmpty {
+                    helpHero
+                    FireVaultHelpVisualView(kind: .quickStart, tint: NativeShellPalette.green)
+                        .nativeSurfaceCard(cornerRadius: 20, emphasized: true)
+                }
 
-            Section("Accounts & Arrival Maps") {
-                manualItem("Account workspace", "Keep service notes, files and scans, equipment records, and arrival locations together.", "building.2")
-                manualItem("Arrival Map", "Review parking and entrance points, edit saved locations, or start walking directions to a selected point.", "figure.walk")
-                manualItem("Category rules", "Create IF/THEN rules, run them immediately, and automatically apply category labels to matching accounts.", "tag.fill")
-                manualItem("CSV import", "Import account records, review the results, and map usable addresses before adding them to the vault.", "tablecells")
-            }
+                if topics.isEmpty {
+                    ContentUnavailableView.search(text: search)
+                        .frame(minHeight: 300)
+                } else {
+                    Text(search.isEmpty ? "CHOOSE WHAT YOU WANT TO DO" : "MATCHING HELP")
+                        .font(.caption.bold())
+                        .tracking(1.15)
+                        .foregroundStyle(.secondary)
 
-            Section("Trip Log & Reports") {
-                manualItem("Record", "Start at the beginning of the workday. Pause when tracking should stop temporarily and finish the session when the day is complete.", "record.circle")
-                manualItem("Live details", "Choose Speed, Trip, Direction, Elevation, or GPS. Auto Rotate can cycle through any selected combination.", "gauge.with.dots.needle.50percent")
-                manualItem("History", "Open a saved day to review route geometry, account visits, detected stops, and recorded times.", "clock.arrow.circlepath")
-                manualItem("Reports", "Export clean daily or weekly PDFs with route maps, stop summaries, mileage, elapsed time, and elevation information.", "doc.richtext")
-            }
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 260), spacing: 12)],
+                        spacing: 12
+                    ) {
+                        ForEach(topics) { topic in
+                            NavigationLink {
+                                FireVaultHelpTopicView(topic: topic)
+                            } label: {
+                                FireVaultHelpTopicCard(topic: topic)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
 
-            Section("Photos, Maps & Location") {
-                manualItem("Photo overlays", "Resize and position the account-information overlay inside the 4:3 capture area. Configure the FireVault logo separately.", "camera.filters")
-                manualItem("Map layers", "Choose Standard, Satellite, or Hybrid in either 2D or 3D under GPS & Maps.", "square.3.layers.3d")
-                manualItem("GPS Diagnostics", "Inspect live coordinates, accuracy, elevation, speed, direction, source data, and rolling charts.", "waveform.path.ecg.rectangle")
-                manualItem("Plus Codes", "Generate compact location codes from GPS coordinates for accounts and saved arrival points.", "plus.square.dashed")
+                if search.isEmpty {
+                    supportCard
+                }
             }
-
-            Section("Storage, Privacy & Demonstration") {
-                manualItem("File Storage", "Choose photo and document destinations, quality, folder organization, scan format, and upload behavior.", "folder.fill")
-                manualItem("Privacy", "Configure application locking, background behavior, and app-switcher protection.", "lock.shield.fill")
-                manualItem("Demo Mode", "Explore fictional accounts and seven days of sample history in a workspace isolated from live data.", "theatermasks.fill")
-                manualItem("Reset Demo Data", "Restore the sample workspace without changing live accounts or authentication.", "arrow.counterclockwise")
-            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 104)
         }
-        .fireVaultThemedCollection()
-        .contentMargins(.bottom, 96, for: .scrollContent)
-        .navigationTitle("Help & User Manual")
+        .background(NativeShellPalette.background)
+        .searchable(text: $search, prompt: "Search help")
+        .navigationTitle("Help Center")
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func manualItem(_ title: String, _ detail: String, _ symbol: String) -> some View {
-        Label {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.bold())
-                Text(detail).font(.caption).foregroundStyle(.secondary)
+    private var helpHero: some View {
+        HStack(alignment: .center, spacing: 16) {
+            Image(systemName: "questionmark.bubble.fill")
+                .font(.system(size: 34, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 64, height: 64)
+                .background(
+                    LinearGradient(
+                        colors: [NativeShellPalette.red, NativeShellPalette.amber],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                )
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("HELP THAT GETS YOU MOVING")
+                    .font(.caption.bold())
+                    .tracking(1.1)
+                    .foregroundStyle(NativeShellPalette.red)
+                Text("What are you trying to do?")
+                    .font(.title2.bold())
+                    .foregroundStyle(.primary)
+                Text("Short, verified guides for the field—without a wall of manual text.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.vertical, 2)
-        } icon: {
-            Image(systemName: symbol).foregroundStyle(NativeShellPalette.blue)
         }
+        .padding(16)
+        .nativeSurfaceCard(cornerRadius: 22)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var supportCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "envelope.badge.fill")
+                .font(.title2)
+                .foregroundStyle(NativeShellPalette.blue)
+                .frame(width: 44, height: 44)
+                .background(NativeShellPalette.blue.opacity(0.12), in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Still need a hand?")
+                    .font(.headline)
+                Text("Send the exact message and a screenshot. Those two details save the most time.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            Link(destination: URL(string: "mailto:David@Bannerman.us?subject=FireVault%20Pro%20Help")!) {
+                Text("Email")
+                    .font(.subheadline.bold())
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .foregroundStyle(.white)
+                    .background(NativeShellPalette.blue, in: Capsule())
+            }
+            .accessibilityLabel("Email FireVault support")
+        }
+        .padding(16)
+        .nativeSurfaceCard(cornerRadius: 20)
+    }
+}
+
+private struct FireVaultHelpTopicCard: View {
+    let topic: FireVaultHelpTopic
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: topic.symbol)
+                .font(.system(size: 21, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 46, height: 46)
+                .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(topic.eyebrow)
+                    .font(.caption2.bold())
+                    .tracking(1)
+                    .foregroundStyle(tint)
+                Text(topic.title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(topic.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(.caption.bold())
+                .foregroundStyle(.tertiary)
+                .padding(.top, 14)
+                .accessibilityHidden(true)
+        }
+        .padding(15)
+        .frame(maxWidth: .infinity, minHeight: 118, alignment: .topLeading)
+        .nativeSurfaceCard(cornerRadius: 18)
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(topic.title). \(topic.summary)")
+        .accessibilityHint("Opens step-by-step help")
+    }
+
+    private var tint: Color { NativeShellPalette.tint(topic.tint) }
+}
+
+private struct FireVaultHelpTopicView: View {
+    let topic: FireVaultHelpTopic
+
+    private var tint: Color { NativeShellPalette.tint(topic.tint) }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                topicHeader
+
+                FireVaultHelpVisualView(kind: topic.visual, tint: tint)
+                    .nativeSurfaceCard(cornerRadius: 20, emphasized: true)
+
+                helpSectionTitle("DO THIS", symbol: "checklist")
+                VStack(spacing: 0) {
+                    ForEach(Array(topic.steps.enumerated()), id: \.element.id) { index, step in
+                        FireVaultHelpStepRow(number: index + 1, step: step, tint: tint)
+                        if index < topic.steps.count - 1 {
+                            Divider().padding(.leading, 58)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+                .nativeSurfaceCard(cornerRadius: 20)
+
+                successCard
+
+                if !topic.notes.isEmpty {
+                    helpSectionTitle("GOOD TO KNOW", symbol: "lightbulb.fill")
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(topic.notes, id: \.self) { note in
+                            Label {
+                                Text(note)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } icon: {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(tint)
+                            }
+                        }
+                    }
+                    .padding(16)
+                    .nativeSurfaceCard(cornerRadius: 20)
+                }
+
+                if !topic.resources.isEmpty {
+                    helpSectionTitle("OFFICIAL GUIDES", symbol: "safari.fill")
+                    VStack(spacing: 0) {
+                        ForEach(Array(topic.resources.enumerated()), id: \.element.id) { index, resource in
+                            Link(destination: resource.url) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "apple.logo")
+                                        .foregroundStyle(.primary)
+                                        .frame(width: 28)
+                                    Text(resource.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.caption.bold())
+                                        .foregroundStyle(tint)
+                                }
+                                .padding(15)
+                            }
+                            if index < topic.resources.count - 1 { Divider().padding(.leading, 55) }
+                        }
+                    }
+                    .nativeSurfaceCard(cornerRadius: 20)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 104)
+        }
+        .background(NativeShellPalette.background)
+        .navigationTitle(topic.title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var topicHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(topic.eyebrow, systemImage: topic.symbol)
+                .font(.caption.bold())
+                .tracking(1.05)
+                .foregroundStyle(tint)
+            Text(topic.title)
+                .font(.system(.title, design: .rounded, weight: .bold))
+                .foregroundStyle(.primary)
+            Text(topic.summary)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var successCard: some View {
+        HStack(alignment: .top, spacing: 13) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.title2)
+                .foregroundStyle(NativeShellPalette.green)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(topic.successTitle)
+                    .font(.headline)
+                Text(topic.successDetail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(NativeShellPalette.green.opacity(0.10), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(NativeShellPalette.green.opacity(0.28), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func helpSectionTitle(_ text: String, symbol: String) -> some View {
+        Label(text, systemImage: symbol)
+            .font(.caption.bold())
+            .tracking(1.1)
+            .foregroundStyle(.secondary)
+    }
+}
+
+private struct FireVaultHelpStepRow: View {
+    let number: Int
+    let step: FireVaultHelpStep
+    let tint: Color
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 13) {
+            Text("\(number)")
+                .font(.subheadline.bold())
+                .foregroundStyle(.white)
+                .frame(width: 32, height: 32)
+                .background(tint, in: Circle())
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(step.title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text(step.detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Step \(number), \(step.title). \(step.detail)")
+    }
+}
+
+private struct FireVaultHelpVisualView: View {
+    let kind: FireVaultHelpVisual
+    let tint: Color
+
+    var body: some View {
+        Group {
+            switch kind {
+            case .quickStart:
+                flow([("person.crop.circle.fill", "SIGN IN"), ("arrow.triangle.2.circlepath", "SYNC"), ("truck.box.fill", "RECORD")])
+            case .account:
+                branchVisual(
+                    leading: ("building.2.fill", "ONE CUSTOMER"),
+                    trailing: ("person.crop.circle.fill", "YOUR SIGN-IN"),
+                    footer: "Delete Customer Account leaves your FireVault login intact"
+                )
+            case .cloudSync:
+                flow([("iphone", "IPHONE"), ("lock.icloud.fill", "PRIVATE VAULT"), ("globe", "PORTAL")])
+            case .tripLog:
+                flow([("circle", "READY"), ("record.circle.fill", "RECORDING"), ("checkmark.circle.fill", "SAVED")])
+            case .carPlay:
+                carPlayVisual
+            case .fieldCapture:
+                flow([("camera.fill", "CAPTURE"), ("building.2.fill", "CUSTOMER"), ("folder.fill", "FILES")])
+            case .widgets:
+                widgetVisual
+            case .privacy:
+                branchVisual(
+                    leading: ("building.2.fill", "CUSTOMER"),
+                    trailing: ("person.crop.circle.fill", "FIREVAULT ACCOUNT"),
+                    footer: "Two separate deletion paths with separate confirmations"
+                )
+            case .troubleshooting:
+                flow([("exclamationmark.triangle.fill", "READ STATUS"), ("wrench.adjustable.fill", "FIX CAUSE"), ("checkmark.circle.fill", "RECHECK")])
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 112)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func flow(_ items: [(String, String)]) -> some View {
+        HStack(spacing: 8) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                VStack(spacing: 7) {
+                    Image(systemName: item.0)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(index == items.count - 1 ? .white : tint)
+                        .frame(width: 44, height: 44)
+                        .background(index == items.count - 1 ? tint : tint.opacity(0.12), in: Circle())
+                    Text(item.1)
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .tracking(0.65)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
+                .frame(maxWidth: .infinity)
+
+                if index < items.count - 1 {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.bold())
+                        .foregroundStyle(tint.opacity(0.7))
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+    }
+
+    private func branchVisual(
+        leading: (String, String),
+        trailing: (String, String),
+        footer: String
+    ) -> some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                visualPill(leading.0, leading.1, tint: tint)
+                Text("≠")
+                    .font(.title2.bold())
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("is different from")
+                visualPill(trailing.0, trailing.1, tint: NativeShellPalette.red)
+            }
+            Text(footer)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func visualPill(_ symbol: String, _ title: String, tint: Color) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.caption2.bold())
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .minimumScaleFactor(0.68)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity)
+            .background(tint.opacity(0.11), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var carPlayVisual: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 6) {
+                visualPill("truck.box.fill", "TRIP LOG", tint: NativeShellPalette.red)
+                visualPill("location.fill", "NEARBY", tint: NativeShellPalette.blue)
+                visualPill("location.north.fill", "DRIVE", tint: NativeShellPalette.green)
+            }
+            Label("ARRIVED adds saved drop pins when available", systemImage: "mappin.and.ellipse")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var widgetVisual: some View {
+        HStack(spacing: 7) {
+            widgetTile("gauge.with.dots.needle.67percent", "DASH")
+            widgetTile("truck.box.fill", "TRIP")
+            widgetTile("building.2.fill", "ACCOUNT")
+            widgetTile("icloud.fill", "CLOUD")
+        }
+    }
+
+    private func widgetTile(_ symbol: String, _ title: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.title3)
+                .foregroundStyle(.white)
+            Text(title)
+                .font(.system(size: 8, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.72))
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 72)
+        .background(
+            LinearGradient(
+                colors: [Color(red: 0.035, green: 0.055, blue: 0.075), tint.opacity(0.72)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+        )
     }
 }
 

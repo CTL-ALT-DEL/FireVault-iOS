@@ -3137,6 +3137,74 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(FireVaultBreadcrumbRules.maximumPointInterval, 120)
     }
 
+    func testHelpCatalogCoversEveryTopicWithActionableSteps() {
+        let topics = FireVaultHelpCatalog.topics
+
+        XCTAssertEqual(topics.count, FireVaultHelpTopicID.allCases.count)
+        XCTAssertEqual(Set(topics.map(\.id)).count, topics.count)
+        XCTAssertTrue(topics.allSatisfy { $0.steps.count >= 4 })
+
+        for topic in topics {
+            XCTAssertFalse(topic.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            XCTAssertFalse(topic.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            XCTAssertFalse(topic.successDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            XCTAssertEqual(Set(topic.steps.map(\.id)).count, topic.steps.count)
+            XCTAssertTrue(topic.steps.allSatisfy {
+                !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && !$0.detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            })
+        }
+    }
+
+    func testHelpCatalogUsesCurrentInAppControlNames() throws {
+        let sync = try XCTUnwrap(FireVaultHelpCatalog.topic(.cloudSync))
+        let trip = try XCTUnwrap(FireVaultHelpCatalog.topic(.tripLog))
+        let accounts = try XCTUnwrap(FireVaultHelpCatalog.topic(.accounts))
+        let privacy = try XCTUnwrap(FireVaultHelpCatalog.topic(.privacy))
+
+        XCTAssertTrue(sync.searchableText.contains("settings → account & sign-in"))
+        XCTAssertTrue(sync.searchableText.contains("sync now"))
+        XCTAssertTrue(sync.searchableText.contains("last checked"))
+        XCTAssertTrue(sync.searchableText.contains("last successful sync"))
+        XCTAssertTrue(trip.searchableText.contains("recording → start trip log"))
+        XCTAssertTrue(trip.searchableText.contains("stop trip log"))
+        XCTAssertTrue(accounts.searchableText.contains("delete customer account"))
+        XCTAssertTrue(privacy.searchableText.contains("delete account and data"))
+    }
+
+    func testHelpCatalogDoesNotAdvertiseUnreleasedPurchasingOrMediaCloudSync() {
+        let allHelp = FireVaultHelpCatalog.topics.map(\.searchableText).joined(separator: " ")
+
+        XCTAssertFalse(allHelp.contains("$29"))
+        XCTAssertFalse(allHelp.contains("$49"))
+        XCTAssertFalse(allHelp.contains("buy pro"))
+        XCTAssertTrue(allHelp.contains("photos and scans follow the destinations configured"))
+        XCTAssertTrue(allHelp.contains("connected storage remains inactive until it is configured"))
+    }
+
+    func testHelpSearchFindsRelevantTaskGuides() {
+        XCTAssertEqual(FireVaultHelpCatalog.matching("delete customer").map(\.id), [.accounts, .privacy])
+        XCTAssertTrue(FireVaultHelpCatalog.matching("precise location").contains { $0.id == .tripLog })
+        XCTAssertTrue(FireVaultHelpCatalog.matching("drop pins").contains { $0.id == .carPlay })
+        XCTAssertEqual(FireVaultHelpCatalog.matching("no-such-help-topic"), [])
+    }
+
+    func testHelpExternalResourcesUseOfficialAppleHTTPSPages() {
+        let resources = FireVaultHelpCatalog.topics.flatMap(\.resources)
+
+        XCTAssertFalse(resources.isEmpty)
+        XCTAssertTrue(resources.allSatisfy { resource in
+            resource.url.scheme == "https" && resource.url.host == "support.apple.com"
+        })
+    }
+
+    func testAboutScreenCreditsBannermanUSLLC() {
+        XCTAssertEqual(FireVaultPublisherInfo.name, "Bannerman US LLC")
+        XCTAssertEqual(FireVaultPublisherInfo.role, "Creator, Developer & Publisher")
+        XCTAssertEqual(FireVaultPublisherInfo.supportEmail, "David@Bannerman.us")
+        XCTAssertEqual(FireVaultPublisherInfo.supportEmailURL.scheme, "mailto")
+    }
+
     private func testLocation(
         latitude: Double,
         longitude: Double,
