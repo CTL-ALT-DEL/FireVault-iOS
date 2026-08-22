@@ -1,20 +1,12 @@
 # FireVault Current Build
 
-## Official `main` baseline
+## Official `main` release candidate
 
-- Visible version: **1.08.56**
-- Build number: **116**
-- Main includes the tested CarPlay workspace and protected Google Places stop
-  classification corrections.
-
-## Active candidate
-
-- Branch: `build/1.08.60-vault-reliability-optimization`
-- Purpose: complete backups, scalable persistence, media housekeeping, Trip Log
-  energy improvements, regression coverage, accessibility, and release hygiene.
-- The candidate intentionally keeps version **1.08.56 (116)** until local Xcode
-  and physical-device testing are approved.
-- Acceptance checklist: `BUILD_1.08.60_CHECKLIST.md`
+- Visible version: **1.08.69**
+- Build number: **129**
+- Includes the tested CarPlay optimization and the four-widget portfolio:
+  Dashboard, Trip Log, Field Account, and Cloud Status.
+- Intended distribution: TestFlight.
 
 ## Release rule
 
