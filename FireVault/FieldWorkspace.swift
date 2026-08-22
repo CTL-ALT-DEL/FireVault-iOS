@@ -9,6 +9,7 @@ import SwiftUI
 import Combine
 import MapKit
 import UniformTypeIdentifiers
+import UIKit
 
 struct FireVaultWorkspaceAccount: Codable, Identifiable, Equatable {
     var id: String
@@ -26,6 +27,11 @@ struct FireVaultWorkspaceAccount: Codable, Identifiable, Equatable {
     var equipment: [FireVaultWorkspaceEquipment]
     var locations: [FireVaultWorkspaceLocation]
     var recent: [FireVaultWorkspaceRecent]
+    /// Added after the original on-device vault shipped. Optional fields keep
+    /// existing archives decodable and identify records needing backfill.
+    var cloudID: String? = nil
+    var cloudSyncedAt: Date? = nil
+    var cloudSyncError: String? = nil
 
     var coordinate: CLLocationCoordinate2D? {
         guard let latitude, let longitude,
@@ -132,6 +138,7 @@ struct FireVaultWorkspaceLocation: Codable, Identifiable, Equatable {
     var latitude: Double?
     var longitude: Double?
     var pinColor: String?
+    var directionsMode: String? = nil
 
     var coordinate: CLLocationCoordinate2D? {
         guard let latitude, let longitude,
@@ -141,6 +148,31 @@ struct FireVaultWorkspaceLocation: Codable, Identifiable, Equatable {
 
     var resolvedPinColor: FireVaultMapPinColor {
         FireVaultMapPinColor(rawValue: pinColor ?? "") ?? .purple
+    }
+
+    var resolvedDirectionsMode: FireVaultDirectionsMode {
+        FireVaultDirectionsMode(rawValue: directionsMode ?? "") ?? .walking
+    }
+}
+
+enum FireVaultDirectionsMode: String, Codable, CaseIterable, Identifiable {
+    case walking = "Walking"
+    case driving = "Driving"
+
+    var id: String { rawValue }
+
+    var symbol: String {
+        switch self {
+        case .walking: "figure.walk"
+        case .driving: "car.fill"
+        }
+    }
+
+    var mapKitValue: String {
+        switch self {
+        case .walking: MKLaunchOptionsDirectionsModeWalking
+        case .driving: MKLaunchOptionsDirectionsModeDriving
+        }
     }
 }
 
@@ -193,6 +225,9 @@ struct FieldWorkspaceView: View {
 
     @State private var isShowingAccountEditor = false
     @State private var isShowingNoteEditor = false
+    @State private var isConfirmingAccountDeletion = false
+    @State private var isDeletingAccount = false
+    @State private var accountDeletionError: String?
 
     private let columns = [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)]
     private var previewCoordinate: CLLocationCoordinate2D? {
@@ -211,6 +246,7 @@ struct FieldWorkspaceView: View {
                         }
                         destinations
                         recentActivity
+                        customerAccountDeletion
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
@@ -240,6 +276,22 @@ struct FieldWorkspaceView: View {
                     .buttonStyle(.glass)
                     .accessibilityLabel(account.favorite ? "Remove Favorite" : "Add Favorite")
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("Edit Customer Account", systemImage: "pencil") {
+                            isShowingAccountEditor = true
+                        }
+                        Divider()
+                        Button("Delete Customer Account", systemImage: "trash", role: .destructive) {
+                            isConfirmingAccountDeletion = true
+                        }
+                        .disabled(isDeletingAccount)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .buttonStyle(.glass)
+                    .accessibilityLabel("Customer account actions")
+                }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 appNavigation
@@ -265,6 +317,22 @@ struct FieldWorkspaceView: View {
             FireVaultNoteEditorSheet(accountName: account.name, note: nil) { draft in
                 store.addNote(to: account.id, title: draft.title, text: draft.text) != nil
             }
+        }
+        .alert("Delete Customer Account?", isPresented: $isConfirmingAccountDeletion) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete Customer Account", role: .destructive) {
+                deleteCustomerAccount()
+            }
+        } message: {
+            Text("This permanently deletes \(account.name) and its notes, files, equipment, and saved locations from this iPhone and FireVault Cloud. This cannot be undone.")
+        }
+        .alert("Customer Account Not Deleted", isPresented: Binding(
+            get: { accountDeletionError != nil },
+            set: { if !$0 { accountDeletionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { accountDeletionError = nil }
+        } message: {
+            Text(accountDeletionError ?? "Nothing was deleted.")
         }
     }
 
@@ -354,6 +422,49 @@ struct FieldWorkspaceView: View {
             ) {
                 isShowingAccountEditor = true
             }
+        }
+    }
+
+    private var customerAccountDeletion: some View {
+        Button(role: .destructive) {
+            isConfirmingAccountDeletion = true
+        } label: {
+            HStack(spacing: 10) {
+                if isDeletingAccount {
+                    ProgressView()
+                        .tint(.red)
+                } else {
+                    Image(systemName: "trash")
+                }
+                Text(isDeletingAccount ? "Deleting Customer Account…" : "Delete Customer Account")
+                    .font(.headline)
+                Spacer()
+            }
+            .foregroundStyle(.red)
+            .padding(15)
+            .background(.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(.red.opacity(0.25), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(isDeletingAccount)
+        .accessibilityIdentifier("delete-customer-account")
+    }
+
+    private func deleteCustomerAccount() {
+        guard !isDeletingAccount else { return }
+        isDeletingAccount = true
+        Task {
+            do {
+                try await store.deleteCustomerAccount(id: account.id)
+            } catch {
+                accountDeletionError = error.localizedDescription.isEmpty
+                    ? "Nothing was deleted. Check your connection and try again."
+                    : error.localizedDescription
+            }
+            isDeletingAccount = false
         }
     }
 
@@ -1004,7 +1115,8 @@ private struct MapArrivalView: View {
                         plusCode: draft.plusCode,
                         latitude: draft.latitude,
                         longitude: draft.longitude,
-                        pinColor: draft.pinColor.rawValue
+                        pinColor: draft.pinColor.rawValue,
+                        directionsMode: draft.directionsMode.rawValue
                     )
                 }
                 return store.addLocation(
@@ -1015,7 +1127,8 @@ private struct MapArrivalView: View {
                     plusCode: draft.plusCode,
                     latitude: draft.latitude,
                     longitude: draft.longitude,
-                    pinColor: draft.pinColor.rawValue
+                    pinColor: draft.pinColor.rawValue,
+                    directionsMode: draft.directionsMode.rawValue
                 ) != nil
             }
         }
@@ -1158,6 +1271,7 @@ private struct ArrivalPointDetailView: View {
     @State private var mapPosition: MapCameraPosition
     @State private var isShowingEditor = false
     @State private var positionStatus = "Drag on the map to move this pin"
+    @Environment(\.openURL) private var openURL
 
     init(
         account: FireVaultWorkspaceAccount,
@@ -1242,12 +1356,30 @@ private struct ArrivalPointDetailView: View {
                     .buttonStyle(.bordered)
                     .frame(maxWidth: .infinity)
 
-                    Button("Walk Here", systemImage: "figure.walk") {
-                        openWalkingRoute()
+                    Button(routeButtonTitle, systemImage: location.resolvedDirectionsMode.symbol) {
+                        openRoute()
                     }
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity)
                     .disabled(coordinate == nil)
+                }
+
+                if !location.plusCode.isEmpty {
+                    HStack(spacing: 10) {
+                        Button("Copy Code", systemImage: "doc.on.doc") {
+                            UIPasteboard.general.string = location.plusCode
+                            positionStatus = "Plus Code copied"
+                        }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+
+                        Button("Google Maps", systemImage: "map.fill") {
+                            guard let url = FireVaultPlusCode.googleMapsURL(for: location.plusCode) else { return }
+                            openURL(url)
+                        }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+                    }
                 }
             }
             .padding(14)
@@ -1275,16 +1407,25 @@ private struct ArrivalPointDetailView: View {
                     plusCode: draft.plusCode,
                     latitude: draft.latitude,
                     longitude: draft.longitude,
-                    pinColor: draft.pinColor.rawValue
+                    pinColor: draft.pinColor.rawValue,
+                    directionsMode: draft.directionsMode.rawValue
                 )
                 guard didSave else { return false }
+                let preferences = FireVaultNativeSettingsStore().preferences.plusCodes
                 location.label = draft.label
                 location.subtitle = draft.subtitle
                 location.type = draft.type
-                location.plusCode = draft.plusCode
+                location.plusCode = FireVaultPlusCode.codeForStorage(
+                    enteredCode: draft.plusCode,
+                    latitude: draft.latitude,
+                    longitude: draft.longitude,
+                    length: preferences.locationLength,
+                    autoGenerate: preferences.autoGenerate
+                ) ?? draft.plusCode
                 location.latitude = draft.latitude
                 location.longitude = draft.longitude
                 location.pinColor = draft.pinColor.rawValue
+                location.directionsMode = draft.directionsMode.rawValue
                 coordinate = location.coordinate
                 if let coordinate {
                     zoom(to: coordinate)
@@ -1297,6 +1438,7 @@ private struct ArrivalPointDetailView: View {
 
     private func savePinPosition() {
         guard let coordinate else { return }
+        let preferences = FireVaultNativeSettingsStore().preferences.plusCodes
         let didSave = store.updateLocation(
             accountID: account.id,
             locationID: location.id,
@@ -1306,7 +1448,8 @@ private struct ArrivalPointDetailView: View {
             plusCode: location.plusCode,
             latitude: coordinate.latitude,
             longitude: coordinate.longitude,
-            pinColor: location.resolvedPinColor.rawValue
+            pinColor: location.resolvedPinColor.rawValue,
+            directionsMode: location.resolvedDirectionsMode.rawValue
         )
         guard didSave else {
             positionStatus = "Pin position could not be saved"
@@ -1314,6 +1457,13 @@ private struct ArrivalPointDetailView: View {
         }
         location.latitude = coordinate.latitude
         location.longitude = coordinate.longitude
+        location.plusCode = FireVaultPlusCode.codeForStorage(
+            enteredCode: location.plusCode,
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            length: preferences.locationLength,
+            autoGenerate: preferences.autoGenerate
+        ) ?? location.plusCode
         positionStatus = "Pin position saved"
         UISelectionFeedbackGenerator().selectionChanged()
     }
@@ -1325,7 +1475,11 @@ private struct ArrivalPointDetailView: View {
         ))
     }
 
-    private func openWalkingRoute() {
+    private var routeButtonTitle: String {
+        location.resolvedDirectionsMode == .walking ? "Walk Here" : "Drive Here"
+    }
+
+    private func openRoute() {
         guard let coordinate else { return }
         let item = MKMapItem(
             location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude),
@@ -1333,7 +1487,7 @@ private struct ArrivalPointDetailView: View {
         )
         item.name = location.label
         item.openInMaps(launchOptions: [
-            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking,
+            MKLaunchOptionsDirectionsModeKey: location.resolvedDirectionsMode.mapKitValue,
             MKLaunchOptionsMapTypeKey: MKMapType.hybrid.rawValue
         ])
     }
@@ -1440,6 +1594,7 @@ struct FireVaultLocationDraft: Equatable {
     var latitude: Double?
     var longitude: Double?
     var pinColor: FireVaultMapPinColor
+    var directionsMode: FireVaultDirectionsMode
 }
 
 private enum FireVaultArrivalMapLayer: String, CaseIterable, Identifiable {
@@ -1473,10 +1628,12 @@ struct FireVaultLocationEditorSheet: View {
     @State private var latitudeText: String
     @State private var longitudeText: String
     @State private var pinColor: FireVaultMapPinColor
+    @State private var directionsMode: FireVaultDirectionsMode
     @State private var isShowingFullScreenPinEditor = false
     @State private var mapPosition: MapCameraPosition
-    @State private var mapLayer: FireVaultArrivalMapLayer = .satellite
+    @State private var mapLayer: FireVaultArrivalMapLayer = .standard
     @FocusState private var isTextInputFocused: Bool
+    private let plusCodePreferences = FireVaultNativeSettingsStore().preferences.plusCodes
 
     init(
         accountName: String,
@@ -1497,6 +1654,7 @@ struct FireVaultLocationEditorSheet: View {
         _latitudeText = State(initialValue: location?.latitude.map { String($0) } ?? "")
         _longitudeText = State(initialValue: location?.longitude.map { String($0) } ?? "")
         _pinColor = State(initialValue: location?.resolvedPinColor ?? .purple)
+        _directionsMode = State(initialValue: location?.resolvedDirectionsMode ?? .walking)
         let initialCoordinate = location?.coordinate
             ?? accountCoordinate
             ?? CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)
@@ -1516,7 +1674,15 @@ struct FireVaultLocationEditorSheet: View {
     }
 
     private var canSave: Bool {
-        !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && parsedCoordinates != nil
+        !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && parsedCoordinates != nil
+            && plusCodeEntryIsValid
+    }
+
+    private var plusCodeEntryIsValid: Bool {
+        if locationCoordinate != nil && plusCodePreferences.autoGenerate { return true }
+        let trimmed = plusCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || FireVaultPlusCode.normalizedFullCode(trimmed) != nil
     }
 
     var body: some View {
@@ -1535,6 +1701,19 @@ struct FireVaultLocationEditorSheet: View {
                     TextField("Plus Code", text: $plusCode)
                         .textInputAutocapitalization(.characters)
                         .focused($isTextInputFocused)
+                    if let locationCoordinate, plusCodePreferences.autoGenerate {
+                        LabeledContent("Generated from pin") {
+                            Text(FireVaultPlusCode.encode(locationCoordinate, length: plusCodePreferences.locationLength))
+                                .font(.caption.monospaced().bold())
+                                .foregroundStyle(FieldWorkspacePalette.blue)
+                                .textSelection(.enabled)
+                        }
+                    } else if !plusCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                              FireVaultPlusCode.normalizedFullCode(plusCode) == nil {
+                        Text("Enter a full Plus Code, such as 85M5JR93+4C. Short codes need nearby city context and are not saved by FireVault.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
 
                     Picker("Pin Color", selection: $pinColor) {
                         ForEach(FireVaultMapPinColor.allCases) { option in
@@ -1542,6 +1721,13 @@ struct FireVaultLocationEditorSheet: View {
                         }
                     }
                     .pickerStyle(.menu)
+
+                    Picker("Directions", selection: $directionsMode) {
+                        ForEach(FireVaultDirectionsMode.allCases) { mode in
+                            Label(mode.rawValue, systemImage: mode.symbol).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
                 }
                 Section("Exact Location") {
                         locationPinMap
@@ -1604,6 +1790,7 @@ struct FireVaultLocationEditorSheet: View {
                             .foregroundStyle(.secondary)
                 }
             }
+            .fireVaultThemedCollection()
             .navigationTitle(location == nil ? "New Location" : "Edit Location")
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
@@ -1621,7 +1808,8 @@ struct FireVaultLocationEditorSheet: View {
                             plusCode: plusCode,
                             latitude: coordinates.0,
                             longitude: coordinates.1,
-                            pinColor: pinColor
+                            pinColor: pinColor,
+                            directionsMode: directionsMode
                         )) {
                             dismiss()
                         }
@@ -1656,6 +1844,9 @@ struct FireVaultLocationEditorSheet: View {
     private func apply(_ coordinate: CLLocationCoordinate2D) {
         latitudeText = String(format: "%.6f", coordinate.latitude)
         longitudeText = String(format: "%.6f", coordinate.longitude)
+        if plusCodePreferences.autoGenerate {
+            plusCode = FireVaultPlusCode.encode(coordinate, length: plusCodePreferences.locationLength)
+        }
         mapPosition = .region(.init(
             center: coordinate,
             span: .init(latitudeDelta: 0.0005, longitudeDelta: 0.0005)
@@ -1909,6 +2100,7 @@ struct FireVaultNoteEditorSheet: View {
                         .focused($isTextInputFocused)
                 }
             }
+            .fireVaultThemedCollection()
             .navigationTitle(note == nil ? "New Note" : "Edit Note")
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
@@ -1974,6 +2166,11 @@ private struct FilesScansView: View {
                         .padding(.vertical, 4)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Delete File", systemImage: "trash", role: .destructive) {
+                            store.deleteDocument(accountID: account.id, documentID: document.id)
+                        }
+                    }
                 }
             }
         }
@@ -2374,6 +2571,7 @@ struct FireVaultEquipmentEditorSheet: View {
                     }
                 }
             }
+            .fireVaultThemedCollection()
             .navigationTitle(equipment == nil ? "New Equipment" : "Edit Equipment")
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
@@ -2510,8 +2708,8 @@ private struct FireVaultComponentTypePickerSheet: View {
 private struct FireVaultFullScreenPinEditor: View {
     private enum MapLayer: String, CaseIterable, Identifiable {
         case standard = "Standard"
-        case hybrid = "Hybrid"
         case imagery = "Satellite"
+        case hybrid = "Hybrid"
 
         var id: String { rawValue }
 

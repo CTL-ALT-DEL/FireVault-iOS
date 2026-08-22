@@ -173,6 +173,102 @@ struct CallFireVaultAccountIntent: AppIntent {
     }
 }
 
+struct StartFireVaultTripLogIntent: AppIntent {
+    static var title: LocalizedStringResource = "Start FireVault Trip Log"
+    static var description = IntentDescription("Starts today’s FireVault Trip Log.")
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let breadcrumbs = FireVaultBreadcrumbStore.shared
+        if breadcrumbs.isRecording {
+            return .result(dialog: "Trip Log is already recording.")
+        }
+        let store = FireVaultStore()
+        if breadcrumbs.activeDay?.isPaused == true {
+            breadcrumbs.resumeWorkday(accounts: store.accounts)
+            return .result(dialog: "Trip Log resumed.")
+        }
+        breadcrumbs.startWorkday(accounts: store.accounts)
+        return .result(dialog: "Trip Log started.")
+    }
+}
+
+struct PauseFireVaultTripLogIntent: AppIntent {
+    static var title: LocalizedStringResource = "Pause FireVault Trip Log"
+    static var description = IntentDescription("Pauses the active FireVault Trip Log.")
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let breadcrumbs = FireVaultBreadcrumbStore.shared
+        guard breadcrumbs.activeDay != nil else {
+            return .result(dialog: "There is no active Trip Log to pause.")
+        }
+        guard breadcrumbs.activeDay?.isPaused == false else {
+            return .result(dialog: "Trip Log is already paused.")
+        }
+        breadcrumbs.pauseWorkday()
+        return .result(dialog: "Trip Log paused.")
+    }
+}
+
+struct ResumeFireVaultTripLogIntent: AppIntent {
+    static var title: LocalizedStringResource = "Resume FireVault Trip Log"
+    static var description = IntentDescription("Resumes the paused FireVault Trip Log.")
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let breadcrumbs = FireVaultBreadcrumbStore.shared
+        guard breadcrumbs.activeDay != nil else {
+            return .result(dialog: "There is no paused Trip Log to resume.")
+        }
+        guard breadcrumbs.activeDay?.isPaused == true else {
+            return .result(dialog: "Trip Log is already recording.")
+        }
+        let store = FireVaultStore()
+        breadcrumbs.resumeWorkday(accounts: store.accounts)
+        return .result(dialog: "Trip Log resumed.")
+    }
+}
+
+struct FireVaultTripLogStatusIntent: AppIntent {
+    static var title: LocalizedStringResource = "FireVault Trip Log Status"
+    static var description = IntentDescription("Reports the status of today’s FireVault Trip Log.")
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let breadcrumbs = FireVaultBreadcrumbStore.shared
+        guard let day = breadcrumbs.activeDay ?? breadcrumbs.today else {
+            return .result(dialog: "There is no Trip Log for today.")
+        }
+        let state = day.isActive ? (day.isPaused ? "paused" : "recording") : "complete"
+        let miles = day.totalDistanceMeters / 1_609.344
+        let stops = day.stops.count == 1 ? "1 stop" : "\(day.stops.count) stops"
+        return .result(
+            dialog: "Trip Log is \(state), with \(String(format: "%.1f", miles)) miles and \(stops)."
+        )
+    }
+}
+
+struct EndFireVaultTripLogIntent: AppIntent {
+    static var title: LocalizedStringResource = "End FireVault Trip Log"
+    static var description = IntentDescription("Finishes and saves the active FireVault Trip Log.")
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let breadcrumbs = FireVaultBreadcrumbStore.shared
+        guard let day = breadcrumbs.activeDay else {
+            return .result(dialog: "There is no active Trip Log to end.")
+        }
+        let miles = day.totalDistanceMeters / 1_609.344
+        let stopCount = day.stops.count
+        breadcrumbs.endWorkday()
+        let stops = stopCount == 1 ? "1 stop" : "\(stopCount) stops"
+        return .result(
+            dialog: "Trip Log ended and saved with \(String(format: "%.1f", miles)) miles and \(stops)."
+        )
+    }
+}
+
 struct FireVaultAppShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
@@ -209,6 +305,47 @@ struct FireVaultAppShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Call Account",
             systemImageName: "phone.fill"
+        )
+        AppShortcut(
+            intent: StartFireVaultTripLogIntent(),
+            phrases: [
+                "Start Trip Log in \(.applicationName)",
+                "Start my \(.applicationName) Trip Log"
+            ],
+            shortTitle: "Start Trip Log",
+            systemImageName: "record.circle.fill"
+        )
+        AppShortcut(
+            intent: PauseFireVaultTripLogIntent(),
+            phrases: [
+                "Pause Trip Log in \(.applicationName)"
+            ],
+            shortTitle: "Pause Trip Log",
+            systemImageName: "pause.circle.fill"
+        )
+        AppShortcut(
+            intent: ResumeFireVaultTripLogIntent(),
+            phrases: [
+                "Resume Trip Log in \(.applicationName)"
+            ],
+            shortTitle: "Resume Trip Log",
+            systemImageName: "play.circle.fill"
+        )
+        AppShortcut(
+            intent: FireVaultTripLogStatusIntent(),
+            phrases: [
+                "Check Trip Log in \(.applicationName)"
+            ],
+            shortTitle: "Trip Log Status",
+            systemImageName: "gauge.with.dots.needle.50percent"
+        )
+        AppShortcut(
+            intent: EndFireVaultTripLogIntent(),
+            phrases: [
+                "End Trip Log in \(.applicationName)"
+            ],
+            shortTitle: "End Trip Log",
+            systemImageName: "stop.circle.fill"
         )
     }
 

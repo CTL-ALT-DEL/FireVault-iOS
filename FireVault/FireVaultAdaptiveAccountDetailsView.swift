@@ -37,8 +37,8 @@ private enum FireVaultAccountDetailSection: String, CaseIterable, Identifiable {
 
 private enum FireVaultAccountMapLayer: String, CaseIterable, Identifiable {
     case standard = "Standard"
-    case hybrid = "Hybrid"
     case imagery = "Satellite"
+    case hybrid = "Hybrid"
 
     var id: String { rawValue }
 
@@ -75,6 +75,9 @@ struct FireVaultAdaptiveAccountDetailsView: View {
     @State private var isLoadingAccountBrief = false
     @State private var accountBrief: String?
     @State private var accountBriefError: String?
+    @State private var isConfirmingAccountDeletion = false
+    @State private var isDeletingAccount = false
+    @State private var accountDeletionError: String?
 
     private var mappedPins: [FireVaultWorkspaceLocation] {
         account.locations.filter { $0.coordinate != nil }
@@ -250,7 +253,8 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                         plusCode: draft.plusCode,
                         latitude: draft.latitude,
                         longitude: draft.longitude,
-                        pinColor: draft.pinColor.rawValue
+                        pinColor: draft.pinColor.rawValue,
+                        directionsMode: draft.directionsMode.rawValue
                     )
                 }
                 return store.addLocation(
@@ -261,9 +265,26 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     plusCode: draft.plusCode,
                     latitude: draft.latitude,
                     longitude: draft.longitude,
-                    pinColor: draft.pinColor.rawValue
+                    pinColor: draft.pinColor.rawValue,
+                    directionsMode: draft.directionsMode.rawValue
                 ) != nil
             }
+        }
+        .alert("Delete Customer Account?", isPresented: $isConfirmingAccountDeletion) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete Customer Account", role: .destructive) {
+                deleteCustomerAccount()
+            }
+        } message: {
+            Text("This permanently deletes \(account.name) and its field records from this iPad and FireVault Cloud. This cannot be undone.")
+        }
+        .alert("Customer Account Not Deleted", isPresented: Binding(
+            get: { accountDeletionError != nil },
+            set: { if !$0 { accountDeletionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { accountDeletionError = nil }
+        } message: {
+            Text(accountDeletionError ?? "Nothing was deleted.")
         }
     }
 
@@ -303,6 +324,11 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                             store.call(account.phone)
                         }
                     }
+                    Divider()
+                    Button("Delete Customer Account", systemImage: "trash", role: .destructive) {
+                        isConfirmingAccountDeletion = true
+                    }
+                    .disabled(isDeletingAccount)
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.title3.bold())
@@ -406,6 +432,21 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 accountBriefError = error.localizedDescription
             }
             isLoadingAccountBrief = false
+        }
+    }
+
+    private func deleteCustomerAccount() {
+        guard !isDeletingAccount else { return }
+        isDeletingAccount = true
+        Task {
+            do {
+                try await store.deleteCustomerAccount(id: account.id)
+            } catch {
+                accountDeletionError = error.localizedDescription.isEmpty
+                    ? "Nothing was deleted. Check your connection and try again."
+                    : error.localizedDescription
+            }
+            isDeletingAccount = false
         }
     }
 
@@ -633,6 +674,11 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 } else {
                     ForEach(account.documents) { document in
                         dataRow(title: document.title, subtitle: document.subtitle, trailing: document.date, symbol: document.kind == "scan" ? "doc.viewfinder" : "doc")
+                            .contextMenu {
+                                Button("Delete File", systemImage: "trash", role: .destructive) {
+                                    store.deleteDocument(accountID: account.id, documentID: document.id)
+                                }
+                            }
                     }
                 }
             case .equipment:

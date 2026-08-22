@@ -97,6 +97,27 @@ final class FireVaultAuthentication: ObservableObject {
         }
     }
 
+    func deleteAccount(store: FireVaultStore) async {
+        guard !isWorking else { return }
+        clearMessages()
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            let session = try await SupabaseManager.client.auth.session
+            let userID = session.user.id
+            _ = try await SupabaseManager.client.functions.invoke("delete-account")
+            let removedLocalVault = store.eraseLocalAccountDataAfterCloudDeletion(for: userID)
+            try? await SupabaseManager.client.auth.signOut()
+            signedInEmail = ""
+            confirmationMessage = removedLocalVault
+                ? "Your FireVault account and its local account records were deleted."
+                : "Your cloud account was deleted. This iPhone's local vault belongs to a different login and was kept safely on the device."
+            phase = .signedOut
+        } catch {
+            errorMessage = friendlyMessage(for: error)
+        }
+    }
+
     func clearMessages() {
         errorMessage = nil
         confirmationMessage = nil
@@ -110,6 +131,7 @@ final class FireVaultAuthentication: ObservableObject {
 
 struct FireVaultAuthGate: View {
     @StateObject private var authentication = FireVaultAuthentication()
+    @AppStorage("firevault.native.settings.appearance.v1") private var storedAppearance = FireVaultAppearanceMode.system.rawValue
 
     var body: some View {
         Group {
@@ -121,14 +143,13 @@ struct FireVaultAuthGate: View {
                         .tint(NativeShellPalette.red)
                         .foregroundStyle(.secondary)
                 }
-                .preferredColorScheme(.dark)
             case .signedOut:
                 FireVaultAuthenticationView()
-                    .preferredColorScheme(.dark)
             case .signedIn:
                 ContentView()
             }
         }
+        .preferredColorScheme(preferredColorScheme)
         .environmentObject(authentication)
         .onAppear {
             authentication.start()
@@ -137,6 +158,14 @@ struct FireVaultAuthGate: View {
             if !FireVaultWidgetDeepLinkCenter.shared.receive(url) {
                 SupabaseManager.client.auth.handle(url)
             }
+        }
+    }
+
+    private var preferredColorScheme: ColorScheme? {
+        switch FireVaultAppearanceMode(rawValue: storedAppearance) ?? .system {
+        case .dark: .dark
+        case .light: .light
+        case .system: nil
         }
     }
 }
@@ -319,10 +348,10 @@ private struct FireVaultAuthenticationView: View {
             }
         }
         .padding(20)
-        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(.white.opacity(0.08))
+                .stroke(NativeShellPalette.hairline)
         }
     }
 
@@ -332,10 +361,10 @@ private struct FireVaultAuthenticationView: View {
         HStack(spacing: 11, content: content)
             .padding(.horizontal, 14)
             .frame(minHeight: 52)
-            .background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .background(NativeShellPalette.surfaceRaised, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .stroke(.white.opacity(0.09))
+                    .stroke(NativeShellPalette.hairline)
             }
     }
 
@@ -363,6 +392,180 @@ private struct FireVaultAuthenticationView: View {
             case .signup:
                 await authentication.signUp(email: normalizedEmail, password: password)
             }
+        }
+    }
+}
+
+struct FireVaultAccountSettingsView: View {
+    @EnvironmentObject private var authentication: FireVaultAuthentication
+    @ObservedObject var store: FireVaultStore
+    @State private var showsSignOutConfirmation = false
+    @State private var showsDeleteConfirmation = false
+
+    private var accountEmail: String {
+        let email = authentication.signedInEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        return email.isEmpty ? "Signed in" : email
+    }
+
+    private var cloudSyncTint: Color {
+        if store.cloudSyncErrorMessage != nil { return .orange }
+        if store.isCloudSyncing { return NativeShellPalette.blue }
+        if store.cloudLastSyncedAt == nil { return .secondary }
+        return NativeShellPalette.green
+    }
+
+    private var cloudSyncSymbol: String {
+        if store.isCloudSyncing { return "arrow.triangle.2.circlepath" }
+        if store.cloudSyncErrorMessage != nil { return "exclamationmark.icloud.fill" }
+        if store.cloudLastSyncedAt == nil { return "icloud.slash" }
+        return "checkmark.icloud.fill"
+    }
+
+    private var lastSyncText: String {
+        guard let date = store.cloudLastSyncedAt else { return "Not yet" }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private var lastCheckedText: String {
+        guard let date = store.cloudLastCheckedAt else { return "Not yet" }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    var body: some View {
+        Form {
+            Section("FireVault Account") {
+                LabeledContent {
+                    Text(accountEmail)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                } label: {
+                    Label("Signed in as", systemImage: "person.crop.circle.fill")
+                }
+
+                Label {
+                    Text("This account securely connects your iPhone, CSV imports, and FireVault web portal.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } icon: {
+                    Image(systemName: "checkmark.shield.fill")
+                        .foregroundStyle(NativeShellPalette.green)
+                }
+            }
+
+            Section {
+                LabeledContent {
+                    Label(store.cloudSyncStatusText, systemImage: cloudSyncSymbol)
+                        .foregroundStyle(cloudSyncTint)
+                } label: {
+                    Text("Status")
+                }
+
+                LabeledContent("Last successful sync") {
+                    Text(lastSyncText)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+
+                LabeledContent("Last checked") {
+                    Text(lastCheckedText)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+
+                Button {
+                    Task {
+                        await store.syncAccountsNow()
+                    }
+                } label: {
+                HStack {
+                        Label(
+                            store.isCloudSyncing ? "Syncing…" : "Sync Now",
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                        Spacer()
+                        if store.isCloudSyncing {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(store.isCloudSyncing || store.demoMode)
+
+                if store.isCloudSyncing, store.cloudSyncTotal > 0 {
+                    ProgressView(value: Double(store.cloudSyncCompleted), total: Double(store.cloudSyncTotal)) {
+                        Text("Backing up legacy accounts")
+                    } currentValueLabel: {
+                        Text("\(store.cloudSyncCompleted) of \(store.cloudSyncTotal)")
+                    }
+                }
+                if let message = store.cloudSyncErrorMessage {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            } header: {
+                Text("Cloud Sync")
+            } footer: {
+                Text(
+                    store.demoMode
+                        ? "Demo data stays on this iPhone."
+                        : "FireVault checks your account data when the app opens or becomes active. Tap Sync Now after website changes to refresh immediately."
+                )
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    showsSignOutConfirmation = true
+                } label: {
+                    HStack {
+                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                        Spacer()
+                        if authentication.isWorking {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(authentication.isWorking)
+            } footer: {
+                Text("Signing out disconnects this device from your FireVault account. Local information remains on this device.")
+            }
+            Section {
+                Button("Delete Account", role: .destructive) {
+                    showsDeleteConfirmation = true
+                }
+                .disabled(authentication.isWorking || store.isCloudSyncing)
+            } header: {
+                Text("Delete FireVault Account")
+            } footer: {
+                Text("Permanently deletes your FireVault cloud account and its data, then removes local account records from this iPhone.")
+            }
+        }
+        .navigationTitle("Account & Sign-In")
+        .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Sign out of FireVault Pro?",
+            isPresented: $showsSignOutConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Sign Out", role: .destructive) {
+                Task {
+                    await authentication.signOut()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You will return to the Log In or Sign Up screen.")
+        }
+        .confirmationDialog(
+            "Permanently delete your FireVault account?",
+            isPresented: $showsDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Account and Data", role: .destructive) {
+                Task { await authentication.deleteAccount(store: store) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This cannot be undone. If cloud deletion fails, local data will remain on this iPhone.")
         }
     }
 }

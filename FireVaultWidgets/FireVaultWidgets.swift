@@ -31,6 +31,7 @@ struct FireVaultFieldWidget: Widget {
             .accessoryCircular,
             .accessoryRectangular
         ])
+        .containerBackgroundRemovable(true)
     }
 }
 
@@ -98,22 +99,50 @@ private struct FireVaultWidgetView: View {
 
     private var smallWidget: some View {
         VStack(alignment: .leading, spacing: 9) {
-            brand
-            statusRow
+            smallBrand
+            smallStatusRow
             Spacer(minLength: 0)
             Text(durationText)
                 .font(.system(size: 27, weight: .black, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .minimumScaleFactor(0.72)
             HStack(spacing: 8) {
                 Label(milesText, systemImage: "road.lanes")
                 Label("\(entry.snapshot.stopCount)", systemImage: "mappin.and.ellipse")
             }
             .font(.caption2.bold())
-            .foregroundStyle(.white.opacity(0.76))
+            .foregroundStyle(.secondary)
         }
         .padding(3)
+    }
+
+    private var smallBrand: some View {
+        HStack(spacing: 0) {
+            Text("FIRE")
+                .foregroundStyle(.tint)
+            Text("VAULT")
+                .foregroundStyle(.primary)
+            Text("  PRO")
+                .font(.system(size: 7, weight: .black, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+        .font(.system(size: 13, weight: .black, design: .rounded))
+        .tracking(1.0)
+    }
+
+    private var smallStatusRow: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 8, height: 8)
+            Text("TRIP LOG")
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+            Text(entry.snapshot.tripState.title.uppercased())
+                .font(.caption2.bold())
+                .foregroundStyle(.primary)
+        }
     }
 
     private var mediumWidget: some View {

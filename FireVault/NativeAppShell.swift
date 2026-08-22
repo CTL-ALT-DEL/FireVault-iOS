@@ -338,10 +338,14 @@ private struct NativeNearbyView: View {
     @State private var scrollAccountID: String?
     @State private var accountScrollWasActive = false
     @State private var mapLayer: FireVaultMapLayer = .standard
-    @State private var mapIs3D = false
+    @State private var mapIs3D = true
     @State private var hasCenteredOnInitialLiveLocation = false
     @State private var radiusPickerExpanded = false
     @State private var radiusCollapseTask: Task<Void, Never>?
+    @State private var showsSelectedAddress = false
+    @State private var selectedAddressTask: Task<Void, Never>?
+    @State private var mapCameraRestoreTask: Task<Void, Never>?
+    @State private var selectedAccountIsCloseZoom = false
     @State private var showsTripLogControls = false
     @State private var tripLogControlsCollapseTask: Task<Void, Never>?
     @State private var tripLogDetailIndex = 0
@@ -365,11 +369,6 @@ private struct NativeNearbyView: View {
     private var selectedWorkspaceAccount: FireVaultWorkspaceAccount? {
         guard let selected else { return nil }
         return store.accounts.first(where: { $0.id == selected.account.id })
-    }
-
-    private var selectedHasPhone: Bool {
-        guard let selected else { return false }
-        return selected.account.phone.contains(where: \.isNumber)
     }
 
     private var canDisplayMap: Bool {
@@ -435,17 +434,19 @@ private struct NativeNearbyView: View {
         .padding(.top, 4)
         .task {
             mapLayer = FireVaultMapLayer(rawValue: settings.gps.resolvedDefaultMapLayer) ?? .standard
+            mapIs3D = settings.gps.resolvedDefaultMapIs3D
             scrollAccountID = nearbyRows.first?.id
             if payload.demoMode {
                 cameraPosition = overviewCameraPosition
             } else {
+                if let tripLocation = breadcrumbs.latestLocation {
+                    locationService.acceptTripLogLocation(tripLocation)
+                }
                 if locationService.coordinate != nil {
                     centerMapOnUser()
                     hasCenteredOnInitialLiveLocation = true
                 }
-                locationService.startLiveNearbyUpdates(
-                    highAccuracy: settings.gps.highAccuracy
-                )
+                synchronizeNearbyLocationOwnership()
             }
         }
         .task {
@@ -454,8 +455,10 @@ private struct NativeNearbyView: View {
         .onDisappear {
             radiusCollapseTask?.cancel()
             tripLogControlsCollapseTask?.cancel()
+            selectedAddressTask?.cancel()
+            mapCameraRestoreTask?.cancel()
             guard !payload.demoMode else { return }
-            locationService.stopLiveNearbyUpdates()
+            locationService.stopLiveNearbyUpdates(consumer: .handset)
         }
         .onChange(of: store.nearbyResetRequestID) { _, _ in
             resetNearby()
@@ -463,6 +466,14 @@ private struct NativeNearbyView: View {
         .onChange(of: locationService.mapRecenterRequestID) { _, _ in
             guard !payload.demoMode else { return }
             resetNearby()
+        }
+        .onChange(of: breadcrumbs.isRecording) { _, _ in
+            guard !payload.demoMode else { return }
+            synchronizeNearbyLocationOwnership()
+        }
+        .onReceive(breadcrumbs.$latestLocation.compactMap { $0 }) { location in
+            guard !payload.demoMode, breadcrumbs.isRecording else { return }
+            locationService.acceptTripLogLocation(location)
         }
         .onChange(of: locationService.coordinate?.latitude) { _, latitude in
             guard !payload.demoMode,
@@ -496,6 +507,20 @@ private struct NativeNearbyView: View {
         }
     }
 
+    private func synchronizeNearbyLocationOwnership() {
+        if breadcrumbs.isRecording {
+            locationService.stopLiveNearbyUpdates(consumer: .handset)
+            if let location = breadcrumbs.latestLocation {
+                locationService.acceptTripLogLocation(location)
+            }
+        } else {
+            locationService.startLiveNearbyUpdates(
+                highAccuracy: settings.gps.highAccuracy,
+                consumer: .handset
+            )
+        }
+    }
+
     private var statusHeader: some View {
         HStack(spacing: 0) {
             Button {
@@ -521,17 +546,17 @@ private struct NativeNearbyView: View {
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text("TRIP LOG")
-                            .font(.caption2.bold())
+                            .font(.caption2.weight(.heavy))
                             .tracking(1.05)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(NativeShellPalette.red)
                         Text(tripLogStateText)
-                            .font(.subheadline.bold())
+                            .font(.subheadline.weight(.heavy))
                             .foregroundStyle(tripLogStatusTint)
                     }
 
                     Image(systemName: showsTripLogControls ? "chevron.up" : "chevron.down")
                         .font(.caption2.bold())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(NativeShellPalette.blue)
                 }
                 .padding(.leading, 9)
                 .padding(.trailing, 7)
@@ -549,28 +574,19 @@ private struct NativeNearbyView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(height: 44)
-        .background(NativeShellPalette.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(
+            LinearGradient(
+                colors: [NativeShellPalette.tripLogLeading, NativeShellPalette.tripLogTrailing],
+                startPoint: .leading,
+                endPoint: .trailing
+            ),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(.black.opacity(0.58), lineWidth: 3)
-                .blur(radius: 1.25)
-                .offset(y: 1.6)
-                .mask(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .stroke(NativeShellPalette.tripLogBorder, lineWidth: 1.8)
         }
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(.black.opacity(0.24), lineWidth: 1.5)
-                .blur(radius: 2.2)
-                .padding(2)
-                .mask(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(.white.opacity(0.32), lineWidth: 1)
-                .offset(y: 1.5)
-                .mask(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .shadow(color: .white.opacity(0.18), radius: 1, y: 1)
+        .shadow(color: .black.opacity(0.18), radius: 7, y: 3)
     }
 
     private var tripLogDetailMenu: some View {
@@ -586,12 +602,12 @@ private struct NativeNearbyView: View {
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text(displayedTripLogDetail.rawValue)
-                            .font(.caption2.bold())
+                            .font(.caption2.weight(.heavy))
                             .tracking(0.8)
                             .foregroundStyle(.secondary)
                         HStack(spacing: 5) {
                             Text(tripLogDetailPrimaryText)
-                                .font(.caption.bold().monospacedDigit())
+                                .font(.caption.weight(.heavy).monospacedDigit())
                                 .foregroundStyle(.primary)
                             Text(tripLogDetailSecondaryText)
                                 .font(.caption2.weight(.semibold))
@@ -773,6 +789,7 @@ private struct NativeNearbyView: View {
                     Text("Select any combination of details to cycle. Your choices save automatically.")
                 }
             }
+            .fireVaultThemedCollection()
             .navigationTitle("Auto Rotate Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -796,7 +813,10 @@ private struct NativeNearbyView: View {
         } else {
             switch displayedTripLogDetail {
             case .speed:
-                guard let speed = locationService.latestLocation?.speed, speed >= 0 else { return "— mph" }
+                let speed = breadcrumbs.isRecording
+                    ? breadcrumbs.liveSpeedMetersPerSecond
+                    : locationService.liveSpeedMetersPerSecond
+                guard let speed else { return "— mph" }
                 return "\(Int((speed * 2.236_936).rounded())) mph"
             case .trip:
                 guard let day = breadcrumbs.today else { return "0.0 mi" }
@@ -1059,7 +1079,7 @@ private struct NativeNearbyView: View {
                 .frame(height: 270)
                 .nativeMapFrame()
                 .overlay(alignment: .topLeading) {
-                    if let selected {
+                    if let selected, showsSelectedAddress {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(selected.account.name)
                                 .font(.subheadline.bold())
@@ -1086,35 +1106,15 @@ private struct NativeNearbyView: View {
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if let selected {
-                        FireVaultMapActionStrip {
-                            FireVaultMapControlButton(
-                                role: .note,
-                                label: "Open \(selected.account.name) details"
-                            ) {
-                                store.openAccount(selected.account.id)
-                            }
-                            .accessibilityIdentifier("nearby-map-note")
-
-                            FireVaultMapControlButton(
-                                role: .call,
-                                label: "Call \(selected.account.name)",
-                                disabled: !selectedHasPhone
-                            ) {
-                                store.call(selected.account.phone)
-                            }
-                            .accessibilityValue(selectedHasPhone ? selected.account.phone : "No phone number")
-                            .accessibilityIdentifier("nearby-map-call")
-
-                            FireVaultMapControlButton(
-                                role: .route,
-                                label: "Route to \(selected.account.name)",
-                                disabled: selectedWorkspaceAccount == nil
-                            ) {
-                                guard let account = selectedWorkspaceAccount else { return }
-                                store.openRoute(for: account)
-                            }
-                            .accessibilityIdentifier("nearby-map-route")
+                        FireVaultMapControlButton(
+                            role: .route,
+                            label: "Route to \(selected.account.name)",
+                            disabled: selectedWorkspaceAccount == nil
+                        ) {
+                            guard let account = selectedWorkspaceAccount else { return }
+                            store.openRoute(for: account)
                         }
+                        .accessibilityIdentifier("nearby-map-route")
                         .padding(10)
                     }
                 }
@@ -1191,7 +1191,7 @@ private struct NativeNearbyView: View {
 
     private var mapOptionsMenu: some View {
         Menu {
-            Picker("Map Layer", selection: $mapLayer) {
+            Picker("Map Layer", selection: mapLayerBinding) {
                 ForEach(FireVaultMapLayer.allCases) { layer in
                     Label(layer.title, systemImage: layer.symbol)
                         .tag(layer)
@@ -1216,6 +1216,17 @@ private struct NativeNearbyView: View {
         Binding(
             get: { settings.gps.nearbyRadiusMiles },
             set: updateNearbyRadius
+        )
+    }
+
+    private var mapLayerBinding: Binding<FireVaultMapLayer> {
+        Binding(
+            get: { mapLayer },
+            set: { layer in
+                guard layer != mapLayer else { return }
+                mapLayer = layer
+                restoreCameraAfterLayerChange()
+            }
         )
     }
 
@@ -1343,7 +1354,11 @@ private struct NativeNearbyView: View {
         index: Int
     ) -> some View {
         return Button {
-            selectAccount(row, scrollToCard: true, haptic: true)
+            if selectedID == row.id {
+                store.openAccount(row.account.id)
+            } else {
+                selectAccount(row, scrollToCard: true, haptic: true)
+            }
         } label: {
             HStack(alignment: .top, spacing: 10) {
                 Text("\(index + 1)")
@@ -1426,7 +1441,9 @@ private struct NativeNearbyView: View {
                 row.distanceLabel
             ].joined(separator: ", ")
         )
-        .accessibilityHint("Tap to select on the map. Long press to open account details.")
+        .accessibilityHint(selectedID == row.id
+            ? "Opens account details."
+            : "Selects and zooms this account on the map. Tap again to open account details.")
         .accessibilityValue(selectedID == row.id ? "Selected" : "Not selected")
         .accessibilityAddTraits(selectedID == row.id ? .isSelected : [])
         .accessibilityAction(named: "Open Account Details") {
@@ -1475,6 +1492,8 @@ private struct NativeNearbyView: View {
         }
         guard let coordinate = row.account.coordinate else { return }
         selectedID = row.id
+        selectedAccountIsCloseZoom = false
+        showSelectedAddressTemporarily()
         store.selectCaptureAccount(row.account.id)
         if scrollToCard {
             // Update the scroll anchor without animating through intermediate
@@ -1488,6 +1507,9 @@ private struct NativeNearbyView: View {
 
     private func centerMapOnUser() {
         guard let coordinate = locationService.coordinate else { return }
+        selectedAddressTask?.cancel()
+        showsSelectedAddress = false
+        selectedAccountIsCloseZoom = false
         selectedID = nil
         withAnimation(.easeInOut(duration: 0.3)) {
             cameraPosition = userCameraPosition(coordinate)
@@ -1552,7 +1574,9 @@ private struct NativeNearbyView: View {
         withAnimation(.easeInOut(duration: 0.35)) {
             if let selected,
                let coordinate = selected.account.coordinate {
-                cameraPosition = accountCameraPosition(coordinate)
+                cameraPosition = selectedAccountIsCloseZoom
+                    ? closeAccountCameraPosition(coordinate)
+                    : accountCameraPosition(coordinate)
             } else if !payload.demoMode,
                       let coordinate = locationService.coordinate {
                 cameraPosition = userCameraPosition(coordinate)
@@ -1564,6 +1588,9 @@ private struct NativeNearbyView: View {
 
     private func resetNearby() {
         accountScrollWasActive = false
+        selectedAddressTask?.cancel()
+        showsSelectedAddress = false
+        selectedAccountIsCloseZoom = false
         selectedID = nil
 
         if let closestID = nearbyRows.first?.id {
@@ -1580,6 +1607,79 @@ private struct NativeNearbyView: View {
             centerMapOnUser()
         }
     }
+
+    private func showSelectedAddressTemporarily() {
+        selectedAddressTask?.cancel()
+        withAnimation(.easeOut(duration: 0.18)) {
+            showsSelectedAddress = true
+        }
+        selectedAddressTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.24)) {
+                showsSelectedAddress = false
+            }
+            guard let selected,
+                  let coordinate = selected.account.coordinate else { return }
+            selectedAccountIsCloseZoom = true
+            let closePosition = closeAccountCameraPosition(coordinate)
+            withAnimation(.easeInOut(duration: 0.55)) {
+                cameraPosition = closePosition
+            }
+            restoreCameraAfterLayerChange(
+                preferredPosition: closePosition
+            )
+        }
+    }
+
+    private func restoreCameraAfterLayerChange(
+        preferredPosition: MapCameraPosition? = nil
+    ) {
+        mapCameraRestoreTask?.cancel()
+        mapCameraRestoreTask = Task { @MainActor in
+            // A map-style swap rebuilds MapKit's renderer. Reapply the camera
+            // after that swap finishes instead of allowing .automatic to show
+            // the default nationwide viewport.
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.32)) {
+                if let preferredPosition {
+                    cameraPosition = preferredPosition
+                } else if let selected,
+                          let coordinate = selected.account.coordinate {
+                    cameraPosition = selectedAccountIsCloseZoom
+                        ? closeAccountCameraPosition(coordinate)
+                        : accountCameraPosition(coordinate)
+                } else if !payload.demoMode,
+                          let coordinate = locationService.coordinate {
+                    cameraPosition = userCameraPosition(coordinate)
+                } else {
+                    cameraPosition = overviewCameraPosition
+                }
+            }
+        }
+    }
+
+    private func closeAccountCameraPosition(
+        _ coordinate: CLLocationCoordinate2D
+    ) -> MapCameraPosition {
+        guard mapIs3D else {
+            return .region(
+                .init(
+                    center: coordinate,
+                    span: .init(latitudeDelta: 0.0035, longitudeDelta: 0.0035)
+                )
+            )
+        }
+        return .camera(
+            MapCamera(
+                centerCoordinate: coordinate,
+                distance: 650,
+                heading: 0,
+                pitch: 60
+            )
+        )
+    }
 }
 
 private enum NativeAccountSort: String, CaseIterable, Identifiable {
@@ -1595,13 +1695,17 @@ private struct NativeAccountsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var search = ""
     @State private var sort: NativeAccountSort = .alphabetic
-    @State private var topAccountID: String?
-    @State private var accountScrollIsActive = false
 
     private var accounts: [FireVaultNativeAccount] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let filtered = query.isEmpty ? payload.accounts : payload.accounts.filter {
-            [$0.name, $0.address, $0.accountId, $0.category].joined(separator: " ").lowercased().contains(query)
+        let filtered = query.isEmpty ? payload.accounts : payload.accounts.filter { account in
+            let locationCodes = settings.preferences.plusCodes.searchable
+                ? store.accounts.first(where: { $0.id == account.id })?.locations.map(\.plusCode).joined(separator: " ") ?? ""
+                : ""
+            return [account.name, account.address, account.accountId, account.category, locationCodes]
+                .joined(separator: " ")
+                .lowercased()
+                .contains(query)
         }
         switch sort {
         case .alphabetic: return filtered.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -1641,7 +1745,6 @@ private struct NativeAccountsView: View {
 
                             ForEach(accounts) { account in
                                 Button {
-                                    topAccountID = account.id
                                     store.openAccount(account.id)
                                 } label: {
                                     NativeAccountRow(account: account)
@@ -1649,14 +1752,12 @@ private struct NativeAccountsView: View {
                                         .nativeSurfaceCard(cornerRadius: NativeShellMetrics.cardRadius)
                                 }
                                 .buttonStyle(.plain)
-                                .id(account.id)
                             }
 
                             Color.clear
                                 .frame(height: max(0, geometry.size.height - 92))
                                 .allowsHitTesting(false)
                         }
-                        .scrollTargetLayout()
                         .padding(.horizontal, 16)
                         .padding(.bottom, 18)
                     }
@@ -1665,19 +1766,7 @@ private struct NativeAccountsView: View {
                         store.reloadAccounts()
                         try? await Task.sleep(for: .milliseconds(350))
                     }
-                    .scrollPosition(id: $topAccountID, anchor: .top)
-                    .scrollTargetBehavior(.viewAligned(limitBehavior: .never, anchor: .top))
-                    .onScrollPhaseChange { _, phase in
-                        accountScrollIsActive = phase.isScrolling
-                    }
-                    .onChange(of: topAccountID) { _, newID in
-                        guard accountScrollIsActive, newID != nil,
-                              settings.gps.hapticsAreEnabled else { return }
-                        let feedback = UISelectionFeedbackGenerator()
-                        feedback.prepare()
-                        feedback.selectionChanged()
-                    }
-                    .accessibilityIdentifier("accounts-snapping-scroll")
+                    .accessibilityIdentifier("accounts-scroll")
                 }
             }
             .background(NativeShellPalette.background)
@@ -1756,17 +1845,21 @@ struct NativePhotoView: View {
                 VStack(spacing: 14) {
                     destinationAccountCard
 
-                    if horizontalSizeClass == .regular {
+                    if horizontalSizeClass == .regular, selectedImage != nil {
                         HStack(alignment: .top, spacing: 18) {
                             previewColumn
                                 .frame(maxWidth: .infinity)
 
-                            ipadCapturePanel
-                                .frame(width: 340)
+                            captureWorkspacePanel
+                                .frame(width: 380)
                         }
                     } else {
-                        previewColumn
-                        captureControls
+                        if selectedImage != nil {
+                            previewColumn
+                        }
+
+                        captureWorkspacePanel
+                            .frame(maxWidth: 720)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -1872,53 +1965,51 @@ struct NativePhotoView: View {
                 }
                 .font(.caption.bold())
                 .padding(.horizontal, 4)
-            } else {
-                captureReadyCard
-                    .aspectRatio(1, contentMode: .fit)
-                    .frame(maxHeight: 650)
             }
         }
     }
 
-    private var ipadCapturePanel: some View {
+    private var captureWorkspacePanel: some View {
         NativeShellCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Label("FIELD CAPTURE", systemImage: "camera.aperture")
+            VStack(alignment: .leading, spacing: 11) {
+                Label("CAPTURE TOOLS", systemImage: "camera.aperture")
                     .font(.caption.bold())
-                    .tracking(1.1)
-                    .foregroundStyle(NativeShellPalette.blue)
+                    .tracking(1.0)
+                    .foregroundStyle(.primary)
 
-                Text("Capture a field photo, scan a document, or import an existing image into the selected account.")
+                Text("Add field media directly to the selected account.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                Divider()
+                captureActionRow(
+                    title: "Take Photo",
+                    subtitle: "Capture a field photo with your saved overlay",
+                    symbol: "camera.fill",
+                    tint: NativeShellPalette.red,
+                    intent: .camera
+                )
+                .accessibilityIdentifier("native-take-photo")
 
-                VStack(spacing: 10) {
-                    captureButton(
-                        title: "PHOTO",
-                        subtitle: "Camera",
-                        symbol: "camera.fill",
-                        tint: NativeShellPalette.red,
-                        intent: .camera
-                    )
-                    captureButton(
-                        title: "SCAN",
-                        subtitle: "Document",
-                        symbol: "doc.viewfinder",
-                        tint: NativeShellPalette.blue,
-                        intent: .scanner
-                    )
-                    captureButton(
-                        title: "IMPORT",
-                        subtitle: "Photo Library",
-                        symbol: "photo.on.rectangle",
-                        tint: NativeShellPalette.green,
-                        intent: .photoLibrary
-                    )
-                }
+                captureActionRow(
+                    title: "Scan Document",
+                    subtitle: "Create a clean multi-page account document",
+                    symbol: "doc.viewfinder",
+                    tint: NativeShellPalette.blue,
+                    intent: .scanner
+                )
+                .accessibilityIdentifier("native-scan-document")
+
+                captureActionRow(
+                    title: "Choose Photo",
+                    subtitle: "Import an existing image from Photo Library",
+                    symbol: "photo.on.rectangle",
+                    tint: NativeShellPalette.green,
+                    intent: .photoLibrary
+                )
+                .accessibilityIdentifier("native-choose-photo")
             }
         }
+        .accessibilityIdentifier("native-capture-workspace")
     }
 
     private func imagePreview(_ image: UIImage) -> some View {
@@ -2026,38 +2117,7 @@ struct NativePhotoView: View {
         .accessibilityIdentifier("native-scanned-pages")
     }
 
-    private var captureControls: some View {
-        HStack(spacing: 10) {
-            captureButton(
-                title: "PHOTO",
-                subtitle: "Camera",
-                symbol: "camera.fill",
-                tint: NativeShellPalette.red,
-                intent: .camera
-            )
-            .accessibilityIdentifier("native-take-photo")
-
-            captureButton(
-                title: "SCAN",
-                subtitle: "Document",
-                symbol: "doc.viewfinder",
-                tint: NativeShellPalette.blue,
-                intent: .scanner
-            )
-            .accessibilityIdentifier("native-scan-document")
-
-            captureButton(
-                title: "IMPORT",
-                subtitle: "Library",
-                symbol: "photo.on.rectangle",
-                tint: NativeShellPalette.green,
-                intent: .photoLibrary
-            )
-            .accessibilityIdentifier("native-choose-photo")
-        }
-    }
-
-    private func captureButton(
+    private func captureActionRow(
         title: String,
         subtitle: String,
         symbol: String,
@@ -2067,82 +2127,39 @@ struct NativePhotoView: View {
         Button {
             beginCapture(intent)
         } label: {
-            VStack(spacing: 7) {
+            HStack(spacing: 12) {
                 Image(systemName: symbol)
-                    .font(.system(size: 27, weight: .bold))
-                VStack(spacing: 1) {
+                    .font(.system(size: 21, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 46, height: 46)
+                    .background(tint, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.caption.bold())
-                        .tracking(0.7)
+                        .font(.body.bold())
+                        .foregroundStyle(.primary)
                     Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.72))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
+
+                Spacer(minLength: 6)
+
+                Image(systemName: "chevron.right")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(tint)
             }
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 94)
-            .background(
-                LinearGradient(
-                    colors: [tint.opacity(0.92), tint.opacity(0.55)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-            )
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
+            .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(.white.opacity(0.16), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(tint.opacity(0.2), lineWidth: 1)
             }
         }
         .buttonStyle(.plain)
-        .shadow(color: tint.opacity(0.18), radius: 8, y: 4)
-    }
-
-    private var captureReadyCard: some View {
-        ZStack {
-            LinearGradient(
-                colors: [NativeShellPalette.blue.opacity(0.14), NativeShellPalette.surface],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(NativeShellPalette.blue.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [7, 7]))
-                .padding(16)
-
-            VStack(spacing: 14) {
-                Image(systemName: "camera.aperture")
-                    .font(.system(size: 44, weight: .semibold))
-                    .foregroundStyle(NativeShellPalette.blue)
-                    .frame(width: 82, height: 82)
-                    .background(NativeShellPalette.blue.opacity(0.12), in: Circle())
-                    .overlay {
-                        Circle().stroke(NativeShellPalette.blue.opacity(0.24), lineWidth: 1)
-                    }
-
-                VStack(spacing: 5) {
-                    Text("FIELD CAPTURE")
-                        .font(.system(size: 21, weight: .bold, design: .rounded))
-                        .tracking(1.1)
-                    Text("Photo • Scan • Import")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-
-                HStack(spacing: 8) {
-                    Label("Account linked", systemImage: "building.2.fill")
-                    Label("Overlay ready", systemImage: "camera.filters")
-                }
-                .font(.caption2.bold())
-                .foregroundStyle(.secondary)
-            }
-            .padding(28)
-        }
-        .frame(maxWidth: .infinity)
-        .nativeSurfaceCard(cornerRadius: NativeShellMetrics.mapRadius)
-        .accessibilityElement(children: .combine)
     }
 
     private func beginCapture(_ intent: CaptureIntent) {
@@ -2342,6 +2359,7 @@ private struct NativeCaptureAccountPicker: View {
                     }
                 }
             }
+            .fireVaultThemedCollection()
             .searchable(text: $search, prompt: "Name, address, or account ID")
             .navigationTitle("Choose Account")
             .navigationBarTitleDisplayMode(.inline)
@@ -2475,6 +2493,22 @@ struct NativeSettingsView: View {
 
     private var profileSection: some View {
         Section {
+            NavigationLink {
+                FireVaultAccountSettingsView(store: store)
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Account & Sign-In")
+                        Text("Sync, sign out, or delete your account")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "person.crop.circle.badge.checkmark")
+                        .foregroundStyle(NativeShellPalette.green)
+                }
+            }
+
             DisclosureGroup(isExpanded: Binding(
                 get: { isTechnicianGroupExpanded },
                 set: { isExpanded in
@@ -2579,6 +2613,7 @@ struct NativeSettingsView: View {
                     .foregroundStyle(NativeShellPalette.tint(group.tint))
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
+                    .accessibilityIdentifier("settings-group-\(group.id)")
             }
         }
         .listSectionSpacing(.compact)
@@ -2657,7 +2692,7 @@ struct NativeSettingsView: View {
         case "sync": NativeSyncSettingsView(settings: settings)
         case "customerImport": NativeCSVImportView(store: store)
         case "categories": NativeCategoriesSettingsView(settings: settings, store: store)
-        case "backup": NativeBackupRestoreView(store: store)
+        case "backup": NativeBackupRestoreView(store: store, settings: settings, breadcrumbs: breadcrumbs)
         case "webdav": NativeWebDAVSettingsView(settings: settings)
         case "privacy": NativePrivacySettingsView(settings: settings)
         case "security": NativeSecuritySettingsView(settings: settings)
@@ -2786,6 +2821,7 @@ struct FireVaultIPadSettingsWorkspace: View {
                             symbol: "person.crop.circle.fill",
                             tint: NativeShellPalette.blue,
                             items: [
+                                ("account", "Account & Sign-In", "person.crop.circle.badge.checkmark"),
                                 ("tech", "Technician Profile", "person.text.rectangle"),
                                 ("settingsView", "Preferred Settings View", "rectangle.3.group"),
                                 ("appearance", "Appearance", "circle.lefthalf.filled")
@@ -2869,6 +2905,7 @@ struct FireVaultIPadSettingsWorkspace: View {
     @ViewBuilder
     private func destination(_ id: String) -> some View {
         switch id {
+        case "account": FireVaultAccountSettingsView(store: store)
         case "tech": NativeTechnicianSettingsView(settings: settings)
         case "settingsView": NativeSettingsViewPreferencesView(settings: settings)
         case "appearance": NativeAppearanceSettingsView(settings: settings)
@@ -2883,7 +2920,7 @@ struct FireVaultIPadSettingsWorkspace: View {
         case "sync": NativeSyncSettingsView(settings: settings)
         case "customerImport": NativeCSVImportView(store: store)
         case "categories": NativeCategoriesSettingsView(settings: settings, store: store)
-        case "backup": NativeBackupRestoreView(store: store)
+        case "backup": NativeBackupRestoreView(store: store, settings: settings, breadcrumbs: breadcrumbs)
         case "webdav": NativeWebDAVSettingsView(settings: settings)
         case "privacy": NativePrivacySettingsView(settings: settings)
         case "security": NativeSecuritySettingsView(settings: settings)
@@ -2925,14 +2962,15 @@ private struct NativeGPSSettingsView: View {
             Section {
                 LabeledContent("Map provider", value: "Apple Maps")
 
-                Picker("Default map layer", selection: Binding(
-                    get: { draft.defaultMapLayer ?? "standard" },
-                    set: { draft.defaultMapLayer = $0 }
-                )) {
-                    Label("Standard", systemImage: "map").tag("standard")
-                    Label("Satellite", systemImage: "globe.americas.fill").tag("satellite")
-                    Label("Hybrid", systemImage: "square.3.layers.3d").tag("hybrid")
+                Picker("Default map layer", selection: defaultMapAppearance) {
+                    Label("Standard", systemImage: "map").tag("standard-2d")
+                    Label("Standard 3D", systemImage: "view.3d").tag("standard-3d")
+                    Label("Satellite", systemImage: "globe.americas.fill").tag("satellite-2d")
+                    Label("Satellite 3D", systemImage: "view.3d").tag("satellite-3d")
+                    Label("Hybrid", systemImage: "square.3.layers.3d").tag("hybrid-2d")
+                    Label("Hybrid 3D", systemImage: "building.2.crop.circle").tag("hybrid-3d")
                 }
+                .pickerStyle(.menu)
 
                 Toggle("High-accuracy GPS", isOn: $draft.highAccuracy)
 
@@ -2954,7 +2992,7 @@ private struct NativeGPSSettingsView: View {
             } header: {
                 Text("Map Preferences")
             } footer: {
-                Text("This distance controls the accounts displayed on the Nearby map and list.")
+                Text("Choose Standard, Satellite, or Hybrid in either 2D or 3D. This becomes the opening appearance for Nearby maps. The distance controls the accounts displayed on the map and list.")
             }
 
             Section("GPS Tools") {
@@ -3001,6 +3039,7 @@ private struct NativeGPSSettingsView: View {
                 NavigationLink {
                     FireVaultGPSDiagnosticsView(
                         locationService: locationService,
+                        breadcrumbs: FireVaultBreadcrumbStore.shared,
                         highAccuracy: draft.highAccuracy
                     )
                 } label: {
@@ -3029,6 +3068,7 @@ private struct NativeGPSSettingsView: View {
                 }
             }
         }
+        .fireVaultThemedCollection()
         .navigationTitle("GPS & Maps")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaPadding(.bottom, 82)
@@ -3047,6 +3087,20 @@ private struct NativeGPSSettingsView: View {
         settings.saveGPS(draft)
         saved = true
     }
+
+    private var defaultMapAppearance: Binding<String> {
+        Binding(
+            get: {
+                "\(draft.resolvedDefaultMapLayer)-\(draft.resolvedDefaultMapIs3D ? "3d" : "2d")"
+            },
+            set: { selection in
+                let components = selection.split(separator: "-")
+                guard components.count == 2 else { return }
+                draft.defaultMapLayer = String(components[0])
+                draft.defaultMapIs3D = components[1] == "3d"
+            }
+        )
+    }
 }
 
 private struct FireVaultGPSDiagnosticSample: Identifiable {
@@ -3059,10 +3113,21 @@ private struct FireVaultGPSDiagnosticSample: Identifiable {
 
 private struct FireVaultGPSDiagnosticsView: View {
     @ObservedObject var locationService: FireVaultLocationService
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     let highAccuracy: Bool
     @State private var samples: [FireVaultGPSDiagnosticSample] = []
 
-    private var location: CLLocation? { locationService.latestLocation }
+    private var location: CLLocation? {
+        breadcrumbs.isRecording
+            ? (breadcrumbs.latestLocation ?? locationService.latestLocation)
+            : locationService.latestLocation
+    }
+
+    private var liveSpeed: CLLocationSpeed? {
+        breadcrumbs.isRecording
+            ? breadcrumbs.liveSpeedMetersPerSecond
+            : locationService.liveSpeedMetersPerSecond
+    }
 
     var body: some View {
         ScrollView {
@@ -3083,22 +3148,36 @@ private struct FireVaultGPSDiagnosticsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    locationService.requestCurrentLocation(highAccuracy: true)
+                    if !breadcrumbs.isRecording {
+                        locationService.requestCurrentLocation(highAccuracy: true)
+                    }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
+                .disabled(breadcrumbs.isRecording)
                 .accessibilityLabel("Refresh GPS reading")
             }
         }
         .onAppear {
-            locationService.startDiagnosticsUpdates(highAccuracy: highAccuracy)
-            append(locationService.latestLocation)
+            synchronizeDiagnosticsOwnership()
+            append(location)
         }
         .onDisappear {
-            locationService.stopDiagnosticsUpdates()
+            locationService.stopDiagnosticsUpdates(
+                resumeNearby: !breadcrumbs.isRecording
+            )
         }
         .onReceive(locationService.$latestLocation.compactMap { $0 }) { updated in
+            guard !breadcrumbs.isRecording else { return }
             append(updated)
+        }
+        .onReceive(breadcrumbs.$latestLocation.compactMap { $0 }) { updated in
+            guard breadcrumbs.isRecording else { return }
+            append(updated)
+        }
+        .onChange(of: breadcrumbs.isRecording) { _, _ in
+            synchronizeDiagnosticsOwnership()
+            append(location)
         }
     }
 
@@ -3112,11 +3191,11 @@ private struct FireVaultGPSDiagnosticsView: View {
             }
             .frame(width: 48, height: 48)
             VStack(alignment: .leading, spacing: 3) {
-                Text(locationService.isDiagnosticsTracking ? "LIVE GPS SIGNAL" : "GPS STATUS")
+                Text(isLive ? "LIVE GPS SIGNAL" : "GPS STATUS")
                     .font(.caption.bold())
                     .tracking(1)
                     .foregroundStyle(.secondary)
-                Text(locationService.statusText)
+                Text(statusText)
                     .font(.subheadline.bold())
                     .lineLimit(2)
                 Text(highAccuracy ? "High-accuracy preference enabled" : "Balanced-accuracy preference enabled")
@@ -3138,7 +3217,7 @@ private struct FireVaultGPSDiagnosticsView: View {
                 metric("Accuracy", feet(location?.horizontalAccuracy, prefix: "±"), "scope")
                 metric("Vertical Accuracy", feet(location?.verticalAccuracy, prefix: "±"), "arrow.up.and.down")
                 metric("Altitude", feet(location?.altitude), "mountain.2")
-                metric("Speed", speed(location?.speed), "speedometer")
+                metric("Speed", speed(liveSpeed), "speedometer")
                 metric("Direction", course(location?.course), "location.north.fill")
                 metric("Reading Age", readingAge, "clock")
             }
@@ -3196,7 +3275,7 @@ private struct FireVaultGPSDiagnosticsView: View {
             time: location.timestamp,
             horizontalAccuracyFeet: location.horizontalAccuracy * 3.28084,
             altitudeFeet: location.altitude * 3.28084,
-            speedMPH: max(0, location.speed) * 2.236_936
+            speedMPH: max(0, liveSpeed ?? 0) * 2.236_936
         ))
         if samples.count > 90 { samples.removeFirst(samples.count - 90) }
     }
@@ -3249,7 +3328,17 @@ private struct FireVaultGPSDiagnosticsView: View {
     }
 
     private var statusTint: Color {
-        locationService.isDiagnosticsTracking ? NativeShellPalette.green : NativeShellPalette.amber
+        isLive ? NativeShellPalette.green : NativeShellPalette.amber
+    }
+
+    private var isLive: Bool {
+        breadcrumbs.isRecording || locationService.isDiagnosticsTracking
+    }
+
+    private var statusText: String {
+        breadcrumbs.isRecording
+            ? "Using the active Trip Log GPS recorder"
+            : locationService.statusText
     }
 
     private var authorizationText: String {
@@ -3292,6 +3381,14 @@ private struct FireVaultGPSDiagnosticsView: View {
         guard let source = location?.sourceInformation else { return "Unavailable" }
         return (software ? source.isSimulatedBySoftware : source.isProducedByAccessory) ? "Yes" : "No"
     }
+
+    private func synchronizeDiagnosticsOwnership() {
+        if breadcrumbs.isRecording {
+            locationService.stopDiagnosticsUpdates(resumeNearby: false)
+        } else {
+            locationService.startDiagnosticsUpdates(highAccuracy: highAccuracy)
+        }
+    }
 }
 
 private extension View {
@@ -3324,7 +3421,7 @@ private struct FVRadiusWheelPicker: View {
         .frame(maxWidth: .infinity)
         .frame(height: 150)
         .clipped()
-        .background(.black.opacity(0.18))
+        .background(NativeShellPalette.surfaceRaised)
         .clipShape(
             RoundedRectangle(
                 cornerRadius: 18,
@@ -3336,7 +3433,7 @@ private struct FVRadiusWheelPicker: View {
                 cornerRadius: 18,
                 style: .continuous
             )
-            .stroke(.white.opacity(0.10), lineWidth: 1)
+            .stroke(NativeShellPalette.hairline, lineWidth: 1)
         }
         .sensoryFeedback(.selection, trigger: selection)
         .accessibilityLabel("Nearby radius")
@@ -3545,7 +3642,7 @@ private struct NativeAboutFireVaultView: View {
                     title: "Separate Workspaces",
                     detail: "Demo records remain isolated from live customer data.",
                     systemImage: "square.stack.3d.up.fill",
-                    tint: .purple
+                    tint: NativeShellPalette.purple
                 )
                 FireVaultAboutFeatureRow(
                     title: "Location Control",
@@ -3612,6 +3709,7 @@ private struct NativeAboutFireVaultView: View {
                 LabeledContent("Updated", value: updatedAtText)
             }
         }
+        .fireVaultThemedCollection()
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -3798,6 +3896,7 @@ private struct FireVaultDeveloperCenterView: View {
                 Text("A production database write test will require a dedicated diagnostic table migration. FireVault Pro does not write test records into customer or Trip Log tables.")
             }
         }
+        .fireVaultThemedCollection()
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Developer Center")
         .navigationBarTitleDisplayMode(.inline)
@@ -3834,6 +3933,7 @@ private struct FireVaultSimpleTemplateDeveloperView: View {
                 Text("Resetting enables every Simple-mode feature without deleting FireVault Pro data.")
             }
         }
+        .fireVaultThemedCollection()
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Simple Template")
         .navigationBarTitleDisplayMode(.inline)
@@ -3977,7 +4077,7 @@ extension View {
                 )
         }
         .shadow(
-            color: .black.opacity(emphasized ? 0.31 : 0.18),
+            color: emphasized ? NativeShellPalette.emphasizedShadow : NativeShellPalette.cardShadow,
             radius: emphasized ? 9 : 7,
             x: 0,
             y: emphasized ? 5 : 3
@@ -4011,16 +4111,43 @@ enum NativeShellMetrics {
 }
 
 enum NativeShellPalette {
-    static let background = adaptive(
+    static let backgroundUIColor = adaptiveUIColor(
         light: UIColor(red: 0.957, green: 0.941, blue: 0.902, alpha: 1),
         dark: UIColor(red: 0.028, green: 0.043, blue: 0.061, alpha: 1)
     )
-    static let surface = adaptive(
-        light: UIColor(red: 1.000, green: 0.992, blue: 0.965, alpha: 1),
+    static let surfaceUIColor = adaptiveUIColor(
+        light: UIColor(red: 1.000, green: 0.984, blue: 0.941, alpha: 1),
         dark: UIColor(red: 0.070, green: 0.095, blue: 0.125, alpha: 1)
     )
+    static let navigationBackgroundUIColor = adaptiveUIColor(
+        light: UIColor(red: 0.925, green: 0.894, blue: 0.835, alpha: 1),
+        dark: UIColor(red: 0.045, green: 0.061, blue: 0.082, alpha: 1)
+    )
+    static let primaryTextUIColor = adaptiveUIColor(
+        light: UIColor(red: 0.145, green: 0.137, blue: 0.122, alpha: 1),
+        dark: UIColor(white: 0.96, alpha: 1)
+    )
+    static let borderUIColor = adaptiveUIColor(
+        light: UIColor(red: 0.31, green: 0.28, blue: 0.24, alpha: 0.22),
+        dark: UIColor(white: 1, alpha: 0.14)
+    )
+
+    static let background = Color(uiColor: backgroundUIColor)
+    static let surface = Color(uiColor: surfaceUIColor)
+    static let surfaceRaised = adaptive(
+        light: UIColor(red: 0.984, green: 0.957, blue: 0.902, alpha: 1),
+        dark: UIColor(red: 0.090, green: 0.116, blue: 0.148, alpha: 1)
+    )
+    static let cardShadow = adaptive(
+        light: UIColor(white: 0.05, alpha: 0.10),
+        dark: UIColor(white: 0, alpha: 0.18)
+    )
+    static let emphasizedShadow = adaptive(
+        light: UIColor(white: 0.03, alpha: 0.17),
+        dark: UIColor(white: 0, alpha: 0.31)
+    )
     static let blue = adaptive(
-        light: UIColor(red: 0.08, green: 0.39, blue: 0.68, alpha: 1),
+        light: UIColor(red: 0.075, green: 0.278, blue: 0.420, alpha: 1),
         dark: UIColor(red: 0.24, green: 0.67, blue: 1.0, alpha: 1)
     )
     static let green = adaptive(
@@ -4036,13 +4163,22 @@ enum NativeShellPalette {
         dark: UIColor(red: 1.0, green: 0.34, blue: 0.40, alpha: 1)
     )
     static let purple = adaptive(
-        light: UIColor(red: 0.42, green: 0.23, blue: 0.68, alpha: 1),
+        light: UIColor(red: 0.16, green: 0.36, blue: 0.39, alpha: 1),
         dark: UIColor(red: 0.68, green: 0.48, blue: 1.0, alpha: 1)
     )
-    static let navigationBackground = adaptive(
-        light: UIColor(red: 0.925, green: 0.894, blue: 0.835, alpha: 1),
-        dark: UIColor(red: 0.045, green: 0.061, blue: 0.082, alpha: 1)
+    static let tripLogLeading = adaptive(
+        light: UIColor(red: 1.000, green: 0.985, blue: 0.945, alpha: 1),
+        dark: UIColor(red: 0.105, green: 0.105, blue: 0.098, alpha: 1)
     )
+    static let tripLogTrailing = adaptive(
+        light: UIColor(red: 0.940, green: 0.915, blue: 0.855, alpha: 1),
+        dark: UIColor(red: 0.145, green: 0.140, blue: 0.125, alpha: 1)
+    )
+    static let tripLogBorder = adaptive(
+        light: UIColor(red: 0.22, green: 0.21, blue: 0.19, alpha: 0.86),
+        dark: UIColor(red: 0.72, green: 0.69, blue: 0.62, alpha: 0.72)
+    )
+    static let navigationBackground = Color(uiColor: navigationBackgroundUIColor)
     static let navigationInactive = adaptive(
         light: UIColor(red: 0.36, green: 0.34, blue: 0.30, alpha: 1),
         dark: UIColor(red: 0.60, green: 0.65, blue: 0.72, alpha: 1)
@@ -4060,10 +4196,14 @@ enum NativeShellPalette {
         dark: UIColor(white: 0, alpha: 0.78)
     )
 
-    private static func adaptive(light: UIColor, dark: UIColor) -> Color {
-        Color(uiColor: UIColor { traits in
+    private static func adaptiveUIColor(light: UIColor, dark: UIColor) -> UIColor {
+        UIColor { traits in
             traits.userInterfaceStyle == .dark ? dark : light
-        })
+        }
+    }
+
+    private static func adaptive(light: UIColor, dark: UIColor) -> Color {
+        Color(uiColor: adaptiveUIColor(light: light, dark: dark))
     }
     static func tint(_ name: String) -> Color {
         switch name { case "green": green; case "amber": amber; case "red": red; case "purple": purple; default: blue }

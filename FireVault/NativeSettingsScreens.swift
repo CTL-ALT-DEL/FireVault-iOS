@@ -18,7 +18,7 @@ enum NativeSettingsCatalog {
             item("plusCodes", "Plus Codes", "Offline location-code preferences", "plus.square.dashed"),
             item("notifications", "Notifications", "Trip Log, service, and system alerts", "bell.badge")
         ]),
-        group("reports", "Reports", "Reports and customer email", "doc.text", "purple", [
+        group("reports", "Reports", "Reports and customer email", "doc.text", "blue", [
             item("reports", "Report Settings", "Trip Log report defaults", "doc.text"),
             item("email", "Email Settings", "Recipients, subject, and signature", "envelope")
         ]),
@@ -92,9 +92,10 @@ struct NativeAppearanceSettingsView: View {
             } header: {
                 Text("Theme")
             } footer: {
-                Text("Light uses FireVault Pro's warm porcelain palette. System Default follows the iPhone appearance automatically.")
+                Text("Light uses FireVault Pro's Warm Ivory palette. System Default follows the iPhone appearance automatically.")
             }
         }
+        .fireVaultThemedCollection()
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -109,7 +110,7 @@ struct NativeAppearanceSettingsView: View {
 
     private func accent(for mode: FireVaultAppearanceMode) -> Color {
         switch mode {
-        case .dark: NativeShellPalette.purple
+        case .dark: NativeShellPalette.blue
         case .light: NativeShellPalette.amber
         case .system: NativeShellPalette.blue
         }
@@ -118,7 +119,7 @@ struct NativeAppearanceSettingsView: View {
     private func detail(for mode: FireVaultAppearanceMode) -> String {
         switch mode {
         case .dark: "Original high-contrast FireVault Pro theme"
-        case .light: "Warm porcelain and ivory surfaces"
+        case .light: "Warm Ivory canvas and soft cream surfaces"
         case .system: "Match the current iPhone setting"
         }
     }
@@ -158,6 +159,7 @@ struct NativeSettingsViewPreferencesView: View {
                 }
             }
         }
+        .fireVaultThemedCollection()
         .navigationTitle("Settings View")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: draft) { _, updated in
@@ -566,6 +568,7 @@ struct NativeSettingsFormModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .fireVaultThemedCollection()
             .scrollDismissesKeyboard(.interactively)
             .contentMargins(.bottom, 96, for: .scrollContent)
             .navigationTitle(title)

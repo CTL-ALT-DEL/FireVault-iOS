@@ -11,7 +11,7 @@ import UIKit
 struct ContentView: View {
     @StateObject private var store = FireVaultStore()
     @StateObject private var settings = FireVaultNativeSettingsStore()
-    @StateObject private var locationService = FireVaultLocationService()
+    @StateObject private var locationService = FireVaultLocationService.shared
     @StateObject private var liveBreadcrumbs = FireVaultBreadcrumbStore.shared
     @StateObject private var quickActions = FireVaultQuickActionCenter.shared
     @StateObject private var widgetDeepLinks = FireVaultWidgetDeepLinkCenter.shared
@@ -21,6 +21,8 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showsSplash = true
+    @State private var widgetSnapshotTask: Task<Void, Never>?
+    @State private var hasStartedLegacyBackfill = false
 
     init() {
         _demoBreadcrumbs = State(initialValue: FireVaultDemoShowroom.makeBreadcrumbStore())
@@ -58,6 +60,7 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: store.selectedAccountID)
+        .tint(NativeShellPalette.blue)
         .preferredColorScheme(preferredColorScheme)
     }
 
@@ -103,18 +106,19 @@ struct ContentView: View {
 
     private var workspaceObservationView: some View {
         settingsObservationView
-        .onChange(of: store.demoMode) { _, _ in
+        .onChange(of: store.demoMode) { _, isDemoMode in
             prepareActiveVault()
-            updateWidgetSnapshot()
+            if !isDemoMode { startLegacyBackfillIfNeeded() }
+            scheduleWidgetSnapshotUpdate()
         }
         .onChange(of: store.selectedAccountID) { _, _ in
-            updateWidgetSnapshot()
+            scheduleWidgetSnapshotUpdate()
         }
         .onChange(of: activeBreadcrumbs.days) { _, _ in
-            updateWidgetSnapshot()
+            scheduleWidgetSnapshotUpdate()
         }
         .onChange(of: activeBreadcrumbs.isRecording) { _, _ in
-            updateWidgetSnapshot()
+            scheduleWidgetSnapshotUpdate()
         }
         .onChange(of: store.accounts.count) { _, count in
             guard store.demoMode, count <= 4 else { return }
@@ -211,6 +215,7 @@ struct ContentView: View {
 
     private func performInitialSetup() async {
         prepareActiveVault()
+        startLegacyBackfillIfNeeded()
         await refreshAndReconcileFeatureControls()
         store.configureCategoryRules(settings.preferences.categoryRules ?? [])
         privacyLock.configure(enabled: settings.preferences.privacy.enabled)
@@ -232,6 +237,7 @@ struct ContentView: View {
         switch newPhase {
         case .active:
             prepareActiveVault()
+            resumeNearbyLocationIfNeeded()
             Task { await refreshAndReconcileFeatureControls() }
             privacyLock.lockIfNeeded(settings.preferences.privacy)
             if isPrivacyLocked {
@@ -241,6 +247,8 @@ struct ContentView: View {
                 handlePendingWidgetDeepLink()
             }
         case .background:
+            locationService.stopLiveNearbyUpdates(consumer: .handset)
+            updateWidgetSnapshot()
             privacyLock.enteredBackground()
         default:
             break
@@ -266,8 +274,24 @@ struct ContentView: View {
         }
     }
 
+    private func startLegacyBackfillIfNeeded() {
+        guard !store.demoMode, !hasStartedLegacyBackfill else { return }
+        hasStartedLegacyBackfill = true
+        Task { await store.syncAccountsNow() }
+    }
+
     private var isPrivacyLocked: Bool {
         settings.preferences.privacy.enabled && !privacyLock.isUnlocked
+    }
+
+    private func resumeNearbyLocationIfNeeded() {
+        guard !store.demoMode,
+              store.selectedTab == .nearby,
+              !activeBreadcrumbs.isRecording else { return }
+        locationService.startLiveNearbyUpdates(
+            highAccuracy: settings.gps.highAccuracy,
+            consumer: .handset
+        )
     }
 
     private func handlePendingQuickAction() {
@@ -347,6 +371,15 @@ struct ContentView: View {
                 accountCategory: account?.category ?? existing.accountCategory
             )
         )
+    }
+
+    private func scheduleWidgetSnapshotUpdate() {
+        widgetSnapshotTask?.cancel()
+        widgetSnapshotTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            updateWidgetSnapshot()
+        }
     }
 }
 
@@ -445,7 +478,7 @@ private struct FireVaultBrandHeader: View {
         .background(NativeShellPalette.background)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(.white.opacity(0.07))
+                .fill(NativeShellPalette.hairline)
                 .frame(height: 1)
         }
         .accessibilityIdentifier("firevault-brand-header")

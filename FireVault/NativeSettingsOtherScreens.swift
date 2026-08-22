@@ -26,12 +26,10 @@ struct NativePlusCodeSettingsView: View {
                 Toggle("Show Plus Code tools", isOn: $draft.plusCodes.enabled)
                 Toggle("Generate automatically from GPS", isOn: $draft.plusCodes.autoGenerate)
                 Toggle("Allow account search", isOn: $draft.plusCodes.searchable)
-                Toggle("Include in reports", isOn: $draft.plusCodes.includeInReports)
             }
             Section("Precision") {
                 Picker("Account precision", selection: $draft.plusCodes.accountLength) { Text("10 digits").tag(10); Text("11 digits").tag(11) }
                 Picker("Location precision", selection: $draft.plusCodes.locationLength) { Text("10 digits").tag(10); Text("11 digits").tag(11) }
-                Picker("Reverify", selection: $draft.plusCodes.verifyAfterDays) { Text("90 days").tag(90); Text("180 days").tag(180); Text("1 year").tag(365) }
             }
             Section {
                 LabeledContent("CURRENT LOCATION") {
@@ -46,7 +44,7 @@ struct NativePlusCodeSettingsView: View {
                     Label("Refresh Current Location", systemImage: "location.fill")
                 }
             } footer: {
-                Text("The full Plus Code is generated locally from the current GPS coordinate. No address lookup is required.")
+                Text("Full Plus Codes are generated locally from GPS coordinates. No address lookup, Google API key, or paid Google request is required.")
             }
         }
         .nativeSettingsForm(title: "Plus Codes") { settings.save(draft) }
@@ -54,46 +52,7 @@ struct NativePlusCodeSettingsView: View {
 
     private var currentPlusCode: String {
         guard let coordinate = locationService.coordinate else { return "Waiting for GPS…" }
-        return FireVaultPlusCodeEncoder.encode(coordinate, length: draft.plusCodes.accountLength)
-    }
-}
-
-private enum FireVaultPlusCodeEncoder {
-    private static let alphabet = Array("23456789CFGHJMPQRVWX")
-    private static let pairResolutions = [20.0, 1.0, 0.05, 0.0025, 0.000125]
-
-    static func encode(_ coordinate: CLLocationCoordinate2D, length: Int = 10) -> String {
-        var latitude = min(90, max(-90, coordinate.latitude))
-        if latitude == 90 { latitude -= 0.000000001 }
-        var longitude = coordinate.longitude
-        while longitude < -180 { longitude += 360 }
-        while longitude >= 180 { longitude -= 360 }
-        latitude += 90
-        longitude += 180
-
-        var code = ""
-        for resolution in pairResolutions {
-            let latitudeDigit = min(19, Int(latitude / resolution))
-            let longitudeDigit = min(19, Int(longitude / resolution))
-            code.append(alphabet[latitudeDigit])
-            code.append(alphabet[longitudeDigit])
-            latitude -= Double(latitudeDigit) * resolution
-            longitude -= Double(longitudeDigit) * resolution
-        }
-
-        if length > 10 {
-            let latitudeDigit = min(4, Int(latitude / (0.000125 / 5)))
-            let longitudeDigit = min(3, Int(longitude / (0.000125 / 4)))
-            code.append(alphabet[latitudeDigit * 4 + longitudeDigit])
-        }
-
-        code.insert("+", at: code.index(code.startIndex, offsetBy: 8))
-        let requested = min(11, max(8, length))
-        let charactersWithoutSeparator = code.filter { $0 != "+" }
-        let end = charactersWithoutSeparator.index(charactersWithoutSeparator.startIndex, offsetBy: requested)
-        let trimmed = String(charactersWithoutSeparator[..<end])
-        let separator = trimmed.index(trimmed.startIndex, offsetBy: 8)
-        return String(trimmed[..<separator]) + "+" + String(trimmed[separator...])
+        return FireVaultPlusCode.encode(coordinate, length: draft.plusCodes.accountLength)
     }
 }
 
@@ -253,40 +212,78 @@ struct NativeStorageSettingsView: View {
     var body: some View {
         Form {
             Section {
-                storageDestinationPicker("Photo destination", selection: $draft.storage.photoProvider)
-                TextField("Photo folder", text: $draft.storage.photoFolder)
-                    .textInputAutocapitalization(.never)
-                    .focused($focused)
-                Picker("Photo quality", selection: optionalString(\.photoQuality, default: "original")) {
-                    Text("Original quality").tag("original")
-                    Text("Storage optimized").tag("optimized")
-                    Text("Small file").tag("compact")
-                }
+                storagePlanOverview
+            }
+            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 8, trailing: 16))
+            .listRowBackground(Color.clear)
+
+            Section {
+                destinationRow(
+                    title: "Photos",
+                    detail: "Field photos and imported images",
+                    symbol: "photo.on.rectangle.angled",
+                    selection: $draft.storage.photoProvider
+                )
+                folderField("Photo folder", text: $draft.storage.photoFolder)
             } header: {
-                Label("Photos", systemImage: "photo.fill")
+                Text("Photo Storage")
             } footer: {
                 providerDescription(draft.storage.photoProvider)
             }
 
             Section {
-                storageDestinationPicker("Document destination", selection: $draft.storage.documentProvider)
-                TextField("Document folder", text: $draft.storage.documentFolder)
-                    .textInputAutocapitalization(.never)
-                    .focused($focused)
+                destinationRow(
+                    title: "Files & Scans",
+                    detail: "Documents, reports, and scanned pages",
+                    symbol: "doc.on.doc.fill",
+                    selection: $draft.storage.documentProvider
+                )
+                folderField("Document folder", text: $draft.storage.documentFolder)
+            } header: {
+                Text("Document Storage")
+            } footer: {
+                providerDescription(draft.storage.documentProvider)
+            }
+
+            Section {
+                Picker("Photo quality", selection: optionalString(\.photoQuality, default: "original")) {
+                    Text("Original quality").tag("original")
+                    Text("Storage optimized").tag("optimized")
+                    Text("Small file").tag("compact")
+                }
                 Picker("Scanned document format", selection: optionalString(\.scanFormat, default: "pdf")) {
                     Text("Searchable PDF").tag("pdf")
                     Text("Individual images").tag("images")
                 }
             } header: {
-                Label("Documents & Scans", systemImage: "doc.text.fill")
+                Label("File Quality & Format", systemImage: "slider.horizontal.3")
             } footer: {
-                providerDescription(draft.storage.documentProvider)
+                Text("Original photos preserve maximum detail. Searchable PDF keeps a multi-page scan together as one document.")
             }
 
-            Section("Organization") {
-                Toggle("Create a folder for each account", isOn: optionalBool(\.useAccountFolders, default: true))
-                Toggle("Keep originals on this device", isOn: optionalBool(\.preserveOriginals, default: true))
-                Toggle("Upload using Wi-Fi only", isOn: optionalBool(\.wifiOnlyUploads, default: false))
+            Section {
+                settingsToggle(
+                    "Account folders",
+                    detail: "Keep each customer's files together",
+                    symbol: "folder.badge.person.crop",
+                    isOn: optionalBool(\.useAccountFolders, default: true)
+                )
+                settingsToggle(
+                    "Keep device originals",
+                    detail: "Retain a local copy after upload",
+                    symbol: "iphone",
+                    isOn: optionalBool(\.preserveOriginals, default: true)
+                )
+                settingsToggle(
+                    "Wi-Fi uploads only",
+                    detail: "Avoid using cellular data for files",
+                    symbol: "wifi",
+                    isOn: optionalBool(\.wifiOnlyUploads, default: false)
+                )
+            } header: {
+                Text("Organization & Uploads")
+            } footer: {
+                Text(uploadSummary)
             }
 
             Section {
@@ -311,16 +308,102 @@ struct NativeStorageSettingsView: View {
                 storageConnectionRow("iCloud Drive", symbol: "icloud.fill", configured: true)
                 storageConnectionRow("FireVault Cloud", symbol: "shield.lefthalf.filled", configured: false)
             } header: {
-                Text("Storage Connections")
+                Text("Connected Services")
             } footer: {
-                Text("FireVault Cloud storage requires a Pro subscription. External services must be configured before they can receive uploads.")
+                Text("Set up a service here before selecting it as a save destination. FireVault Cloud requires a Pro subscription.")
             }
         }
         .nativeSettingsForm(title: "File Storage", focused: $focused) { settings.save(draft) }
     }
 
-    private func storageDestinationPicker(_ title: String, selection: Binding<String>) -> some View {
-        Picker(title, selection: selection) {
+    private var storagePlanOverview: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "externaldrive.fill.badge.checkmark")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(NativeShellPalette.blue)
+                    .frame(width: 44, height: 44)
+                    .background(NativeShellPalette.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Storage Plan")
+                        .font(.headline)
+                    Text("Choose where field records are saved and how files are prepared.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            HStack(spacing: 10) {
+                destinationSummary(
+                    title: "PHOTOS",
+                    provider: draft.storage.photoProvider,
+                    symbol: "photo.fill"
+                )
+                destinationSummary(
+                    title: "FILES & SCANS",
+                    provider: draft.storage.documentProvider,
+                    symbol: "doc.fill"
+                )
+            }
+        }
+        .padding(16)
+        .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(NativeShellPalette.blue.opacity(0.18), lineWidth: 1)
+        }
+        .shadow(color: NativeShellPalette.cardShadow, radius: 10, y: 4)
+    }
+
+    private func destinationSummary(title: String, provider: String, symbol: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .foregroundStyle(NativeShellPalette.blue)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                Text(providerName(provider))
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(NativeShellPalette.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func destinationRow(title: String, detail: String, symbol: String, selection: Binding<String>) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(NativeShellPalette.blue)
+                .frame(width: 32, height: 32)
+                .background(NativeShellPalette.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            storageDestinationPicker(selection: selection)
+        }
+        .padding(.vertical, 3)
+    }
+
+    private func storageDestinationPicker(selection: Binding<String>) -> some View {
+        Picker("Destination", selection: selection) {
             Text("On this iPhone or iPad").tag("local")
             Text("FireVault Cloud").tag("firevault")
             Text("iCloud Drive").tag("icloud")
@@ -328,6 +411,39 @@ struct NativeStorageSettingsView: View {
             Text("Microsoft SharePoint").tag("sharepoint")
             Text("WebDAV Server").tag("webdav")
         }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .font(.subheadline.weight(.semibold))
+    }
+
+    private func folderField(_ title: String, text: Binding<String>) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "folder.fill")
+                .foregroundStyle(NativeShellPalette.amber)
+                .frame(width: 24)
+            TextField(title, text: text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($focused)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func settingsToggle(_ title: String, detail: String, symbol: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            HStack(spacing: 11) {
+                Image(systemName: symbol)
+                    .foregroundStyle(NativeShellPalette.blue)
+                    .frame(width: 25)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     private func providerDescription(_ provider: String) -> Text {
@@ -358,14 +474,46 @@ struct NativeStorageSettingsView: View {
         HStack(spacing: 11) {
             Image(systemName: symbol)
                 .foregroundStyle(configured ? NativeShellPalette.green : NativeShellPalette.blue)
-                .frame(width: 24)
-            Text(title)
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
+                .frame(width: 32, height: 32)
+                .background(
+                    (configured ? NativeShellPalette.green : NativeShellPalette.blue).opacity(0.10),
+                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                Text(configured ? "Available as a destination" : "Connection required")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
             Text(configured ? "Ready" : "Setup")
                 .font(.caption.bold())
                 .foregroundStyle(configured ? NativeShellPalette.green : .secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    (configured ? NativeShellPalette.green : Color.secondary).opacity(0.10),
+                    in: Capsule()
+                )
+        }
+    }
+
+    private var uploadSummary: String {
+        let connection = (draft.storage.wifiOnlyUploads ?? false) ? "Uploads wait for Wi-Fi." : "Uploads may use Wi-Fi or cellular data."
+        let originals = (draft.storage.preserveOriginals ?? true) ? "Device originals are retained." : "Device originals may be removed after upload."
+        return "\(connection) \(originals)"
+    }
+
+    private func providerName(_ provider: String) -> String {
+        switch provider {
+        case "firevault": "FireVault Cloud"
+        case "icloud": "iCloud Drive"
+        case "onedrive", "microsoft": "OneDrive"
+        case "sharepoint": "SharePoint"
+        case "webdav": "WebDAV"
+        default: "This Device"
         }
     }
 }
@@ -446,7 +594,7 @@ struct NativeCategoriesSettingsView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .onDelete { draft.categories.remove(atOffsets: $0) }
+                .onDelete(perform: deleteCategories)
             }
             Section("Add Category") {
                 TextField("Category tag", text: $newCategory).focused($focused)
@@ -565,8 +713,57 @@ struct NativeCategoriesSettingsView: View {
     }
 
     private func save() {
-        settings.save(draft)
-        store.configureCategoryRules(draft.categoryRules ?? [])
+        var cleanedDraft = draft
+        let configuredCategories = cleanedDraft.categories
+        let isConfigured: (String) -> Bool = { candidate in
+            configuredCategories.contains {
+                $0.caseInsensitiveCompare(candidate) == .orderedSame
+            }
+        }
+        let removedFromList = settings.preferences.categories.filter { existing in
+            !draft.categories.contains {
+                $0.caseInsensitiveCompare(existing) == .orderedSame
+            }
+        }
+        let retiredRuleCategories = (cleanedDraft.categoryRules ?? [])
+            .map(\.categoryTag)
+            .filter { !isConfigured($0) }
+        let retiredStyleCategories = (cleanedDraft.categoryStyles ?? [])
+            .map(\.category)
+            .filter { !isConfigured($0) }
+        let removedCategories = removedFromList + retiredRuleCategories + retiredStyleCategories
+
+        cleanedDraft.categoryRules = (cleanedDraft.categoryRules ?? []).filter {
+            isConfigured($0.categoryTag)
+        }
+        cleanedDraft.categoryStyles = (cleanedDraft.categoryStyles ?? []).filter {
+            isConfigured($0.category)
+        }
+        if !removedCategories.isEmpty {
+            store.removeCategories(removedCategories)
+        }
+        draft = cleanedDraft
+        settings.save(cleanedDraft)
+        store.configureCategoryRules(cleanedDraft.categoryRules ?? [])
+    }
+
+    private func deleteCategories(at offsets: IndexSet) {
+        let removed = offsets.compactMap { index in
+            draft.categories.indices.contains(index) ? draft.categories[index] : nil
+        }
+        guard !removed.isEmpty else { return }
+
+        draft.categories.remove(atOffsets: offsets)
+        draft.categoryRules = (draft.categoryRules ?? []).filter { rule in
+            !removed.contains {
+                $0.caseInsensitiveCompare(rule.categoryTag) == .orderedSame
+            }
+        }
+        draft.categoryStyles = (draft.categoryStyles ?? []).filter { style in
+            !removed.contains {
+                $0.caseInsensitiveCompare(style.category) == .orderedSame
+            }
+        }
     }
 
     private func ruleCategoryBinding(at index: Int) -> Binding<String> {
@@ -661,6 +858,7 @@ struct NativeCategoriesSettingsView: View {
                     .foregroundStyle(categoryColor(editingCategoryColor))
                 }
             }
+            .fireVaultThemedCollection()
             .navigationTitle("Edit Category")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -815,7 +1013,7 @@ struct NativeSecuritySettingsView: View {
 }
 
 struct FireVaultVaultBackupDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
+    static var readableContentTypes: [UTType] { [.fireVaultBackup, .json] }
     var data: Data
 
     init(data: Data = Data("[]".utf8)) {
@@ -833,34 +1031,61 @@ struct FireVaultVaultBackupDocument: FileDocument {
 
 struct NativeBackupRestoreView: View {
     @ObservedObject var store: FireVaultStore
+    @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @State private var exportDocument = FireVaultVaultBackupDocument()
     @State private var isExporting = false
     @State private var isImporting = false
     @State private var statusMessage = ""
     @State private var errorMessage = ""
+    @State private var storageReport = FireVaultMediaStorageReport(
+        referencedFiles: 0,
+        orphanedFiles: 0,
+        totalBytes: 0
+    )
+    @State private var confirmsMediaCleanup = false
 
     var body: some View {
         List {
             Section {
-                Label("\(store.accounts.count) accounts ready to protect", systemImage: "checkmark.shield.fill")
+                Label(
+                    "\(store.accounts.count) accounts and \(breadcrumbs.days.count) Trip Log days ready",
+                    systemImage: "checkmark.shield.fill"
+                )
                     .foregroundStyle(NativeShellPalette.green)
-                Button("Export Vault Backup", systemImage: "square.and.arrow.up") {
+                Button("Export Complete Vault", systemImage: "square.and.arrow.up") {
                     do {
-                        exportDocument = .init(data: try store.accountsBackupData())
+                        exportDocument = .init(
+                            data: try FireVaultVaultBackupCoordinator.export(
+                                store: store,
+                                settings: settings,
+                                breadcrumbs: breadcrumbs
+                            )
+                        )
                         errorMessage = ""
                         isExporting = true
                     } catch {
                         errorMessage = error.localizedDescription
                     }
                 }
-                Button("Merge From Backup", systemImage: "square.and.arrow.down") {
+                Button("Restore From Backup", systemImage: "square.and.arrow.down") {
                     errorMessage = ""
                     isImporting = true
                 }
             } header: {
-                Text("Account Vault")
+                Text("Complete Vault")
             } footer: {
-                Text("A restore merge adds accounts that are missing. Existing accounts and their field history are never overwritten.")
+                Text("The protected backup includes accounts, settings, Trip Log history, and referenced photos and scans. Restore merges missing records without overwriting an existing account or workday.")
+            }
+
+            Section("Local Media") {
+                LabeledContent("Storage used", value: storageReport.formattedSize)
+                LabeledContent("Referenced files", value: "\(storageReport.referencedFiles)")
+                LabeledContent("Orphaned files", value: "\(storageReport.orphanedFiles)")
+                Button("Clean Orphaned Media", systemImage: "trash", role: .destructive) {
+                    confirmsMediaCleanup = true
+                }
+                .disabled(storageReport.orphanedFiles == 0)
             }
 
             if !statusMessage.isEmpty {
@@ -876,14 +1101,30 @@ struct NativeBackupRestoreView: View {
                 }
             }
         }
+        .fireVaultThemedCollection()
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Backup & Restore")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { storageReport = store.mediaStorageReport() }
+        .confirmationDialog(
+            "Remove orphaned media?",
+            isPresented: $confirmsMediaCleanup,
+            titleVisibility: .visible
+        ) {
+            Button("Remove Orphaned Files", role: .destructive) {
+                let removed = store.removeOrphanedMedia()
+                storageReport = store.mediaStorageReport()
+                statusMessage = "Removed \(removed) orphaned media file\(removed == 1 ? "" : "s")."
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Only files that are not referenced by any account record will be removed.")
+        }
         .fileExporter(
             isPresented: $isExporting,
             document: exportDocument,
-            contentType: .json,
-            defaultFilename: "FireVault-Accounts-\(Date().formatted(.iso8601.year().month().day()))"
+            contentType: .fireVaultBackup,
+            defaultFilename: "FireVault-Complete-\(Date().formatted(.iso8601.year().month().day()))"
         ) { result in
             switch result {
             case .success:
@@ -893,13 +1134,28 @@ struct NativeBackupRestoreView: View {
                 errorMessage = error.localizedDescription
             }
         }
-        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
+        .fileImporter(
+            isPresented: $isImporting,
+            allowedContentTypes: [.fireVaultBackup, .json],
+            allowsMultipleSelection: false
+        ) { result in
             do {
                 guard let url = try result.get().first else { return }
                 let accessed = url.startAccessingSecurityScopedResource()
                 defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-                let merge = try store.mergeAccountsBackup(Data(contentsOf: url, options: .mappedIfSafe))
-                statusMessage = "\(merge.added) accounts restored; \(merge.preserved) existing accounts preserved."
+                let data = try Data(contentsOf: url, options: .mappedIfSafe)
+                if url.pathExtension.lowercased() == "json" {
+                    let merge = try store.mergeAccountsBackup(data)
+                    statusMessage = "Legacy backup: \(merge.added) accounts restored; \(merge.preserved) preserved."
+                } else {
+                    let restored = try FireVaultVaultBackupCoordinator.restore(
+                        data,
+                        store: store,
+                        settings: settings,
+                        breadcrumbs: breadcrumbs
+                    )
+                    statusMessage = "Restored \(restored.accountsAdded) accounts, \(restored.tripLogDaysAdded) Trip Log days, and \(restored.mediaFilesRestored) media files."
+                }
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             } catch {
                 errorMessage = error.localizedDescription
@@ -1039,6 +1295,7 @@ struct NativeCSVImportView: View {
                     NativeCSVImportReviewView(
                         store: store,
                         data: importData,
+                        fileName: selectedFileName,
                         initialAnalysis: analysis
                     ) { importResult in
                         result = importResult
@@ -1127,6 +1384,7 @@ struct NativeCSVImportView: View {
 private struct NativeCSVImportReviewView: View {
     @ObservedObject var store: FireVaultStore
     let data: Data
+    let fileName: String
     let onImport: (FireVaultCSVImportResult) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -1140,11 +1398,13 @@ private struct NativeCSVImportReviewView: View {
     init(
         store: FireVaultStore,
         data: Data,
+        fileName: String,
         initialAnalysis: FireVaultCSVAnalysis,
         onImport: @escaping (FireVaultCSVImportResult) -> Void
     ) {
         self.store = store
         self.data = data
+        self.fileName = fileName
         self.onImport = onImport
         _analysis = State(initialValue: initialAnalysis)
         _mapping = State(initialValue: initialAnalysis.preview.mapping)
@@ -1236,7 +1496,7 @@ private struct NativeCSVImportReviewView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Importing Accounts")
                                 .font(.headline)
-                            Text("Updating the local vault and preserving existing field records…")
+                            Text("Saving on this iPhone and syncing to your FireVault account…")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -1248,6 +1508,7 @@ private struct NativeCSVImportReviewView: View {
                 Section { Label(errorMessage, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
             }
         }
+        .fireVaultThemedCollection()
         .navigationTitle("Review CSV Import")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -1261,7 +1522,11 @@ private struct NativeCSVImportReviewView: View {
                     isImporting = true
                     Task { @MainActor in
                         await Task.yield()
-                        let result = store.applyCSVImport(analysis)
+                        let result = await store.applyCSVImportAndSync(
+                            analysis,
+                            csvData: data,
+                            fileName: fileName
+                        )
                         UINotificationFeedbackGenerator().notificationOccurred(.success)
                         isImporting = false
                         onImport(result)
@@ -1337,6 +1602,7 @@ struct NativeDemoSettingsView: View {
                     : "Enter Demo Mode to explore the complete sample workspace. Your live FireVault records are not modified.")
             }
         }
+        .fireVaultThemedCollection()
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Demo Mode")
         .navigationBarTitleDisplayMode(.inline)
@@ -1369,7 +1635,7 @@ struct NativeManualView: View {
 
             Section("Photos, Maps & Location") {
                 manualItem("Photo overlays", "Resize and position the account-information overlay inside the 4:3 capture area. Configure the FireVault logo separately.", "camera.filters")
-                manualItem("Map layers", "Choose Standard, Satellite, or Hybrid as the default layer under GPS & Maps.", "square.3.layers.3d")
+                manualItem("Map layers", "Choose Standard, Satellite, or Hybrid in either 2D or 3D under GPS & Maps.", "square.3.layers.3d")
                 manualItem("GPS Diagnostics", "Inspect live coordinates, accuracy, elevation, speed, direction, source data, and rolling charts.", "waveform.path.ecg.rectangle")
                 manualItem("Plus Codes", "Generate compact location codes from GPS coordinates for accounts and saved arrival points.", "plus.square.dashed")
             }
@@ -1381,6 +1647,7 @@ struct NativeManualView: View {
                 manualItem("Reset Demo Data", "Restore the sample workspace without changing live accounts or authentication.", "arrow.counterclockwise")
             }
         }
+        .fireVaultThemedCollection()
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Help & User Manual")
         .navigationBarTitleDisplayMode(.inline)

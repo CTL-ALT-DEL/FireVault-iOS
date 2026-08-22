@@ -88,6 +88,10 @@ struct FireVaultTripLogPortraitView: View {
         .onAppear {
             selectedDayID = breadcrumbs.today?.id ?? breadcrumbs.days.first?.id
         }
+        .task(id: selectedDay?.id) {
+            guard let dayID = selectedDay?.id else { return }
+            breadcrumbs.resolveMissingBoundaryAddresses(for: dayID)
+        }
         .onChange(of: selectedDay?.points.count ?? 0) { previousCount, newCount in
             guard newCount > previousCount, breadcrumbs.isRecording else { return }
             flashWaypointLED()
@@ -459,7 +463,9 @@ struct FireVaultTripLogPortraitView: View {
                     portraitTimelineRow(
                         timeText: day.startedAt.formatted(date: .omitted, time: .shortened),
                         title: "Trip Started",
-                        subtitle: "Route recording began",
+                        subtitle: day.startedAddress
+                            ?? day.points.first.map { "Near \($0.coordinate.fireVaultCoordinateLabel)" }
+                            ?? "Waiting for starting address",
                         symbol: "play.fill",
                         tint: NativeShellPalette.green
                     )
@@ -486,7 +492,9 @@ struct FireVaultTripLogPortraitView: View {
                         portraitTimelineRow(
                             timeText: endedAt.formatted(date: .omitted, time: .shortened),
                             title: "Trip Ended",
-                            subtitle: day.totalDistanceMeters.tripLogMiles,
+                            subtitle: [day.endedAddress, day.totalDistanceMeters.tripLogMiles]
+                                .compactMap { $0 }
+                                .joined(separator: " • "),
                             symbol: "stop.fill",
                             tint: NativeShellPalette.red
                         )

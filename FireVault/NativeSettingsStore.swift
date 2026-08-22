@@ -228,11 +228,13 @@ struct FireVaultGPSPreferences: Codable, Equatable {
     var addressAssistanceEnabled = true
     var hapticsEnabled: Bool? = true
     var defaultMapLayer: String?
+    var defaultMapIs3D: Bool?
     var tripLogMinimumUnknownStopMinutes: Int?
     var tripLogRejectPoorAccuracyStops: Bool?
     var tripLogMergeNearbyStops: Bool?
     var hapticsAreEnabled: Bool { hapticsEnabled ?? true }
     var resolvedDefaultMapLayer: String { defaultMapLayer ?? "standard" }
+    var resolvedDefaultMapIs3D: Bool { defaultMapIs3D ?? true }
     var resolvedTripLogMinimumUnknownStopMinutes: Int {
         tripLogMinimumUnknownStopMinutes ?? 5
     }
@@ -246,6 +248,7 @@ struct FireVaultGPSPreferences: Codable, Equatable {
         if !["standard", "satellite", "hybrid"].contains(copy.resolvedDefaultMapLayer) {
             copy.defaultMapLayer = "standard"
         }
+        if copy.defaultMapIs3D == nil { copy.defaultMapIs3D = true }
         if ![5, 7, 10].contains(copy.resolvedTripLogMinimumUnknownStopMinutes) {
             copy.tripLogMinimumUnknownStopMinutes = 5
         }
@@ -575,6 +578,21 @@ final class FireVaultNativeSettingsStore: ObservableObject {
         merged.overlay = FireVaultOverlayEditorBridge.merge(into: updated.overlay)
         preferences = merged.normalized
         persist()
+    }
+
+    func restore(
+        _ backup: FireVaultNativePreferences,
+        settingsView backupSettingsView: FireVaultSettingsViewPreferences? = nil,
+        appearance backupAppearance: FireVaultAppearanceMode? = nil
+    ) {
+        preferences = backup.normalized
+        persist()
+        if let backupSettingsView {
+            saveSettingsView(backupSettingsView)
+        }
+        if let backupAppearance {
+            saveAppearance(backupAppearance)
+        }
     }
 
     func saveGPS(_ updated: FireVaultGPSPreferences) {
