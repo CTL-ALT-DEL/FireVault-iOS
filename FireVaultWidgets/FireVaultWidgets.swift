@@ -10,12 +10,15 @@ import WidgetKit
 struct FireVaultWidgetBundle: WidgetBundle {
     var body: some Widget {
         FireVaultFieldWidget()
+        FireVaultTripLogWidget()
+        FireVaultAccountWidget()
+        FireVaultCloudStatusWidget()
         FireVaultTripLogLiveActivity()
     }
 }
 
 struct FireVaultFieldWidget: Widget {
-    let kind = "FireVaultFieldWidget"
+    let kind = FireVaultWidgetKind.dashboard.rawValue
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: FireVaultWidgetProvider()) { entry in
@@ -146,25 +149,65 @@ private struct FireVaultWidgetView: View {
     }
 
     private var mediumWidget: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 7) {
             HStack {
                 brand
                 Spacer()
                 statusCapsule
             }
-            HStack(spacing: 8) {
-                metric(title: "MILES", value: milesText, symbol: "road.lanes")
-                metric(title: "TIME", value: durationText, symbol: "timer")
-                metric(title: "STOPS", value: "\(entry.snapshot.stopCount)", symbol: "mappin.and.ellipse")
+
+            HStack(alignment: .center, spacing: 14) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(mediumHeadline)
+                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                        .tracking(1.1)
+                        .foregroundStyle(.white.opacity(0.54))
+                    Text(mediumPrimaryValue)
+                        .font(.system(size: 23, weight: .black, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                compactMetric(value: milesText, label: "MILES", symbol: "road.lanes")
+                compactMetric(
+                    value: "\(entry.snapshot.stopCount)",
+                    label: "STOPS",
+                    symbol: "mappin.and.ellipse"
+                )
             }
-            accountStrip
-            HStack(spacing: 12) {
-                widgetLink("Accounts", symbol: "building.2.fill", destination: "firevault://accounts")
-                widgetLink("Photo", symbol: "camera.fill", destination: "firevault://photo")
-                widgetLink(tripActionTitle, symbol: "truck.box.fill", destination: tripActionDestination)
+
+            Divider().overlay(.white.opacity(0.12))
+
+            HStack(spacing: 9) {
+                Image(systemName: "building.2.fill")
+                    .foregroundStyle(.cyan)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(entry.snapshot.accountName ?? "No account selected")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .privacySensitive()
+                    Text(accountDetail)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.54))
+                        .lineLimit(1)
+                        .privacySensitive()
+                }
+                Spacer(minLength: 4)
+                Link(destination: URL(string: tripActionDestination)!) {
+                    Label(tripActionTitle, systemImage: tripActionSymbol)
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .frame(height: 27)
+                        .background(statusColor.opacity(0.78), in: Capsule())
+                }
             }
         }
-        .padding(2)
+        .padding(.vertical, 1)
     }
 
     private var largeWidget: some View {
@@ -283,6 +326,21 @@ private struct FireVaultWidgetView: View {
         .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 
+    private func compactMetric(value: String, label: String, symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Label(label, systemImage: symbol)
+                .font(.system(size: 7, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.48))
+            Text(value)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(minWidth: 50, alignment: .leading)
+    }
+
     private var accountStrip: some View {
         HStack(spacing: 8) {
             Image(systemName: "building.2.fill")
@@ -335,6 +393,31 @@ private struct FireVaultWidgetView: View {
         case .recording: "Trip Log"
         case .paused: "Resume"
         case .ready, .complete: "Start"
+        }
+    }
+
+    private var tripActionSymbol: String {
+        switch entry.snapshot.tripState {
+        case .recording: "arrow.right.circle.fill"
+        case .paused: "play.fill"
+        case .ready, .complete: "record.circle"
+        }
+    }
+
+    private var mediumHeadline: String {
+        switch entry.snapshot.tripState {
+        case .recording: "ACTIVE TRIP"
+        case .paused: "TRIP PAUSED"
+        case .complete: "LATEST TRIP"
+        case .ready: "FIELD READY"
+        }
+    }
+
+    private var mediumPrimaryValue: String {
+        switch entry.snapshot.tripState {
+        case .recording, .paused: durationText
+        case .complete: durationText
+        case .ready: "Start Trip Log"
         }
     }
 
