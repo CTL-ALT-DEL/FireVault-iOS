@@ -2,12 +2,13 @@
 
 ## Official `main` release candidate
 
-- Visible version: **1.08.70**
-- Build number: **130**
-- Includes the tested CarPlay optimization and the four-widget portfolio:
+- Visible version: **1.08.71**
+- Build number: **131**
+- Includes the tested CarPlay optimization and four-widget portfolio:
   Dashboard, Trip Log, Field Account, and Cloud Status.
-- Includes the small Dashboard widget contrast correction for light, dark,
-  tinted, and clear Home Screen appearances.
+- Includes the rebuilt searchable Help Center with task-based guides, concise
+  visuals, troubleshooting, and accurate account-sync guidance.
+- Credits Bannerman US LLC as the creator, developer, and publisher in About.
 - Intended distribution: TestFlight.
 
 ## Release rule
