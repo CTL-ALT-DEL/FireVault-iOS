@@ -108,14 +108,14 @@ private struct FireVaultWidgetView: View {
             Text(durationText)
                 .font(.system(size: 27, weight: .black, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(.primary)
+                .foregroundStyle(.white)
                 .minimumScaleFactor(0.72)
             HStack(spacing: 8) {
                 Label(milesText, systemImage: "road.lanes")
                 Label("\(entry.snapshot.stopCount)", systemImage: "mappin.and.ellipse")
             }
             .font(.caption2.bold())
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.white.opacity(0.68))
         }
         .padding(3)
     }
@@ -123,12 +123,12 @@ private struct FireVaultWidgetView: View {
     private var smallBrand: some View {
         HStack(spacing: 0) {
             Text("FIRE")
-                .foregroundStyle(.tint)
+                .foregroundStyle(Color(red: 0.94, green: 0.12, blue: 0.14))
             Text("VAULT")
-                .foregroundStyle(.primary)
+                .foregroundStyle(.white)
             Text("  PRO")
                 .font(.system(size: 7, weight: .black, design: .rounded))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.68))
         }
         .font(.system(size: 13, weight: .black, design: .rounded))
         .tracking(1.0)
@@ -141,10 +141,10 @@ private struct FireVaultWidgetView: View {
                 .frame(width: 8, height: 8)
             Text("TRIP LOG")
                 .font(.caption2.bold())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.56))
             Text(entry.snapshot.tripState.title.uppercased())
                 .font(.caption2.bold())
-                .foregroundStyle(.primary)
+                .foregroundStyle(.white)
         }
     }
 
