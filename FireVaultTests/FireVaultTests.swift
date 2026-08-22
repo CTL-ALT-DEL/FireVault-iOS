@@ -1504,6 +1504,17 @@ final class FireVaultTests: XCTestCase {
         )
     }
 
+    func testCarPlayPresentationCadenceMeetsDrivingTaskLimits() {
+        XCTAssertGreaterThanOrEqual(
+            FireVaultCarPlayRefreshPolicy.minimumInterfaceInterval,
+            10
+        )
+        XCTAssertGreaterThanOrEqual(
+            FireVaultCarPlayRefreshPolicy.minimumPointOfInterestInterval,
+            60
+        )
+    }
+
     func testLiveSpeedRejectsPoorAccuracyEvenWhenCoreLocationReportsSpeed() {
         let now = Date(timeIntervalSince1970: 1_700_000_100)
         let location = testLocation(

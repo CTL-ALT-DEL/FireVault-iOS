@@ -8,6 +8,11 @@ import UserNotifications
 final class FireVaultNotificationService {
     static let shared = FireVaultNotificationService()
 
+    private enum Category {
+        static let tripLogAttention = "firevault.triplog.attention"
+        static let handsetOnly = "firevault.handset-only"
+    }
+
     private enum Identifier {
         static let recording = "firevault.triplog.recording"
         static let paused = "firevault.triplog.paused"
@@ -17,12 +22,29 @@ final class FireVaultNotificationService {
 
     private let center = UNUserNotificationCenter.current()
 
+    private init() {
+        center.setNotificationCategories([
+            UNNotificationCategory(
+                identifier: Category.tripLogAttention,
+                actions: [],
+                intentIdentifiers: [],
+                options: [.allowInCarPlay]
+            ),
+            UNNotificationCategory(
+                identifier: Category.handsetOnly,
+                actions: [],
+                intentIdentifiers: [],
+                options: []
+            )
+        ])
+    }
+
     func authorizationStatus() async -> UNAuthorizationStatus {
         await center.notificationSettings().authorizationStatus
     }
 
     func requestAuthorization() async throws -> Bool {
-        try await center.requestAuthorization(options: [.alert, .badge, .sound])
+        try await center.requestAuthorization(options: [.alert, .badge, .sound, .carPlay])
     }
 
     func tripLogStarted(preferences: FireVaultNotificationPreferences) {
@@ -42,6 +64,7 @@ final class FireVaultNotificationService {
             ? "Review your active workday and end Trip Log when you are finished."
             : "FireVault Pro is still recording today’s Trip Log."
         content.sound = .default
+        content.categoryIdentifier = Category.tripLogAttention
         let trigger = UNCalendarNotificationTrigger(
             dateMatching: Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: reminderDate),
             repeats: false
@@ -75,6 +98,7 @@ final class FireVaultNotificationService {
             ? "Trip Log confirmed an on-site account stop."
             : "Trip Log confirmed your arrival at \(stop.accountName ?? "an account")."
         content.sound = .default
+        content.categoryIdentifier = Category.handsetOnly
         center.add(.init(
             identifier: Identifier.arrival(stop.id),
             content: content,
@@ -91,6 +115,7 @@ final class FireVaultNotificationService {
         content.title = "Trip Log stop needs review"
         content.body = "Confirm, identify, or disregard this stop when it is safe to use your iPhone."
         content.sound = .default
+        content.categoryIdentifier = Category.handsetOnly
         content.userInfo = ["tripLogStopID": stop.id.uuidString]
         center.add(.init(
             identifier: Identifier.review(stop.id),
@@ -144,6 +169,7 @@ final class FireVaultNotificationService {
         content.title = title
         content.body = body
         content.sound = .default
+        content.categoryIdentifier = Category.tripLogAttention
         center.add(.init(
             identifier: identifier,
             content: content,

@@ -60,6 +60,14 @@ enum FireVaultCarPlayPresentation {
     }
 }
 
+enum FireVaultCarPlayRefreshPolicy {
+    /// Apple permits Driving Task data items to refresh no more frequently
+    /// than every ten seconds. Location collection and Trip Log persistence
+    /// continue at their existing cadence underneath this presentation layer.
+    static let minimumInterfaceInterval: TimeInterval = 10
+    static let minimumPointOfInterestInterval: TimeInterval = 60
+}
+
 private enum FireVaultCarPlayAccountEmphasis {
     case nearest
     case favorite
@@ -68,8 +76,11 @@ private enum FireVaultCarPlayAccountEmphasis {
 }
 
 @MainActor
-final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
+final class FireVaultCarPlaySceneDelegate: UIResponder,
+    CPTemplateApplicationSceneDelegate,
+    CPPointOfInterestTemplateDelegate {
     private weak var interfaceController: CPInterfaceController?
+    private weak var templateApplicationScene: CPTemplateApplicationScene?
     private let store = FireVaultStore()
     private let settings = FireVaultNativeSettingsStore()
     // Share the live Trip Log owner with the handset scene. Demo Mode keeps a
@@ -84,6 +95,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private var nearbyTemplate: CPListTemplate?
     private var driveTemplate: CPInformationTemplate?
     private var arrivedTemplate: CPListTemplate?
+    private var nearbyMapTemplate: CPPointOfInterestTemplate?
     private var rootTabTemplate: CPTabBarTemplate?
     private var liveRefreshTask: Task<Void, Never>?
     private var metricRefreshTask: Task<Void, Never>?
@@ -94,6 +106,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     private var announcedArrivalAccountID: String?
     private var arrivedAccountID: String?
     private var tabAppearanceSignature: String?
+    private var lastPointOfInterestRefreshAt = Date.distantPast
 
     private let demoLocation = CLLocation(latitude: 43.6150, longitude: -116.2023)
     private let recentAccountIDsKey = "firevault.carplay.recentAccountIDs"
@@ -103,6 +116,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         didConnect interfaceController: CPInterfaceController
     ) {
         self.interfaceController = interfaceController
+        self.templateApplicationScene = templateApplicationScene
 
         if store.demoMode {
             FireVaultDemoShowroom.installAccountsIfNeeded(into: store)
@@ -134,11 +148,14 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         nearbyTemplate = nil
         driveTemplate = nil
         arrivedTemplate = nil
+        nearbyMapTemplate = nil
         rootTabTemplate = nil
         announcedArrivalAccountID = nil
         arrivedAccountID = nil
         tabAppearanceSignature = nil
+        lastPointOfInterestRefreshAt = .distantPast
         self.interfaceController = nil
+        self.templateApplicationScene = nil
     }
 
     // MARK: - Native CarPlay tab workspace
@@ -161,11 +178,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         configureTab(drive, title: "Drive", symbol: "location.north.line.fill", color: .systemTeal)
         driveTemplate = drive
 
-        let arrived = makeArrivedTemplate()
-        configureTab(arrived, title: "Arrived", symbol: "mappin.and.ellipse", color: .systemGreen)
-        arrivedTemplate = arrived
-
-        let tabs = CPTabBarTemplate(templates: [tripLog, nearby, drive, arrived])
+        let tabs = CPTabBarTemplate(templates: [tripLog, nearby, drive])
         rootTabTemplate = tabs
         return tabs
     }
@@ -183,10 +196,17 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     // MARK: - Accounts hub
 
     private func makeNearbyTemplate() -> CPListTemplate {
-        CPListTemplate(
+        let template = CPListTemplate(
             title: "Nearby",
             sections: makeNearbySections()
         )
+        template.trailingNavigationBarButtons = [
+            CPBarButton(
+                title: "Map",
+                handler: { [weak self] _ in self?.showNearbyMap() }
+            )
+        ]
+        return template
     }
 
     private func makeNearbySections() -> [CPListSection] {
@@ -233,6 +253,141 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
             ))
         }
         return sections
+    }
+
+    // MARK: - Nearby map
+
+    private func showNearbyMap() {
+        let accounts = Array(sortedMappedAccounts(favoritesOnly: false).prefix(12))
+        guard !accounts.isEmpty else {
+            presentAlert(
+                title: "No mapped accounts",
+                actionTitle: "OK"
+            )
+            return
+        }
+
+        let template: CPPointOfInterestTemplate
+        if let nearbyMapTemplate {
+            template = nearbyMapTemplate
+            refreshNearbyMapIfAllowed(accounts: accounts)
+        } else {
+            template = CPPointOfInterestTemplate(
+                title: "Nearby Accounts",
+                pointsOfInterest: makePointsOfInterest(accounts),
+                selectedIndex: accounts.isEmpty ? NSNotFound : 0
+            )
+            template.pointOfInterestDelegate = self
+            nearbyMapTemplate = template
+            lastPointOfInterestRefreshAt = Date()
+        }
+
+        guard interfaceController?.topTemplate != template else { return }
+        interfaceController?.pushTemplate(template, animated: true, completion: nil)
+    }
+
+    private func makePointsOfInterest(
+        _ accounts: [FireVaultWorkspaceAccount]
+    ) -> [CPPointOfInterest] {
+        accounts.prefix(12).compactMap { account in
+            guard let coordinate = account.coordinate else { return nil }
+            let mapItem = MKMapItem(
+                location: CLLocation(
+                    latitude: coordinate.latitude,
+                    longitude: coordinate.longitude
+                ),
+                address: nil
+            )
+            mapItem.name = account.name
+
+            let identifier = account.accountId.trimmingCharacters(in: .whitespacesAndNewlines)
+            let subtitle = FireVaultCarPlayPresentation.joined([
+                identifier.isEmpty ? nil : "#\(identifier)",
+                effectiveLocation.map {
+                    String(format: "%.1f mi", distance(from: $0, to: account) / 1_609.344)
+                }
+            ])
+            let address = account.address.trimmingCharacters(in: .whitespacesAndNewlines)
+            let point = CPPointOfInterest(
+                location: mapItem,
+                title: account.name,
+                subtitle: subtitle.isEmpty ? nil : subtitle,
+                summary: address.isEmpty ? nil : address,
+                detailTitle: account.name,
+                detailSubtitle: subtitle.isEmpty ? nil : subtitle,
+                detailSummary: address.isEmpty ? nil : address,
+                pinImage: carPlayIcon(
+                    account.favorite ? "star.circle.fill" : "building.2.fill",
+                    color: account.favorite ? .systemYellow : .systemBlue
+                ),
+                selectedPinImage: carPlayIcon("mappin.circle.fill", color: .systemRed)
+            )
+            point.primaryButton = CPTextButton(
+                title: "Directions",
+                textStyle: .confirm
+            ) { [weak self] _ in
+                self?.openDrivingDirections(to: coordinate, name: account.name)
+            }
+            if account.phone.contains(where: \.isNumber) {
+                point.secondaryButton = CPTextButton(
+                    title: "Call",
+                    textStyle: .normal
+                ) { [weak self] _ in
+                    self?.openPhone(account.phone)
+                }
+            }
+            return point
+        }
+    }
+
+    private func refreshNearbyMapIfAllowed(
+        accounts: [FireVaultWorkspaceAccount]
+    ) {
+        guard let nearbyMapTemplate else { return }
+        let elapsed = Date().timeIntervalSince(lastPointOfInterestRefreshAt)
+        guard elapsed >= FireVaultCarPlayRefreshPolicy.minimumPointOfInterestInterval else {
+            return
+        }
+        lastPointOfInterestRefreshAt = Date()
+        let points = makePointsOfInterest(accounts)
+        nearbyMapTemplate.setPointsOfInterest(
+            points,
+            selectedIndex: points.isEmpty ? NSNotFound : 0
+        )
+    }
+
+    func pointOfInterestTemplate(
+        _ pointOfInterestTemplate: CPPointOfInterestTemplate,
+        didChangeMapRegion region: MKCoordinateRegion
+    ) {
+        // Panning is user-driven rather than a periodic refresh. Keep the
+        // closest relevant sites available without tying POI updates to the
+        // high-frequency Core Location stream.
+        let accounts = sortedMappedAccounts(favoritesOnly: false)
+            .filter { account in
+                guard let coordinate = account.coordinate else { return false }
+                return regionContains(region, coordinate: coordinate)
+            }
+        let relevant = accounts.isEmpty
+            ? Array(sortedMappedAccounts(favoritesOnly: false).prefix(12))
+            : Array(accounts.prefix(12))
+        let points = makePointsOfInterest(relevant)
+        pointOfInterestTemplate.setPointsOfInterest(
+            points,
+            selectedIndex: points.isEmpty ? NSNotFound : 0
+        )
+        lastPointOfInterestRefreshAt = Date()
+    }
+
+    private func regionContains(
+        _ region: MKCoordinateRegion,
+        coordinate: CLLocationCoordinate2D
+    ) -> Bool {
+        let latitudeDelta = abs(coordinate.latitude - region.center.latitude)
+        let rawLongitudeDelta = abs(coordinate.longitude - region.center.longitude)
+        let longitudeDelta = min(rawLongitudeDelta, 360 - rawLongitudeDelta)
+        return latitudeDelta <= region.span.latitudeDelta / 2
+            && longitudeDelta <= region.span.longitudeDelta / 2
     }
 
     private func makeArrivedTemplate() -> CPListTemplate {
@@ -369,7 +524,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
                 symbol: "phone.fill",
                 color: .systemGreen
             ) { [weak self] in
-                self?.store.call(account.phone)
+                self?.openPhone(account.phone)
             })
         }
 
@@ -485,18 +640,30 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
 
         announcedArrivalAccountID = account.id
         arrivedAccountID = account.id
-        arrivedTemplate?.updateSections(makeArrivedSections())
-
-        if let arrivedTemplate {
-            rootTabTemplate?.select(arrivedTemplate)
-        }
+        let template = arrivedTemplate ?? makeArrivedTemplate()
+        arrivedTemplate = template
+        template.updateSections(makeArrivedSections())
+        showArrival(template)
     }
 
     private func clearArrivalState() {
         announcedArrivalAccountID = nil
         guard arrivedAccountID != nil else { return }
         arrivedAccountID = nil
-        arrivedTemplate?.updateSections(makeArrivedSections())
+        if let arrivedTemplate,
+           interfaceController?.topTemplate == arrivedTemplate {
+            interfaceController?.popTemplate(animated: true, completion: nil)
+        }
+        arrivedTemplate = nil
+    }
+
+    private func showArrival(_ template: CPListTemplate) {
+        guard let nearbyTemplate,
+              let rootTabTemplate,
+              let interfaceController else { return }
+        rootTabTemplate.select(nearbyTemplate)
+        guard interfaceController.topTemplate != template else { return }
+        interfaceController.pushTemplate(template, animated: true, completion: nil)
     }
 
     private func displayLocationType(_ value: String) -> String {
@@ -506,14 +673,21 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
     }
 
     private func openDrivingDirections(to coordinate: CLLocationCoordinate2D, name: String) {
-        let item = MKMapItem(
-            location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude),
-            address: nil
-        )
-        item.name = name
-        item.openInMaps(launchOptions: [
-            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
-        ])
+        var components = URLComponents(string: "https://maps.apple.com/")
+        components?.queryItems = [
+            URLQueryItem(name: "daddr", value: "\(coordinate.latitude),\(coordinate.longitude)"),
+            URLQueryItem(name: "dirflg", value: "d"),
+            URLQueryItem(name: "q", value: name)
+        ]
+        guard let url = components?.url else { return }
+        templateApplicationScene?.open(url, options: nil, completionHandler: nil)
+    }
+
+    private func openPhone(_ value: String) {
+        let digits = value.filter(\.isNumber)
+        guard !digits.isEmpty,
+              let url = URL(string: "tel:\(digits)") else { return }
+        templateApplicationScene?.open(url, options: nil, completionHandler: nil)
     }
 
     // MARK: - Trip Log dashboard
@@ -654,6 +828,18 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         )
     }
 
+    private func presentAlert(title: String, actionTitle: String) {
+        guard let interfaceController else { return }
+        let dismiss = CPAlertAction(title: actionTitle, style: .default) { [weak self] _ in
+            self?.interfaceController?.dismissTemplate(animated: true, completion: nil)
+        }
+        interfaceController.presentTemplate(
+            CPAlertTemplate(titleVariants: [title], actions: [dismiss]),
+            animated: true,
+            completion: nil
+        )
+    }
+
     private func endTripLogAndReturnHome() {
         breadcrumbs.endWorkday()
         refreshCarPlayState()
@@ -712,21 +898,23 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
         liveRefreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 do {
-                    try await Task.sleep(for: .seconds(5))
+                    try await Task.sleep(
+                        for: .seconds(FireVaultCarPlayRefreshPolicy.minimumInterfaceInterval)
+                    )
                 } catch {
                     return
                 }
-                self?.refreshCarPlayState()
+                self?.requestMetricRefresh(refreshAccounts: true)
             }
         }
     }
 
-    private func requestMetricRefresh() {
-        let minimumInterval: TimeInterval = 1
+    private func requestMetricRefresh(refreshAccounts: Bool = false) {
+        let minimumInterval = FireVaultCarPlayRefreshPolicy.minimumInterfaceInterval
         let elapsed = Date().timeIntervalSince(lastMetricRefreshAt)
         if elapsed >= minimumInterval {
             lastMetricRefreshAt = Date()
-            refreshCarPlayState(refreshAccounts: false)
+            refreshCarPlayState(refreshAccounts: refreshAccounts)
             return
         }
         guard metricRefreshTask == nil else { return }
@@ -739,7 +927,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
             guard let self else { return }
             metricRefreshTask = nil
             lastMetricRefreshAt = Date()
-            refreshCarPlayState(refreshAccounts: false)
+            refreshCarPlayState(refreshAccounts: refreshAccounts)
         }
     }
 
@@ -774,7 +962,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSce
             color: effectiveLocation == nil ? .systemOrange : .systemTeal
         )
         driveTemplate?.showsTabBadge = effectiveLocation == nil
-        arrivedTemplate?.showsTabBadge = arrivedAccountID != nil
+        nearbyTemplate?.showsTabBadge = arrivedAccountID != nil
 
         if let rootTabTemplate {
             rootTabTemplate.updateTemplates(rootTabTemplate.templates)
