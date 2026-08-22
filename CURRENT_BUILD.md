@@ -2,10 +2,12 @@
 
 ## Official `main` release candidate
 
-- Visible version: **1.08.69**
-- Build number: **129**
+- Visible version: **1.08.70**
+- Build number: **130**
 - Includes the tested CarPlay optimization and the four-widget portfolio:
   Dashboard, Trip Log, Field Account, and Cloud Status.
+- Includes the small Dashboard widget contrast correction for light, dark,
+  tinted, and clear Home Screen appearances.
 - Intended distribution: TestFlight.
 
 ## Release rule
