@@ -11,6 +11,22 @@ import Foundation
 import WidgetKit
 #endif
 
+enum FireVaultWidgetKind: String, CaseIterable {
+    case dashboard = "FireVaultFieldWidget"
+    case tripLog = "FireVaultTripLogWidget"
+    case account = "FireVaultAccountWidget"
+    case cloud = "FireVaultCloudStatusWidget"
+}
+
+struct FireVaultWidgetAccountSummary: Codable, Equatable, Hashable, Identifiable {
+    let id: String
+    let name: String
+    let accountID: String
+    let category: String
+    let address: String
+    let dropPinCount: Int
+}
+
 struct FireVaultWidgetSnapshot: Codable, Equatable {
     enum TripState: String, Codable {
         case ready
@@ -28,6 +44,40 @@ struct FireVaultWidgetSnapshot: Codable, Equatable {
         }
     }
 
+    enum CloudState: String, Codable {
+        case notSynced
+        case syncing
+        case upToDate
+        case needsAttention
+
+        var title: String {
+            switch self {
+            case .notSynced: "Not Synced"
+            case .syncing: "Syncing"
+            case .upToDate: "Up to Date"
+            case .needsAttention: "Needs Attention"
+            }
+        }
+    }
+
+    enum GPSQuality: String, Codable {
+        case unavailable
+        case excellent
+        case good
+        case fair
+        case poor
+
+        var title: String {
+            switch self {
+            case .unavailable: "Waiting"
+            case .excellent: "Excellent"
+            case .good: "Good"
+            case .fair: "Fair"
+            case .poor: "Poor"
+            }
+        }
+    }
+
     var updatedAt: Date
     var tripState: TripState
     var tripStartedAt: Date?
@@ -37,6 +87,21 @@ struct FireVaultWidgetSnapshot: Codable, Equatable {
     var accountName: String?
     var accountID: String?
     var accountCategory: String?
+    // Optional additions preserve decoding for widgets saved by older builds.
+    // Account notes, phone numbers, documents, and exact coordinates are never
+    // copied into the shared widget container.
+    var accountRecordID: String? = nil
+    var accountAddress: String? = nil
+    var accountDropPinCount: Int? = nil
+    var accountCount: Int? = nil
+    var mappedAccountCount: Int? = nil
+    var cloudState: CloudState? = nil
+    var cloudLastSyncedAt: Date? = nil
+    var pendingCloudAccountCount: Int? = nil
+    var gpsQuality: GPSQuality? = nil
+    var gpsAccuracyFeet: Double? = nil
+    var gpsUpdatedAt: Date? = nil
+    var accountChoices: [FireVaultWidgetAccountSummary]? = nil
 
     static let placeholder = FireVaultWidgetSnapshot(
         updatedAt: Date(),
@@ -47,7 +112,28 @@ struct FireVaultWidgetSnapshot: Codable, Equatable {
         stopCount: 0,
         accountName: "Mountain View Medical Center",
         accountID: "DEMO-1003",
-        accountCategory: "Healthcare"
+        accountCategory: "Healthcare",
+        accountRecordID: "demo-account-3",
+        accountAddress: "100 Demo Avenue, Casper, WY",
+        accountDropPinCount: 3,
+        accountCount: 30,
+        mappedAccountCount: 28,
+        cloudState: .upToDate,
+        cloudLastSyncedAt: Date().addingTimeInterval(-240),
+        pendingCloudAccountCount: 0,
+        gpsQuality: .excellent,
+        gpsAccuracyFeet: 12,
+        gpsUpdatedAt: Date(),
+        accountChoices: [
+            FireVaultWidgetAccountSummary(
+                id: "demo-account-3",
+                name: "Mountain View Medical Center",
+                accountID: "DEMO-1003",
+                category: "Healthcare",
+                address: "100 Demo Avenue, Casper, WY",
+                dropPinCount: 3
+            )
+        ]
     )
 
     static let empty = FireVaultWidgetSnapshot(
@@ -59,7 +145,12 @@ struct FireVaultWidgetSnapshot: Codable, Equatable {
         stopCount: 0,
         accountName: nil,
         accountID: nil,
-        accountCategory: nil
+        accountCategory: nil,
+        accountCount: 0,
+        mappedAccountCount: 0,
+        cloudState: .notSynced,
+        pendingCloudAccountCount: 0,
+        gpsQuality: .unavailable
     )
 
     func elapsedTime(at date: Date) -> TimeInterval {
@@ -91,7 +182,9 @@ enum FireVaultWidgetSharedStore {
               let data = try? JSONEncoder().encode(snapshot) else { return }
         defaults.set(data, forKey: snapshotKey)
 #if canImport(WidgetKit)
-        WidgetCenter.shared.reloadTimelines(ofKind: "FireVaultFieldWidget")
+        for kind in FireVaultWidgetKind.allCases {
+            WidgetCenter.shared.reloadTimelines(ofKind: kind.rawValue)
+        }
 #endif
     }
 }

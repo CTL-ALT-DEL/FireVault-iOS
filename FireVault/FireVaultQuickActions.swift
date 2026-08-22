@@ -91,7 +91,9 @@ enum FireVaultWidgetDeepLink: Equatable {
     case tripLog
     case startTripLog
     case accounts
+    case account(String)
     case photo
+    case sync
 }
 
 @MainActor
@@ -116,8 +118,17 @@ final class FireVaultWidgetDeepLinkCenter: ObservableObject {
             pendingLink = .tripLog
         case ("accounts", _):
             pendingLink = .accounts
+        case ("account", _):
+            guard let accountID = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "id" })?
+                .value,
+                  !accountID.isEmpty else { return false }
+            pendingLink = .account(accountID)
         case ("photo", _):
             pendingLink = .photo
+        case ("sync", _):
+            pendingLink = .sync
         default:
             return false
         }

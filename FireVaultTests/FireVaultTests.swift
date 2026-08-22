@@ -380,6 +380,77 @@ final class FireVaultTests: XCTestCase {
         )
     }
 
+    func testLegacyWidgetSnapshotDecodesWithoutPortfolioFields() throws {
+        struct LegacySnapshot: Codable {
+            let updatedAt: Date
+            let tripState: FireVaultWidgetSnapshot.TripState
+            let tripStartedAt: Date?
+            let elapsedSeconds: TimeInterval
+            let distanceMiles: Double
+            let stopCount: Int
+            let accountName: String?
+            let accountID: String?
+            let accountCategory: String?
+        }
+
+        let legacy = LegacySnapshot(
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            tripState: .ready,
+            tripStartedAt: nil,
+            elapsedSeconds: 0,
+            distanceMiles: 0,
+            stopCount: 0,
+            accountName: "Legacy Site",
+            accountID: "LEGACY-1",
+            accountCategory: "Commercial"
+        )
+        let decoded = try JSONDecoder().decode(
+            FireVaultWidgetSnapshot.self,
+            from: JSONEncoder().encode(legacy)
+        )
+
+        XCTAssertEqual(decoded.accountName, "Legacy Site")
+        XCTAssertNil(decoded.cloudState)
+        XCTAssertNil(decoded.gpsQuality)
+        XCTAssertNil(decoded.accountDropPinCount)
+    }
+
+    func testWidgetPortfolioSnapshotExcludesPrivateFieldRecordsAndCoordinates() throws {
+        let data = try JSONEncoder().encode(FireVaultWidgetSnapshot.placeholder)
+        let encoded = try XCTUnwrap(String(data: data, encoding: .utf8))
+
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("notes"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("phone"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("documents"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("latitude"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("longitude"))
+    }
+
+    func testWidgetPortfolioPublishesFourDistinctKinds() {
+        XCTAssertEqual(FireVaultWidgetKind.allCases.count, 4)
+        XCTAssertEqual(Set(FireVaultWidgetKind.allCases.map(\.rawValue)).count, 4)
+        XCTAssertTrue(FireVaultWidgetKind.allCases.contains(.dashboard))
+        XCTAssertTrue(FireVaultWidgetKind.allCases.contains(.tripLog))
+        XCTAssertTrue(FireVaultWidgetKind.allCases.contains(.account))
+        XCTAssertTrue(FireVaultWidgetKind.allCases.contains(.cloud))
+    }
+
+    func testWidgetAccountDeepLinkPreservesRecordIdentifier() throws {
+        let url = try XCTUnwrap(URL(string: "firevault://account?id=account-ABC-123"))
+        let center = FireVaultWidgetDeepLinkCenter.shared
+
+        XCTAssertTrue(center.receive(url))
+        XCTAssertEqual(center.consume(), .account("account-ABC-123"))
+    }
+
+    func testWidgetCloudDeepLinkOpensSyncSettings() throws {
+        let url = try XCTUnwrap(URL(string: "firevault://sync"))
+        let center = FireVaultWidgetDeepLinkCenter.shared
+
+        XCTAssertTrue(center.receive(url))
+        XCTAssertEqual(center.consume(), .sync)
+    }
+
     func testTripLogIntegrityRemovesDuplicateRecordsAndRepairsTimes() {
         let dayID = UUID()
         let pointID = UUID()
