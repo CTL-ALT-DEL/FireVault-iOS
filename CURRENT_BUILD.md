@@ -2,13 +2,17 @@
 
 ## Official `main` release candidate
 
-- Visible version: **1.08.71**
-- Build number: **131**
+- Visible version: **1.08.72**
+- Build number: **132**
 - Includes the tested CarPlay optimization and four-widget portfolio:
   Dashboard, Trip Log, Field Account, and Cloud Status.
 - Includes the rebuilt searchable Help Center with task-based guides, concise
   visuals, troubleshooting, and accurate account-sync guidance.
 - Credits Bannerman US LLC as the creator, developer, and publisher in About.
+- Adds a clickable Bannerman US LLC website, corrected iPhone/iPad capability
+  icons, and a true compile-time build timestamp on the About screen.
+- Moves account identity, compact Cloud Sync status, Sync Now, and Sign Out into
+  Technician Profile while keeping required account deletion under Security.
 - Intended distribution: TestFlight.
 
 ## Release rule
