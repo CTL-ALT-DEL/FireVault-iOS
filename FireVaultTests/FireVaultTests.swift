@@ -3200,9 +3200,21 @@ final class FireVaultTests: XCTestCase {
 
     func testAboutScreenCreditsBannermanUSLLC() {
         XCTAssertEqual(FireVaultPublisherInfo.name, "Bannerman US LLC")
-        XCTAssertEqual(FireVaultPublisherInfo.role, "Creator, Developer & Publisher")
+        XCTAssertEqual(FireVaultPublisherInfo.website, "bannerman.us")
+        XCTAssertEqual(FireVaultPublisherInfo.websiteURL.absoluteString, "https://bannerman.us")
         XCTAssertEqual(FireVaultPublisherInfo.supportEmail, "David@Bannerman.us")
         XCTAssertEqual(FireVaultPublisherInfo.supportEmailURL.scheme, "mailto")
+    }
+
+    func testAboutScreenUsesEmbeddedBuildTimestampInsteadOfInstallTime() {
+        XCTAssertEqual(
+            FireVaultBuildInfo.displayText(infoDictionary: [
+                "FireVaultBuildDate": "\"Aug 22 2026\"",
+                "FireVaultBuildTime": "\"18:04:15\""
+            ]),
+            "Aug 22 2026 at 18:04:15"
+        )
+        XCTAssertEqual(FireVaultBuildInfo.displayText(infoDictionary: [:]), "Unavailable")
     }
 
     private func testLocation(

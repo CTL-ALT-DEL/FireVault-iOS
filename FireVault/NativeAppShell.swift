@@ -105,11 +105,33 @@ struct FireVaultVersionInfo: Equatable {
 
 enum FireVaultPublisherInfo {
     static let name = "Bannerman US LLC"
-    static let role = "Creator, Developer & Publisher"
+    static let website = "bannerman.us"
     static let supportEmail = "David@Bannerman.us"
+
+    static var websiteURL: URL {
+        URL(string: "https://bannerman.us")!
+    }
 
     static var supportEmailURL: URL {
         URL(string: "mailto:\(supportEmail)")!
+    }
+}
+
+enum FireVaultBuildInfo {
+    static func displayText(infoDictionary: [String: Any] = Bundle.main.infoDictionary ?? [:]) -> String {
+        let date = normalized(infoDictionary["FireVaultBuildDate"] as? String)
+        let time = normalized(infoDictionary["FireVaultBuildTime"] as? String)
+
+        guard !date.isEmpty else { return "Unavailable" }
+        guard !time.isEmpty else { return date }
+        return "\(date) at \(time)"
+    }
+
+    private static func normalized(_ value: String?) -> String {
+        value?
+            .replacingOccurrences(of: "\"", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? ""
     }
 }
 
@@ -3609,10 +3631,10 @@ private struct NativeAboutFireVaultView: View {
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    HStack(spacing: 8) {
-                        aboutBadge("iPhone & iPad", systemImage: "iphone.gen3")
-                        aboutBadge("CarPlay", systemImage: "car.fill")
-                        aboutBadge("Widgets", systemImage: "rectangle.grid.2x2.fill")
+                    HStack(alignment: .top, spacing: 8) {
+                        aboutBadge("iPhone / iPad", systemImages: ["iphone", "ipad"])
+                        aboutBadge("CarPlay", systemImages: ["car.fill"])
+                        aboutBadge("Widgets", systemImages: ["rectangle.grid.2x2.fill"])
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -3674,7 +3696,7 @@ private struct NativeAboutFireVaultView: View {
 
             Section("Created by") {
                 HStack(spacing: 14) {
-                    Image(systemName: "person.crop.circle.fill")
+                    Image(systemName: "building.2.fill")
                         .font(.system(size: 34, weight: .semibold))
                         .foregroundStyle(NativeShellPalette.red)
                         .frame(width: 44, height: 44)
@@ -3685,12 +3707,12 @@ private struct NativeAboutFireVaultView: View {
                         Text(FireVaultPublisherInfo.name)
                             .font(.headline)
                             .foregroundStyle(.primary)
-                        Text(FireVaultPublisherInfo.role)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        Link(FireVaultPublisherInfo.website, destination: FireVaultPublisherInfo.websiteURL)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(NativeShellPalette.blue)
                     }
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Bannerman US LLC, creator, developer, and publisher")
+                    .accessibilityLabel("Bannerman US LLC, bannerman dot us")
 
                     Spacer(minLength: 8)
 
@@ -3742,22 +3764,33 @@ private struct NativeAboutFireVaultView: View {
         }
     }
 
-    private func aboutBadge(_ title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.76)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(.thinMaterial, in: Capsule())
+    private func aboutBadge(_ title: String, systemImages: [String]) -> some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 5) {
+                ForEach(systemImages, id: \.self) { systemImage in
+                    Image(systemName: systemImage)
+                }
+            }
+            .font(.system(size: 19, weight: .semibold))
+            .foregroundStyle(NativeShellPalette.red)
+            .frame(height: 24)
+
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .allowsTightening(true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 64)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 8)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 
     private var updatedAtText: String {
-        let date = Bundle.main.executableURL
-            .flatMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }
-            ?? Date()
-        return date.formatted(date: .abbreviated, time: .shortened)
+        FireVaultBuildInfo.displayText()
     }
 }
 

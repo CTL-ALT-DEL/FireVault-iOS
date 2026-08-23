@@ -33,6 +33,10 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>FireVaultBuildDate</key>
+	<string>__DATE__</string>
+	<key>FireVaultBuildTime</key>
+	<string>__TIME__</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
