@@ -2,8 +2,8 @@
 
 ## Official `main` release candidate
 
-- Visible version: **1.08.72**
-- Build number: **132**
+- Visible version: **1.08.73**
+- Build number: **133**
 - Includes the tested CarPlay optimization and four-widget portfolio:
   Dashboard, Trip Log, Field Account, and Cloud Status.
 - Includes the rebuilt searchable Help Center with task-based guides, concise
@@ -13,6 +13,8 @@
   icons, and a true compile-time build timestamp on the About screen.
 - Moves account identity, compact Cloud Sync status, Sync Now, and Sign Out into
   Technician Profile while keeping required account deletion under Security.
+- Adds Cloudflare Turnstile verification to native sign-in, sign-up, and
+  password-reset requests while preserving the current 1.08.72 feature set.
 - Intended distribution: TestFlight.
 
 ## Release rule
