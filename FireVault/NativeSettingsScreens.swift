@@ -18,7 +18,7 @@ enum NativeSettingsCatalog {
             item("plusCodes", "Plus Codes", "Offline location-code preferences", "plus.square.dashed"),
             item("notifications", "Notifications", "Trip Log, service, and system alerts", "bell.badge")
         ]),
-        group("reports", "Reports", "Reports and customer email", "doc.text", "purple", [
+        group("reports", "Reports", "Reports and customer email", "doc.text", "blue", [
             item("reports", "Report Settings", "Trip Log report defaults", "doc.text"),
             item("email", "Email Settings", "Recipients, subject, and signature", "envelope")
         ]),
@@ -34,7 +34,7 @@ enum NativeSettingsCatalog {
             item("security", "Security", "Face ID, app privacy, and data protection", "shield.checkered")
         ]),
         group("help", "Help & About", "Documentation and application information", "questionmark.circle", "red", [
-            item("manual", "Help & User Manual", "Quick-start instructions", "book.closed"),
+            item("manual", "Help Center", "Task guides and troubleshooting", "questionmark.bubble"),
             item("demo", "Demo Mode", "Enter, exit, or reset the fictional vault", "theatermasks"),
             item("about", "About FireVault Pro", "Version and application information", "info.circle")
         ])
@@ -92,9 +92,10 @@ struct NativeAppearanceSettingsView: View {
             } header: {
                 Text("Theme")
             } footer: {
-                Text("Light uses FireVault Pro's warm porcelain palette. System Default follows the iPhone appearance automatically.")
+                Text("Light uses FireVault Pro's Warm Ivory palette. System Default follows the iPhone appearance automatically.")
             }
         }
+        .fireVaultThemedCollection()
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -109,7 +110,7 @@ struct NativeAppearanceSettingsView: View {
 
     private func accent(for mode: FireVaultAppearanceMode) -> Color {
         switch mode {
-        case .dark: NativeShellPalette.purple
+        case .dark: NativeShellPalette.blue
         case .light: NativeShellPalette.amber
         case .system: NativeShellPalette.blue
         }
@@ -118,7 +119,7 @@ struct NativeAppearanceSettingsView: View {
     private func detail(for mode: FireVaultAppearanceMode) -> String {
         switch mode {
         case .dark: "Original high-contrast FireVault Pro theme"
-        case .light: "Warm porcelain and ivory surfaces"
+        case .light: "Warm Ivory canvas and soft cream surfaces"
         case .system: "Match the current iPhone setting"
         }
     }
@@ -158,6 +159,7 @@ struct NativeSettingsViewPreferencesView: View {
                 }
             }
         }
+        .fireVaultThemedCollection()
         .navigationTitle("Settings View")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: draft) { _, updated in
@@ -168,11 +170,14 @@ struct NativeSettingsViewPreferencesView: View {
 
 struct NativeTechnicianSettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var store: FireVaultStore
     @State private var draft: FireVaultNativePreferences
     @FocusState private var focused: Bool
+    @State private var showsSubscriptionSetupMessage = false
 
-    init(settings: FireVaultNativeSettingsStore) {
+    init(settings: FireVaultNativeSettingsStore, store: FireVaultStore) {
         self.settings = settings
+        self.store = store
         _draft = State(initialValue: settings.preferences)
     }
 
@@ -187,9 +192,78 @@ struct NativeTechnicianSettingsView: View {
                 TextField("Phone", text: $draft.technician.phone).keyboardType(.phonePad).focused($focused)
                 TextField("Email", text: $draft.technician.email).keyboardType(.emailAddress).textInputAutocapitalization(.never).focused($focused)
             }
+
+            FireVaultAccountProfileSections(store: store)
+
+            Section {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("FireVault Pro")
+                                .font(.title3.bold())
+                            Text("Annual subscription")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 0) {
+                            Text("$29")
+                                .font(.title2.bold().monospacedDigit())
+                            Text("per year")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    proFeature("Trip reports with 90-day cloud storage", symbol: "cloud.fill")
+                    proFeature("Automatic Trip Log report emailing", symbol: "envelope.badge.fill")
+                    proFeature("Unknown-stop identification with Google Places", symbol: "mappin.and.ellipse")
+                    proFeature("Custom company logo on photo overlays", symbol: "photo.badge.plus")
+
+                    Button {
+                        showsSubscriptionSetupMessage = true
+                    } label: {
+                        Text("Upgrade to Pro — $29 / Year")
+                            .font(.headline)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.76)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                }
+                .padding(.vertical, 6)
+            } header: {
+                Text("Subscription")
+            } footer: {
+                Text("Subscription features require an internet connection. Google Places matching sends stop coordinates for place identification.")
+            }
         }
         .nativeSettingsForm(title: "Technician Profile", focused: $focused) { settings.save(draft) }
+        .alert("App Store Subscription Setup Required", isPresented: $showsSubscriptionSetupMessage) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The FireVault Pro subscription display is ready. Connect the App Store Connect product and StoreKit purchase service before accepting payments.")
+        }
     }
+
+    private func proFeature(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(NativeShellPalette.blue)
+                .frame(width: 26, height: 26)
+                .background(NativeShellPalette.blue.opacity(0.13), in: RoundedRectangle(cornerRadius: 8))
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+            Spacer(minLength: 0)
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(NativeShellPalette.green)
+        }
+    }
+
 }
 
 struct NativeOverlaySettingsView: View {
@@ -498,6 +572,7 @@ struct NativeSettingsFormModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .fireVaultThemedCollection()
             .scrollDismissesKeyboard(.interactively)
             .contentMargins(.bottom, 96, for: .scrollContent)
             .navigationTitle(title)

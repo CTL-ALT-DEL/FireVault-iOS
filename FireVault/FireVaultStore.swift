@@ -10,6 +10,8 @@ import Combine
 import CoreLocation
 import MapKit
 import UIKit
+import Supabase
+import Auth
 
 struct FireVaultCSVImportResult: Equatable {
     let added: Int
@@ -24,13 +26,22 @@ struct FireVaultBackupMergeResult: Equatable {
     let preserved: Int
 }
 
+struct FireVaultMediaStorageReport: Equatable {
+    var referencedFiles: Int
+    var orphanedFiles: Int
+    var totalBytes: Int64
+
+    var formattedSize: String {
+        ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+    }
+}
+
 enum FireVaultMediaError: LocalizedError {
     case accountUnavailable
     case emptyScan
     case encodingFailed
     case storageUnavailable
     case writeFailed(String)
-    case deleteFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -44,8 +55,6 @@ enum FireVaultMediaError: LocalizedError {
             "FireVault Pro media storage is unavailable on this iPhone."
         case .writeFailed(let detail):
             "The captured media could not be saved. \(detail)"
-        case .deleteFailed(let detail):
-            "The saved media could not be deleted. \(detail)"
         }
     }
 }
@@ -54,6 +63,36 @@ enum FireVaultCaptureQuickAction: Equatable {
     case photo
     case scan
 }
+
+enum FireVaultCloudVaultAccessError: LocalizedError, Equatable {
+    case linkedToDifferentLogin
+
+    var errorDescription: String? {
+        switch self {
+        case .linkedToDifferentLogin:
+            "This iPhone's local vault is linked to another FireVault login. Sign out and use the original account. No local or cloud data was changed."
+        }
+    }
+}
+
+enum FireVaultCustomerAccountDeletionError: LocalizedError, Equatable {
+    case accountUnavailable
+    case syncInProgress
+
+    var errorDescription: String? {
+        switch self {
+        case .accountUnavailable:
+            "This customer account is no longer available."
+        case .syncInProgress:
+            "Wait for the current cloud sync to finish, then try deleting this customer account again."
+        }
+    }
+}
+
+typealias FireVaultRemoteAccountDelete = (
+    FireVaultWorkspaceAccount,
+    UUID?
+) async throws -> FireVaultRemoteAccountDeletionResult
 
 @MainActor
 final class FireVaultStore: ObservableObject {
@@ -66,9 +105,22 @@ final class FireVaultStore: ObservableObject {
     @Published private(set) var geocodingProgress: FireVaultGeocodingProgress?
     @Published private(set) var nearbyResetRequestID = UUID()
     @Published private(set) var pendingCaptureQuickAction: FireVaultCaptureQuickAction?
+    @Published private(set) var cloudLastSyncedAt: Date?
+    @Published private(set) var cloudLastCheckedAt: Date?
+    @Published private(set) var cloudSyncErrorMessage: String? = nil
+    @Published private(set) var isCloudSyncing = false
+    @Published private(set) var cloudSyncCompleted = 0
+    @Published private(set) var cloudSyncTotal = 0
 
     private let defaults: UserDefaults
-    private let mediaRootURL: URL?
+    private let accountArchiveURLOverride: URL?
+    private let usesFileArchive: Bool
+    private let remoteAccountDelete: FireVaultRemoteAccountDelete
+    private var accountPersistenceGeneration = 0
+    private var accountArchiveURL: URL? {
+        accountArchiveURLOverride
+            ?? (usesFileArchive ? FireVaultAccountArchive.primaryURL(demoMode: demoMode) : nil)
+    }
     private let demoCoordinate = CLLocationCoordinate2D(latitude: 43.6150, longitude: -116.2023)
     private var geocodingTask: Task<Void, Never>?
     private var categoryRules: [FireVaultCategoryRule] = []
@@ -82,23 +134,60 @@ final class FireVaultStore: ObservableObject {
         static let productionAccountsBackup = "firevault.native.production-accounts.backup.v1"
         static let demoCategoryRuleSuppressions = "firevault.native.demo-category-rule-suppressions.v1"
         static let productionCategoryRuleSuppressions = "firevault.native.production-category-rule-suppressions.v1"
+        static let cloudLastSyncedAt = "firevault.native.cloud-last-synced-at.v1"
+        static let cloudLastCheckedAt = "firevault.native.cloud-last-checked-at.v1"
+        static let cloudVaultOwnerUserID = "firevault.native.cloud-vault-owner-user-id.v1"
     }
 
-    init(defaults: UserDefaults = .standard, mediaRootURL: URL? = nil) {
+    init(
+        defaults: UserDefaults = .standard,
+        accountArchiveURL: URL? = nil,
+        remoteAccountDelete: @escaping FireVaultRemoteAccountDelete = FireVaultAccountSyncService.deleteCustomerAccount
+    ) {
         self.defaults = defaults
-        self.mediaRootURL = mediaRootURL ?? Self.defaultMediaRootURL()
+        self.remoteAccountDelete = remoteAccountDelete
+        cloudLastSyncedAt = defaults.object(forKey: Key.cloudLastSyncedAt) as? Date
+        cloudLastCheckedAt = defaults.object(forKey: Key.cloudLastCheckedAt) as? Date
         let activeDemoMode = defaults.object(forKey: Key.demoMode) as? Bool ?? true
         demoMode = activeDemoMode
+        usesFileArchive = defaults === UserDefaults.standard || accountArchiveURL != nil
+        accountArchiveURLOverride = accountArchiveURL
+        let initialArchiveURL = accountArchiveURL
+            ?? (usesFileArchive ? FireVaultAccountArchive.primaryURL(demoMode: activeDemoMode) : nil)
         let suppressionKey = activeDemoMode
             ? Key.demoCategoryRuleSuppressions
             : Key.productionCategoryRuleSuppressions
         categoryRuleSuppressedAccountIDs = Set(defaults.stringArray(forKey: suppressionKey) ?? [])
         locationStatus = activeDemoMode ? "Demo location ready" : "Location ready"
 
-        if activeDemoMode {
-            accounts = Self.savedAccounts(defaults: defaults, key: Key.demoAccounts) ?? Self.demoAccounts
-        } else {
-            accounts = Self.savedAccounts(defaults: defaults, key: Key.productionAccounts) ?? []
+        var migratedAccounts = activeDemoMode
+            ? Self.savedAccounts(defaults: defaults, key: Key.demoAccounts) ?? Self.demoAccounts
+            : Self.savedAccounts(defaults: defaults, key: Key.productionAccounts) ?? []
+        let plusCodePreferences = FireVaultNativeSettingsStore().preferences.plusCodes
+        let repairedLegacyPlusCodes = Self.repairPlusCodes(
+            in: &migratedAccounts,
+            preferences: plusCodePreferences
+        )
+        accounts = initialArchiveURL.flatMap(FireVaultAccountArchive.load(from:))
+            ?? migratedAccounts
+        let repairedArchivePlusCodes = Self.repairPlusCodes(
+            in: &accounts,
+            preferences: plusCodePreferences
+        )
+        if let archiveURL = initialArchiveURL,
+           !FileManager.default.fileExists(atPath: archiveURL.path),
+           let migrationData = try? JSONEncoder().encode(accounts) {
+            Task {
+                try? await FireVaultAccountArchiveWriter.shared.write(
+                    migrationData,
+                    to: archiveURL,
+                    generation: 0,
+                    immediate: true
+                )
+            }
+        }
+        if repairedLegacyPlusCodes || repairedArchivePlusCodes {
+            persistAccounts()
         }
     }
 
@@ -128,12 +217,19 @@ final class FireVaultStore: ObservableObject {
 
     func reloadAccounts() {
         let key = demoMode ? Key.demoAccounts : Key.productionAccounts
-        guard let refreshed = Self.savedAccounts(defaults: defaults, key: key) else { return }
-        accounts = refreshed
+        guard let refreshed = accountArchiveURL.flatMap(FireVaultAccountArchive.load(from:))
+            ?? Self.savedAccounts(defaults: defaults, key: key) else { return }
+        var repairedAccounts = refreshed
+        let didRepairPlusCodes = Self.repairPlusCodes(
+            in: &repairedAccounts,
+            preferences: FireVaultNativeSettingsStore().preferences.plusCodes
+        )
+        accounts = repairedAccounts
         if let selectedAccountID, !accounts.contains(where: { $0.id == selectedAccountID }) {
             self.selectedAccountID = nil
         }
         applyCategoryRules()
+        if didRepairPlusCodes { persistAccounts() }
     }
 
     @discardableResult
@@ -156,6 +252,45 @@ final class FireVaultStore: ObservableObject {
             }
         }
         persist()
+    }
+
+    /// Removes retired category values from every account and prevents a
+    /// deleted automatic rule from restoring them during the same save.
+    @discardableResult
+    func removeCategories(_ categoryNames: [String]) -> Int {
+        let removedKeys = Set(categoryNames.compactMap { name -> String? in
+            let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? nil : value.lowercased()
+        })
+        guard !removedKeys.isEmpty else { return 0 }
+
+        categoryRules.removeAll {
+            removedKeys.contains($0.categoryTag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        }
+
+        var affectedAccounts = 0
+        for index in accounts.indices {
+            var changed = false
+            let categoryKey = accounts[index].category
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            if removedKeys.contains(categoryKey) {
+                accounts[index].category = ""
+                changed = true
+            }
+
+            let originalTagCount = accounts[index].tags.count
+            accounts[index].tags.removeAll { tag in
+                removedKeys.contains(tag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+            }
+            if accounts[index].tags.count != originalTagCount {
+                changed = true
+            }
+            if changed { affectedAccounts += 1 }
+        }
+
+        persistAccounts()
+        return affectedAccounts
     }
 
     func appPayload(
@@ -220,6 +355,56 @@ final class FireVaultStore: ObservableObject {
     func closeAccount(to tab: FireVaultShellTab? = nil) {
         selectedAccountID = nil
         if let tab { selectedTab = tab }
+    }
+
+    /// Deletes one customer/site record, not the signed-in FireVault user.
+    /// Production records are removed locally only after Supabase confirms the
+    /// user-owned cloud row is gone (or that no matching cloud row exists).
+    func deleteCustomerAccount(id: String) async throws {
+        guard let account = accounts.first(where: { $0.id == id }) else {
+            throw FireVaultCustomerAccountDeletionError.accountUnavailable
+        }
+        guard !isCloudSyncing else {
+            throw FireVaultCustomerAccountDeletionError.syncInProgress
+        }
+
+        if !demoMode {
+            isCloudSyncing = true
+            defer { isCloudSyncing = false }
+            do {
+                _ = try await remoteAccountDelete(account, cloudVaultOwnerUserID)
+                recordCloudCheck()
+                recordSuccessfulCloudSync()
+            } catch {
+                recordCloudCheck()
+                cloudSyncErrorMessage = error.localizedDescription.isEmpty
+                    ? "The customer account could not be deleted from FireVault Cloud. Nothing was removed from this iPhone."
+                    : error.localizedDescription
+                throw error
+            }
+        }
+
+        removeCustomerAccountFromDevice(id: id)
+    }
+
+    private func removeCustomerAccountFromDevice(id: String) {
+        guard accounts.contains(where: { $0.id == id }) else { return }
+        if let root = try? mediaRootURL() {
+            let safeAccountID = id.replacingOccurrences(
+                of: "[^A-Za-z0-9_-]",
+                with: "_",
+                options: .regularExpression
+            )
+            let directory = root.appendingPathComponent(safeAccountID, isDirectory: true)
+            if FileManager.default.fileExists(atPath: directory.path) {
+                try? FileManager.default.removeItem(at: directory)
+            }
+        }
+        accounts.removeAll { $0.id == id }
+        categoryRuleSuppressedAccountIDs.remove(id)
+        if selectedAccountID == id { selectedAccountID = nil }
+        if captureAccountID == id { captureAccountID = nil }
+        persistAccounts()
     }
 
     func refreshNearby() {
@@ -597,69 +782,6 @@ final class FireVaultStore: ObservableObject {
         persist()
     }
 
-    /// Returns a readable local URL only when the document belongs to the
-    /// requested account and its saved file still exists. This deliberately
-    /// does not create folders while browsing account media.
-    func mediaURL(accountID: String, documentID: String) -> URL? {
-        guard let account = accounts.first(where: { $0.id == accountID }),
-              let document = account.documents.first(where: { $0.id == documentID }),
-              let fileName = document.mediaFileName,
-              Self.isSafeMediaFileName(fileName),
-              let directory = mediaDirectoryURL(accountID: accountID) else {
-            return nil
-        }
-
-        let url = directory.appendingPathComponent(fileName, isDirectory: false)
-        guard Self.isSafeRegularMediaFile(at: url) else { return nil }
-        return url
-    }
-
-    /// Removes both the account record and its private local file. Legacy or
-    /// demo records without a backing file remain safely removable.
-    @discardableResult
-    func deleteDocument(accountID: String, documentID: String) throws -> Bool {
-        guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
-              let documentIndex = accounts[accountIndex].documents.firstIndex(where: { $0.id == documentID }) else {
-            return false
-        }
-
-        let document = accounts[accountIndex].documents[documentIndex]
-        if let fileName = document.mediaFileName,
-           Self.isSafeMediaFileName(fileName),
-           let directory = mediaDirectoryURL(accountID: accountID) {
-            let url = directory.appendingPathComponent(fileName, isDirectory: false)
-            let hasAnotherReference = accounts[accountIndex].documents.enumerated().contains { offset, candidate in
-                offset != documentIndex && candidate.mediaFileName == fileName
-            }
-            if !hasAnotherReference, Self.isSafeRegularMediaFile(at: url) {
-                do {
-                    try FileManager.default.removeItem(at: url)
-                } catch {
-                    throw FireVaultMediaError.deleteFailed(error.localizedDescription)
-                }
-            }
-        }
-
-        accounts[accountIndex].documents.remove(at: documentIndex)
-        let linkedRecentIndices = accounts[accountIndex].recent.indices.filter {
-            accounts[accountIndex].recent[$0].sourceID == documentID
-        }
-        if linkedRecentIndices.isEmpty {
-            if let legacyRecentIndex = accounts[accountIndex].recent.firstIndex(where: {
-                $0.sourceID == nil
-                    && $0.kind.lowercased() == document.kind.lowercased()
-                    && $0.title == document.title
-                    && $0.subtitle == document.subtitle
-            }) {
-                accounts[accountIndex].recent.remove(at: legacyRecentIndex)
-            }
-        } else {
-            accounts[accountIndex].recent.removeAll { $0.sourceID == documentID }
-        }
-        persist()
-        return true
-    }
-
     @discardableResult
     func attachCapturedPhoto(_ image: UIImage, to accountID: String) throws -> FireVaultWorkspaceDocument {
         guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
@@ -687,8 +809,7 @@ final class FireVaultStore: ObservableObject {
                 title: document.title,
                 subtitle: document.subtitle,
                 kind: "photo",
-                date: "Now",
-                sourceID: document.id
+                date: "Now"
             ),
             at: 0
         )
@@ -733,8 +854,7 @@ final class FireVaultStore: ObservableObject {
                 title: document.title,
                 subtitle: pageLabel,
                 kind: "scan",
-                date: "Now",
-                sourceID: document.id
+                date: "Now"
             ),
             at: 0
         )
@@ -813,10 +933,13 @@ final class FireVaultStore: ObservableObject {
     }
 
     private func mediaURL(accountID: String, fileName: String) throws -> URL {
-        guard Self.isSafeMediaFileName(fileName),
-              let directory = mediaDirectoryURL(accountID: accountID) else {
-            throw FireVaultMediaError.storageUnavailable
-        }
+        let safeAccountID = accountID.replacingOccurrences(
+            of: "[^A-Za-z0-9_-]",
+            with: "_",
+            options: .regularExpression
+        )
+        let directory = try mediaRootURL()
+            .appendingPathComponent(safeAccountID, isDirectory: true)
 
         do {
             try FileManager.default.createDirectory(
@@ -829,45 +952,29 @@ final class FireVaultStore: ObservableObject {
         }
     }
 
-    private func mediaDirectoryURL(accountID: String) -> URL? {
-        guard let mediaRootURL,
-              Self.isSafeMediaAccountID(accountID) else { return nil }
-        return mediaRootURL.appendingPathComponent(accountID, isDirectory: true)
-    }
-
-    private static func defaultMediaRootURL() -> URL? {
-        FileManager.default.urls(
+    private func mediaRootURL() throws -> URL {
+        guard let applicationSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
-        ).first?
+        ).first else {
+            throw FireVaultMediaError.storageUnavailable
+        }
+        return applicationSupport
             .appendingPathComponent("FireVault", isDirectory: true)
             .appendingPathComponent("Media", isDirectory: true)
     }
 
-    private static func isSafeMediaFileName(_ fileName: String) -> Bool {
-        !fileName.isEmpty
-            && fileName == URL(fileURLWithPath: fileName).lastPathComponent
-            && !fileName.contains("/")
-            && !fileName.contains("\\")
-            && fileName != "."
-            && fileName != ".."
-    }
-
-    private static func isSafeMediaAccountID(_ accountID: String) -> Bool {
-        !accountID.isEmpty
-            && accountID.range(
-                of: "^[A-Za-z0-9_-]+$",
-                options: .regularExpression
-            ) != nil
-            && accountID != "."
-            && accountID != ".."
-    }
-
-    private static func isSafeRegularMediaFile(at url: URL) -> Bool {
-        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]) else {
-            return false
-        }
-        return values.isRegularFile == true && values.isSymbolicLink != true
+    private var referencedMediaPaths: Set<String> {
+        Set(accounts.flatMap { account in
+            account.documents.compactMap { document in
+                guard let fileName = document.mediaFileName,
+                      fileName == URL(fileURLWithPath: fileName).lastPathComponent,
+                      let url = try? mediaURL(accountID: account.id, fileName: fileName) else {
+                    return nil
+                }
+                return url.standardizedFileURL.path
+            }
+        })
     }
 
     @discardableResult
@@ -879,10 +986,19 @@ final class FireVaultStore: ObservableObject {
         plusCode: String = "",
         latitude: Double? = nil,
         longitude: Double? = nil,
-        pinColor: String = "Purple"
+        pinColor: String = "Purple",
+        directionsMode: String = FireVaultDirectionsMode.walking.rawValue
     ) -> FireVaultWorkspaceLocation? {
+        let plusCodePreferences = FireVaultNativeSettingsStore().preferences.plusCodes
         guard let index = accounts.firstIndex(where: { $0.id == accountID }),
-              Self.isValidCoordinatePair(latitude: latitude, longitude: longitude) else { return nil }
+              Self.isValidCoordinatePair(latitude: latitude, longitude: longitude),
+              let storedPlusCode = FireVaultPlusCode.codeForStorage(
+                  enteredCode: plusCode,
+                  latitude: latitude,
+                  longitude: longitude,
+                  length: plusCodePreferences.locationLength,
+                  autoGenerate: plusCodePreferences.autoGenerate
+              ) else { return nil }
         let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedLabel.isEmpty else { return nil }
         let location = FireVaultWorkspaceLocation(
@@ -892,11 +1008,13 @@ final class FireVaultStore: ObservableObject {
             type: type.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "Other"
                 : type.trimmingCharacters(in: .whitespacesAndNewlines),
-            plusCode: plusCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+            plusCode: storedPlusCode,
             latitude: latitude,
             longitude: longitude,
             pinColor: FireVaultMapPinColor(rawValue: pinColor)?.rawValue
-                ?? FireVaultMapPinColor.purple.rawValue
+                ?? FireVaultMapPinColor.purple.rawValue,
+            directionsMode: FireVaultDirectionsMode(rawValue: directionsMode)?.rawValue
+                ?? FireVaultDirectionsMode.walking.rawValue
         )
         accounts[index].locations.append(location)
         persist()
@@ -913,23 +1031,37 @@ final class FireVaultStore: ObservableObject {
         plusCode: String,
         latitude: Double?,
         longitude: Double?,
-        pinColor: String = "Purple"
+        pinColor: String = "Purple",
+        directionsMode: String? = nil
     ) -> Bool {
+        let plusCodePreferences = FireVaultNativeSettingsStore().preferences.plusCodes
         guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
               let locationIndex = accounts[accountIndex].locations.firstIndex(where: { $0.id == locationID }),
-              Self.isValidCoordinatePair(latitude: latitude, longitude: longitude) else { return false }
+              Self.isValidCoordinatePair(latitude: latitude, longitude: longitude),
+              let storedPlusCode = FireVaultPlusCode.codeForStorage(
+                  enteredCode: plusCode,
+                  latitude: latitude,
+                  longitude: longitude,
+                  length: plusCodePreferences.locationLength,
+                  autoGenerate: plusCodePreferences.autoGenerate
+              ) else { return false }
         let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedLabel.isEmpty else { return false }
         accounts[accountIndex].locations[locationIndex].label = trimmedLabel
         accounts[accountIndex].locations[locationIndex].subtitle = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedType = type.trimmingCharacters(in: .whitespacesAndNewlines)
         accounts[accountIndex].locations[locationIndex].type = trimmedType.isEmpty ? "Other" : trimmedType
-        accounts[accountIndex].locations[locationIndex].plusCode = plusCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        accounts[accountIndex].locations[locationIndex].plusCode = storedPlusCode
         accounts[accountIndex].locations[locationIndex].latitude = latitude
         accounts[accountIndex].locations[locationIndex].longitude = longitude
         accounts[accountIndex].locations[locationIndex].pinColor =
             FireVaultMapPinColor(rawValue: pinColor)?.rawValue
             ?? FireVaultMapPinColor.purple.rawValue
+        if let directionsMode {
+            accounts[accountIndex].locations[locationIndex].directionsMode =
+                FireVaultDirectionsMode(rawValue: directionsMode)?.rawValue
+                ?? FireVaultDirectionsMode.walking.rawValue
+        }
         persist()
         return true
     }
@@ -972,6 +1104,7 @@ final class FireVaultStore: ObservableObject {
         captureAccountID = nil
         defaults.removeObject(forKey: Key.demoAccounts)
         defaults.removeObject(forKey: Key.demoCategoryRuleSuppressions)
+        persistAccounts()
     }
 
     func exitDemoMode() {
@@ -980,7 +1113,9 @@ final class FireVaultStore: ObservableObject {
         captureAccountID = nil
         demoMode = false
         defaults.set(false, forKey: Key.demoMode)
-        accounts = Self.savedAccounts(defaults: defaults, key: Key.productionAccounts) ?? []
+        accounts = accountArchiveURL.flatMap(FireVaultAccountArchive.load(from:))
+            ?? Self.savedAccounts(defaults: defaults, key: Key.productionAccounts)
+            ?? []
         categoryRuleSuppressedAccountIDs = Set(
             defaults.stringArray(forKey: Key.productionCategoryRuleSuppressions) ?? []
         )
@@ -993,7 +1128,9 @@ final class FireVaultStore: ObservableObject {
         captureAccountID = nil
         demoMode = true
         defaults.set(true, forKey: Key.demoMode)
-        accounts = Self.savedAccounts(defaults: defaults, key: Key.demoAccounts) ?? Self.demoAccounts
+        accounts = accountArchiveURL.flatMap(FireVaultAccountArchive.load(from:))
+            ?? Self.savedAccounts(defaults: defaults, key: Key.demoAccounts)
+            ?? Self.demoAccounts
         categoryRuleSuppressedAccountIDs = Set(
             defaults.stringArray(forKey: Key.demoCategoryRuleSuppressions) ?? []
         )
@@ -1017,14 +1154,84 @@ final class FireVaultStore: ObservableObject {
         )
     }
 
-    func refreshAccountsFromCloud() async {
-        guard !demoMode else { return }
+    var cloudSyncStatusText: String {
+        if demoMode { return "Demo data" }
+        if isCloudSyncing { return "Syncing" }
+        if cloudSyncErrorMessage != nil { return "Needs attention" }
+        return cloudLastSyncedAt == nil ? "Not synced yet" : "Up to date"
+    }
+
+    func syncAccountsNow() async {
+        guard !demoMode, !isCloudSyncing else { return }
+        isCloudSyncing = true
+        cloudSyncErrorMessage = nil
+        cloudSyncCompleted = 0
+        cloudSyncTotal = accounts.filter { $0.cloudID == nil || $0.cloudSyncedAt == nil }.count
+        defer { isCloudSyncing = false }
         do {
+            let session = try await SupabaseManager.client.auth.session
+            let visibleCloudRows = try await FireVaultAccountSyncService.fetchAccounts()
+            try validateCloudVaultOwnership(userID: session.user.id, cloudRows: visibleCloudRows)
+            let result = try await FireVaultAccountSyncService.backfillLegacyAccounts(accounts) { [weak self] completed, total in
+                await MainActor.run {
+                    self?.cloudSyncCompleted = completed
+                    self?.cloudSyncTotal = total
+                }
+            }
+            let timestamp = Date()
+            for index in accounts.indices {
+                guard let remoteID = result.mappings[accounts[index].id] else { continue }
+                accounts[index].cloudID = remoteID.uuidString
+                accounts[index].cloudSyncedAt = timestamp
+                accounts[index].cloudSyncError = nil
+            }
+            persist()
             let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
+            mergeCloudAccounts(cloudRows)
+            recordCloudCheck()
+            recordSuccessfulCloudSync()
+        } catch {
+            recordCloudCheck()
+            cloudSyncErrorMessage = error.localizedDescription.isEmpty
+                ? "Cloud sync failed. Your accounts remain saved on this iPhone."
+                : error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    func eraseLocalAccountDataAfterCloudDeletion(for userID: UUID) -> Bool {
+        guard cloudVaultOwnerUserID == userID else { return false }
+        accounts.removeAll()
+        selectedAccountID = nil
+        captureAccountID = nil
+        cloudLastSyncedAt = nil
+        cloudLastCheckedAt = nil
+        defaults.removeObject(forKey: Key.cloudLastSyncedAt)
+        defaults.removeObject(forKey: Key.cloudLastCheckedAt)
+        defaults.removeObject(forKey: Key.cloudVaultOwnerUserID)
+        persistAccounts()
+        return true
+    }
+
+    func refreshAccountsFromCloud() async {
+        guard !demoMode, !isCloudSyncing else { return }
+        isCloudSyncing = true
+        cloudSyncErrorMessage = nil
+        defer { isCloudSyncing = false }
+
+        do {
+            // Reading session refreshes an expired token when needed, so Sync
+            // Now verifies the saved sign-in before reading user-owned accounts.
+            let session = try await SupabaseManager.client.auth.session
+            let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
+            try validateCloudVaultOwnership(userID: session.user.id, cloudRows: cloudRows)
             guard !demoMode else { return }
             mergeCloudAccounts(cloudRows)
+            recordCloudCheck()
+            recordSuccessfulCloudSync()
         } catch {
-            // Offline-first: keep the last valid local vault when the network is unavailable.
+            recordCloudCheck()
+            recordCloudSyncFailure(error)
         }
     }
 
@@ -1036,8 +1243,15 @@ final class FireVaultStore: ObservableObject {
         let localResult = applyCSVImport(analysis)
         guard !demoMode else { return localResult }
 
+        isCloudSyncing = true
+        cloudSyncErrorMessage = nil
+        defer { isCloudSyncing = false }
+
         var messages = localResult.messages
         do {
+            let session = try await SupabaseManager.client.auth.session
+            let visibleCloudRows = try await FireVaultAccountSyncService.fetchAccounts()
+            try validateCloudVaultOwnership(userID: session.user.id, cloudRows: visibleCloudRows)
             let cloudResult = try await FireVaultAccountSyncService.importCSV(
                 data: csvData,
                 fileName: fileName.isEmpty ? "accounts.csv" : fileName,
@@ -1046,13 +1260,17 @@ final class FireVaultStore: ObservableObject {
             )
             let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
             mergeCloudAccounts(cloudRows)
+            recordCloudCheck()
+            recordSuccessfulCloudSync()
             messages.insert(
                 "Synced \(cloudResult.importedRows) account\(cloudResult.importedRows == 1 ? "" : "s") to your FireVault account.",
                 at: 0
             )
         } catch {
+            recordCloudCheck()
+            recordCloudSyncFailure(error)
             messages.insert(
-                "Saved on this iPhone. Cloud sync could not finish: \(error.localizedDescription)",
+                "Saved on this iPhone. Cloud sync could not finish. Tap Sync Now in Settings to retry.",
                 at: 0
             )
         }
@@ -1064,6 +1282,58 @@ final class FireVaultStore: ObservableObject {
             totalRows: localResult.totalRows,
             messages: Array(messages.prefix(12))
         )
+    }
+
+    private func recordSuccessfulCloudSync() {
+        let timestamp = Date()
+        cloudLastSyncedAt = timestamp
+        defaults.set(timestamp, forKey: Key.cloudLastSyncedAt)
+        cloudSyncErrorMessage = nil
+    }
+
+    private var cloudVaultOwnerUserID: UUID? {
+        defaults.string(forKey: Key.cloudVaultOwnerUserID).flatMap(UUID.init(uuidString:))
+    }
+
+    func validateCloudVaultOwnership(
+        userID: UUID,
+        cloudRows: [FireVaultCloudAccountRow]
+    ) throws {
+        if let ownerID = cloudVaultOwnerUserID {
+            guard ownerID == userID else {
+                throw FireVaultCloudVaultAccessError.linkedToDifferentLogin
+            }
+            return
+        }
+
+        let linkedCloudIDs = Set(accounts.compactMap { account in
+            account.cloudID.flatMap(UUID.init(uuidString:))
+        })
+        if !linkedCloudIDs.isEmpty {
+            let visibleCloudIDs = Set(cloudRows.map(\.id))
+            guard !linkedCloudIDs.isDisjoint(with: visibleCloudIDs) else {
+                throw FireVaultCloudVaultAccessError.linkedToDifferentLogin
+            }
+        }
+
+        defaults.set(userID.uuidString.lowercased(), forKey: Key.cloudVaultOwnerUserID)
+    }
+
+    private func recordCloudCheck() {
+        let timestamp = Date()
+        cloudLastCheckedAt = timestamp
+        defaults.set(timestamp, forKey: Key.cloudLastCheckedAt)
+    }
+
+    private func recordCloudSyncFailure(_ error: Error? = nil) {
+        if let accessError = error as? FireVaultCloudVaultAccessError {
+            cloudSyncErrorMessage = accessError.localizedDescription
+            return
+        }
+        // Offline-first behavior is intentional: the last valid on-device vault
+        // stays available. Keep the customer message actionable and avoid
+        // exposing low-level network or authentication details.
+        cloudSyncErrorMessage = "FireVault Cloud could not be reached. Your saved accounts remain available."
     }
 
     private func mergeCloudAccounts(_ cloudRows: [FireVaultCloudAccountRow]) {
@@ -1102,6 +1372,9 @@ final class FireVaultStore: ObservableObject {
             if !accounts[existingIndex].tags.contains("Cloud Sync") {
                 accounts[existingIndex].tags.append("Cloud Sync")
             }
+            accounts[existingIndex].cloudID = row.id.uuidString
+            accounts[existingIndex].cloudSyncedAt = Date()
+            accounts[existingIndex].cloudSyncError = nil
         }
 
         persist()
@@ -1242,6 +1515,108 @@ final class FireVaultStore: ObservableObject {
         return .init(added: added, preserved: preserved)
     }
 
+    func backupMediaRecords() throws -> [FireVaultVaultMediaRecord] {
+        var records: [FireVaultVaultMediaRecord] = []
+        for account in accounts {
+            for document in account.documents {
+                guard let fileName = document.mediaFileName,
+                      fileName == URL(fileURLWithPath: fileName).lastPathComponent else { continue }
+                let url = try mediaURL(accountID: account.id, fileName: fileName)
+                guard FileManager.default.fileExists(atPath: url.path) else { continue }
+                records.append(
+                    .init(
+                        accountID: account.id,
+                        fileName: fileName,
+                        data: try Data(contentsOf: url, options: .mappedIfSafe)
+                    )
+                )
+            }
+        }
+        return records
+    }
+
+    @discardableResult
+    func installBackupMedia(
+        _ records: [FireVaultVaultMediaRecord],
+        allowedAccountIDs: Set<String>
+    ) throws -> Int {
+        var restored = 0
+        for record in records where allowedAccountIDs.contains(record.accountID) && record.isValid {
+            let url = try mediaURL(accountID: record.accountID, fileName: record.fileName)
+            guard !FileManager.default.fileExists(atPath: url.path) else { continue }
+            try record.data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            restored += 1
+        }
+        return restored
+    }
+
+    @discardableResult
+    func deleteDocument(accountID: String, documentID: String) -> Bool {
+        guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
+              let documentIndex = accounts[accountIndex].documents.firstIndex(where: { $0.id == documentID }) else {
+            return false
+        }
+        let document = accounts[accountIndex].documents[documentIndex]
+        if let fileName = document.mediaFileName,
+           fileName == URL(fileURLWithPath: fileName).lastPathComponent,
+           let url = try? mediaURL(accountID: accountID, fileName: fileName),
+           FileManager.default.fileExists(atPath: url.path) {
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                return false
+            }
+        }
+        accounts[accountIndex].documents.remove(at: documentIndex)
+        persist()
+        return true
+    }
+
+    func mediaStorageReport() -> FireVaultMediaStorageReport {
+        let referenced = referencedMediaPaths
+        var storedFiles = Set<String>()
+        var totalBytes: Int64 = 0
+        guard let root = try? mediaRootURL(),
+              let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return .init(referencedFiles: referenced.count, orphanedFiles: 0, totalBytes: 0)
+        }
+        for case let url as URL in enumerator {
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                  values.isRegularFile == true else { continue }
+            storedFiles.insert(url.standardizedFileURL.path)
+            totalBytes += Int64(values.fileSize ?? 0)
+        }
+        return .init(
+            referencedFiles: referenced.intersection(storedFiles).count,
+            orphanedFiles: storedFiles.subtracting(referenced).count,
+            totalBytes: totalBytes
+        )
+    }
+
+    @discardableResult
+    func removeOrphanedMedia() -> Int {
+        let referenced = referencedMediaPaths
+        guard let root = try? mediaRootURL(),
+              let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+              ) else { return 0 }
+        var removed = 0
+        for case let url as URL in enumerator {
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+                  !referenced.contains(url.standardizedFileURL.path) else { continue }
+            if (try? FileManager.default.removeItem(at: url)) != nil {
+                removed += 1
+            }
+        }
+        return removed
+    }
+
     private static func csvIdentityKey(name: String, address: String) -> String {
         "\(name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())|\(address.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
     }
@@ -1253,13 +1628,25 @@ final class FireVaultStore: ObservableObject {
 
     private func persistAccounts() {
         guard let data = try? JSONEncoder().encode(accounts) else { return }
-        let key = demoMode ? Key.demoAccounts : Key.productionAccounts
-        let backupKey = demoMode ? Key.demoAccountsBackup : Key.productionAccountsBackup
-        if let existing = defaults.data(forKey: key),
-           (try? JSONDecoder().decode([FireVaultWorkspaceAccount].self, from: existing)) != nil {
-            defaults.set(existing, forKey: backupKey)
+        if let accountArchiveURL {
+            accountPersistenceGeneration += 1
+            let generation = accountPersistenceGeneration
+            Task {
+                try? await FireVaultAccountArchiveWriter.shared.write(
+                    data,
+                    to: accountArchiveURL,
+                    generation: generation
+                )
+            }
+        } else {
+            let key = demoMode ? Key.demoAccounts : Key.productionAccounts
+            let backupKey = demoMode ? Key.demoAccountsBackup : Key.productionAccountsBackup
+            if let existing = defaults.data(forKey: key),
+               (try? JSONDecoder().decode([FireVaultWorkspaceAccount].self, from: existing)) != nil {
+                defaults.set(existing, forKey: backupKey)
+            }
+            defaults.set(data, forKey: key)
         }
-        defaults.set(data, forKey: key)
         let suppressionKey = demoMode
             ? Key.demoCategoryRuleSuppressions
             : Key.productionCategoryRuleSuppressions
@@ -1337,6 +1724,27 @@ final class FireVaultStore: ObservableObject {
             longitude: account.longitude,
             recentText: account.recent.first?.date ?? ""
         )
+    }
+
+    /// Repairs pre-integrity-build data without changing coordinates or any
+    /// unrelated account fields. Re-running this migration is a no-op.
+    @discardableResult
+    private static func repairPlusCodes(
+        in accounts: inout [FireVaultWorkspaceAccount],
+        preferences: FireVaultPlusCodePreferences
+    ) -> Bool {
+        guard preferences.autoGenerate else { return false }
+        var changed = false
+        for accountIndex in accounts.indices {
+            for locationIndex in accounts[accountIndex].locations.indices {
+                guard let coordinate = accounts[accountIndex].locations[locationIndex].coordinate else { continue }
+                let expected = FireVaultPlusCode.encode(coordinate, length: preferences.locationLength)
+                guard accounts[accountIndex].locations[locationIndex].plusCode != expected else { continue }
+                accounts[accountIndex].locations[locationIndex].plusCode = expected
+                changed = true
+            }
+        }
+        return changed
     }
 
     private static func distanceLabel(_ meters: Double) -> String {

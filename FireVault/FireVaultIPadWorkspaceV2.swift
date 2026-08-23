@@ -10,8 +10,8 @@ import SwiftUI
 
 private enum FireVaultIPadNearbyMapLayer: String, CaseIterable, Identifiable {
     case standard
-    case hybrid
     case imagery
+    case hybrid
 
     var id: String { rawValue }
 
@@ -81,7 +81,7 @@ struct FireVaultIPadWorkspaceV2: View {
                     .foregroundStyle(.secondary)
                     .padding(.leading, 10)
 
-                ForEach(FireVaultShellTab.allCases.filter { $0.isVisible(in: settings) }) { tab in
+                ForEach(FireVaultShellTab.allCases) { tab in
                     sidebarButton(tab)
                 }
             }
@@ -195,7 +195,6 @@ struct FireVaultIPadWorkspaceV2: View {
                 FireVaultAdaptiveAccountDetailsView(
                     account: account,
                     store: store,
-                    settings: settings,
                     locationService: locationService,
                     returnTab: .nearby,
                     returnTitle: "Nearby"
@@ -215,7 +214,6 @@ struct FireVaultIPadWorkspaceV2: View {
                 FireVaultAdaptiveAccountDetailsView(
                     account: account,
                     store: store,
-                    settings: settings,
                     locationService: locationService,
                     returnTab: .accounts,
                     returnTitle: "Account List"
@@ -257,6 +255,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
     @State private var accountScrollIsActive = false
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var mapLayer: FireVaultIPadNearbyMapLayer = .standard
+    @State private var mapIs3D = true
     @State private var showsTripLogControls = false
     @State private var confirmsTripLogEnd = false
     @State private var tripLogControlsTask: Task<Void, Never>?
@@ -378,8 +377,8 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                 }
                 .frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("TRIP LOG").font(.caption2.bold()).tracking(1).foregroundStyle(.secondary)
-                    Text(tripLogStatusTitle).font(.subheadline.bold()).foregroundStyle(tripLogStatusTint)
+                    Text("TRIP LOG").font(.caption2.weight(.heavy)).tracking(1).foregroundStyle(NativeShellPalette.red)
+                    Text(tripLogStatusTitle).font(.subheadline.weight(.heavy)).foregroundStyle(tripLogStatusTint)
                 }
                 Divider().frame(height: 30)
                 tripMetric("MILES", value: tripMiles, symbol: "road.lanes")
@@ -387,17 +386,23 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                 tripMetric("ELAPSED", value: tripElapsed, symbol: "clock")
                 Spacer(minLength: 8)
                 Image(systemName: showsTripLogControls ? "chevron.up" : "chevron.down")
-                    .font(.caption.bold()).foregroundStyle(.secondary)
+                    .font(.caption.bold()).foregroundStyle(NativeShellPalette.blue)
             }
             .padding(.horizontal, 14)
             .frame(height: 56)
-            .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .background(
+                LinearGradient(
+                    colors: [NativeShellPalette.tripLogLeading, NativeShellPalette.tripLogTrailing],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                ),
+                in: RoundedRectangle(cornerRadius: 17, style: .continuous)
+            )
             .overlay {
                 RoundedRectangle(cornerRadius: 17, style: .continuous)
-                    .stroke(.black.opacity(0.34), lineWidth: 2)
-                    .blur(radius: 0.8)
-                    .mask(RoundedRectangle(cornerRadius: 17, style: .continuous))
+                    .stroke(NativeShellPalette.tripLogBorder, lineWidth: 1.8)
             }
+            .shadow(color: .black.opacity(0.18), radius: 7, y: 3)
             .contentShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -412,6 +417,11 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                 }
                 .buttonStyle(.borderedProminent)
             } else if breadcrumbs.isRecording {
+                Button("Pause", systemImage: "pause.fill") {
+                    breadcrumbs.pauseWorkday()
+                    closeTripLogControls()
+                }
+                .buttonStyle(.bordered)
                 Button("Stop", systemImage: "stop.fill", role: .destructive) {
                     confirmsTripLogEnd = true
                 }
@@ -611,8 +621,6 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                                         )
                                         .overlay { Circle().stroke(.white.opacity(0.88), lineWidth: 2) }
                                         .shadow(radius: 5)
-                                        .frame(width: 44, height: 44)
-                                        .contentShape(Circle())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -698,7 +706,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(row.account.name)
                             .font(.subheadline.bold())
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(.white)
                             .lineLimit(2)
 
                         Text(row.account.address)
@@ -764,7 +772,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                     centerCoordinate: coordinate,
                     distance: 950,
                     heading: 0,
-                    pitch: 52
+                    pitch: mapIs3D ? 52 : 0
                 )
             )
         }
@@ -776,6 +784,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
         case "hybrid": .hybrid
         default: .standard
         }
+        mapIs3D = settings.gps.resolvedDefaultMapIs3D
         selectedID = nearbyRows.first?.id
         scrollingID = selectedID
         accountScrollIsActive = false
@@ -786,7 +795,7 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                 centerCoordinate: overviewRegion.center,
                 distance: max(1_600, max(latitudeDistance, longitudeDistance) * 1.8),
                 heading: 0,
-                pitch: 42
+                pitch: mapIs3D ? 42 : 0
             )
         )
     }

@@ -12,7 +12,7 @@ import CoreLocation
 struct ContentView: View {
     @StateObject private var store = FireVaultStore()
     @StateObject private var settings = FireVaultNativeSettingsStore()
-    @StateObject private var locationService = FireVaultLocationService()
+    @StateObject private var locationService = FireVaultLocationService.shared
     @StateObject private var liveBreadcrumbs = FireVaultBreadcrumbStore.shared
     @StateObject private var quickActions = FireVaultQuickActionCenter.shared
     @StateObject private var widgetDeepLinks = FireVaultWidgetDeepLinkCenter.shared
@@ -22,6 +22,8 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showsSplash = true
+    @State private var widgetSnapshotTask: Task<Void, Never>?
+    @State private var hasStartedLegacyBackfill = false
 
     init() {
         _demoBreadcrumbs = State(initialValue: FireVaultDemoShowroom.makeBreadcrumbStore())
@@ -59,6 +61,7 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: store.selectedAccountID)
+        .tint(NativeShellPalette.blue)
         .preferredColorScheme(preferredColorScheme)
     }
 
@@ -106,24 +109,29 @@ struct ContentView: View {
         settingsObservationView
         .onChange(of: store.demoMode) { _, isDemoMode in
             prepareActiveVault()
-            updateWidgetSnapshot()
-            if !isDemoMode {
-                Task {
-                    await store.refreshAccountsFromCloud()
-                    updateWidgetSnapshot()
-                }
-            }
+            if !isDemoMode { startLegacyBackfillIfNeeded() }
+            scheduleWidgetSnapshotUpdate()
         }
         .onChange(of: store.selectedAccountID) { _, _ in
-            updateWidgetSnapshot()
+            scheduleWidgetSnapshotUpdate()
         }
         .onChange(of: activeBreadcrumbs.days) { _, _ in
-            updateWidgetSnapshot()
+            scheduleWidgetSnapshotUpdate()
         }
         .onChange(of: activeBreadcrumbs.isRecording) { _, _ in
-            updateWidgetSnapshot()
+            scheduleWidgetSnapshotUpdate()
+        }
+        .onChange(of: store.cloudLastSyncedAt) { _, _ in
+            scheduleWidgetSnapshotUpdate()
+        }
+        .onChange(of: store.cloudSyncErrorMessage) { _, _ in
+            scheduleWidgetSnapshotUpdate()
+        }
+        .onChange(of: store.isCloudSyncing) { _, _ in
+            scheduleWidgetSnapshotUpdate()
         }
         .onChange(of: store.accounts.count) { _, count in
+            scheduleWidgetSnapshotUpdate()
             guard store.demoMode, count <= 4 else { return }
             FireVaultDemoShowroom.installAccountsIfNeeded(into: store, force: true)
             demoBreadcrumbs = FireVaultDemoShowroom.makeBreadcrumbStore(forceReset: true)
@@ -150,12 +158,8 @@ struct ContentView: View {
             && !isLandscapeWindow
             && store.selectedAccount == nil
         let payload = store.appPayload(
-            userCoordinate: activeBreadcrumbs.isRecording
-                ? activeBreadcrumbs.latestLocation?.coordinate
-                : locationService.coordinate,
-            liveLocationStatus: activeBreadcrumbs.isRecording
-                ? activeBreadcrumbs.statusText
-                : locationService.statusText
+            userCoordinate: locationService.coordinate,
+            liveLocationStatus: locationService.statusText
         )
 
         return VStack(spacing: 0) {
@@ -177,7 +181,6 @@ struct ContentView: View {
                     FireVaultAdaptiveAccountDetailsView(
                         account: account,
                         store: store,
-                        settings: settings,
                         locationService: locationService,
                         returnTab: store.selectedTab,
                         returnTitle: store.selectedTab == .nearby ? "Nearby" : "Account List"
@@ -223,7 +226,7 @@ struct ContentView: View {
 
     private func performInitialSetup() async {
         prepareActiveVault()
-        await store.refreshAccountsFromCloud()
+        startLegacyBackfillIfNeeded()
         await refreshAndReconcileFeatureControls()
         store.configureCategoryRules(settings.preferences.categoryRules ?? [])
         privacyLock.configure(enabled: settings.preferences.privacy.enabled)
@@ -245,11 +248,8 @@ struct ContentView: View {
         switch newPhase {
         case .active:
             prepareActiveVault()
-            Task {
-                await store.refreshAccountsFromCloud()
-                await refreshAndReconcileFeatureControls()
-                updateWidgetSnapshot()
-            }
+            resumeNearbyLocationIfNeeded()
+            Task { await refreshAndReconcileFeatureControls() }
             privacyLock.lockIfNeeded(settings.preferences.privacy)
             if isPrivacyLocked {
                 privacyLock.authenticate()
@@ -258,8 +258,8 @@ struct ContentView: View {
                 handlePendingWidgetDeepLink()
             }
         case .background:
-            activeBreadcrumbs.prepareForBackgroundTracking()
-            activeBreadcrumbs.flushPendingRoutePersistence()
+            locationService.stopLiveNearbyUpdates(consumer: .handset)
+            updateWidgetSnapshot()
             privacyLock.enteredBackground()
         default:
             break
@@ -285,8 +285,24 @@ struct ContentView: View {
         }
     }
 
+    private func startLegacyBackfillIfNeeded() {
+        guard !store.demoMode, !hasStartedLegacyBackfill else { return }
+        hasStartedLegacyBackfill = true
+        Task { await store.syncAccountsNow() }
+    }
+
     private var isPrivacyLocked: Bool {
         settings.preferences.privacy.enabled && !privacyLock.isUnlocked
+    }
+
+    private func resumeNearbyLocationIfNeeded() {
+        guard !store.demoMode,
+              store.selectedTab == .nearby,
+              !activeBreadcrumbs.isRecording else { return }
+        locationService.startLiveNearbyUpdates(
+            highAccuracy: settings.gps.highAccuracy,
+            consumer: .handset
+        )
     }
 
     private func handlePendingQuickAction() {
@@ -330,9 +346,14 @@ struct ContentView: View {
             }
         case .accounts:
             store.closeAccount(to: .accounts)
+        case .account(let accountID):
+            store.selectedTab = .accounts
+            store.openAccount(accountID)
         case .photo:
             store.closeAccount(to: .photo)
             store.requestCapture(.photo)
+        case .sync:
+            store.closeAccount(to: .settings)
         }
         updateWidgetSnapshot()
     }
@@ -341,6 +362,36 @@ struct ContentView: View {
         let existing = FireVaultWidgetSharedStore.load()
         let day = activeBreadcrumbs.activeDay ?? activeBreadcrumbs.today
         let account = store.selectedAccount
+        let contextAccount = account
+            ?? existing.accountRecordID.flatMap { recordID in
+                store.accounts.first(where: { $0.id == recordID })
+            }
+        let now = Date()
+        let location = locationService.latestLocation
+        let accuracyFeet = location.flatMap { reading in
+            reading.horizontalAccuracy >= 0 ? reading.horizontalAccuracy * 3.280_84 : nil
+        }
+        let pendingCloudAccounts = store.accounts.lazy.filter {
+            $0.cloudID == nil || $0.cloudSyncedAt == nil || $0.cloudSyncError != nil
+        }.count
+        var widgetAccounts = store.accounts.filter(\.favorite)
+        if let contextAccount {
+            widgetAccounts.removeAll { $0.id == contextAccount.id }
+            widgetAccounts.insert(contextAccount, at: 0)
+        }
+        let accountChoices = widgetAccounts.prefix(24).map { candidate in
+            FireVaultWidgetAccountSummary(
+                id: candidate.id,
+                name: candidate.name,
+                accountID: candidate.accountId,
+                category: candidate.category,
+                address: candidate.address,
+                dropPinCount: candidate.locations.lazy.filter {
+                    $0.coordinate != nil
+                        || !$0.plusCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                }.count
+            )
+        }
 
         let state: FireVaultWidgetSnapshot.TripState
         if activeBreadcrumbs.isRecording {
@@ -355,17 +406,59 @@ struct ContentView: View {
 
         FireVaultWidgetSharedStore.save(
             FireVaultWidgetSnapshot(
-                updatedAt: Date(),
+                updatedAt: now,
                 tripState: state,
                 tripStartedAt: day?.startedAt,
                 elapsedSeconds: day?.elapsedTime ?? 0,
                 distanceMiles: (day?.totalDistanceMeters ?? 0) / 1_609.344,
                 stopCount: day?.stops.count ?? 0,
-                accountName: account?.name ?? existing.accountName,
-                accountID: account?.accountId ?? existing.accountID,
-                accountCategory: account?.category ?? existing.accountCategory
+                accountName: contextAccount?.name ?? existing.accountName,
+                accountID: contextAccount?.accountId ?? existing.accountID,
+                accountCategory: contextAccount?.category ?? existing.accountCategory,
+                accountRecordID: contextAccount?.id ?? existing.accountRecordID,
+                accountAddress: contextAccount?.address ?? existing.accountAddress,
+                accountDropPinCount: contextAccount.map { candidate in
+                    candidate.locations.lazy.filter {
+                        $0.coordinate != nil
+                            || !$0.plusCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    }.count
+                } ?? existing.accountDropPinCount,
+                accountCount: store.accounts.count,
+                mappedAccountCount: store.mappedAccountCount,
+                cloudState: widgetCloudState,
+                cloudLastSyncedAt: store.cloudLastSyncedAt,
+                pendingCloudAccountCount: pendingCloudAccounts,
+                gpsQuality: widgetGPSQuality(accuracyFeet: accuracyFeet),
+                gpsAccuracyFeet: accuracyFeet,
+                gpsUpdatedAt: location?.timestamp,
+                accountChoices: accountChoices
             )
         )
+    }
+
+    private var widgetCloudState: FireVaultWidgetSnapshot.CloudState {
+        if store.isCloudSyncing { return .syncing }
+        if store.cloudSyncErrorMessage != nil { return .needsAttention }
+        return store.cloudLastSyncedAt == nil ? .notSynced : .upToDate
+    }
+
+    private func widgetGPSQuality(accuracyFeet: Double?) -> FireVaultWidgetSnapshot.GPSQuality {
+        guard let accuracyFeet else { return .unavailable }
+        switch accuracyFeet {
+        case ...20: return FireVaultWidgetSnapshot.GPSQuality.excellent
+        case ...50: return FireVaultWidgetSnapshot.GPSQuality.good
+        case ...115: return FireVaultWidgetSnapshot.GPSQuality.fair
+        default: return FireVaultWidgetSnapshot.GPSQuality.poor
+        }
+    }
+
+    private func scheduleWidgetSnapshotUpdate() {
+        widgetSnapshotTask?.cancel()
+        widgetSnapshotTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            updateWidgetSnapshot()
+        }
     }
 }
 
@@ -464,7 +557,7 @@ private struct FireVaultBrandHeader: View {
         .background(NativeShellPalette.background)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(.white.opacity(0.07))
+                .fill(NativeShellPalette.hairline)
                 .frame(height: 1)
         }
         .accessibilityIdentifier("firevault-brand-header")

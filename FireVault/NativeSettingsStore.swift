@@ -234,7 +234,7 @@ struct FireVaultGPSPreferences: Codable, Equatable {
     var tripLogMergeNearbyStops: Bool?
     var hapticsAreEnabled: Bool { hapticsEnabled ?? true }
     var resolvedDefaultMapLayer: String { defaultMapLayer ?? "standard" }
-    var opensMapsIn3D: Bool { defaultMapIs3D ?? false }
+    var resolvedDefaultMapIs3D: Bool { defaultMapIs3D ?? true }
     var resolvedTripLogMinimumUnknownStopMinutes: Int {
         tripLogMinimumUnknownStopMinutes ?? 5
     }
@@ -248,6 +248,7 @@ struct FireVaultGPSPreferences: Codable, Equatable {
         if !["standard", "satellite", "hybrid"].contains(copy.resolvedDefaultMapLayer) {
             copy.defaultMapLayer = "standard"
         }
+        if copy.defaultMapIs3D == nil { copy.defaultMapIs3D = true }
         if ![5, 7, 10].contains(copy.resolvedTripLogMinimumUnknownStopMinutes) {
             copy.tripLogMinimumUnknownStopMinutes = 5
         }
@@ -281,6 +282,7 @@ struct FireVaultNotificationPreferences: Codable, Equatable {
     var liveActivitiesAreEnabled: Bool { liveActivitiesEnabled ?? true }
     var showsLiveActivityMetrics: Bool { liveActivityMetricsVisible ?? true }
     var recordingReminderEnabled: Bool { tripLogStillRecording ?? true }
+    var pausedReminderEnabled: Bool { tripLogPaused ?? true }
     var hidesSensitiveDetails: Bool { hideSensitiveDetails ?? true }
     var usesQuietHours: Bool { quietHoursEnabled ?? true }
     var resolvedQuietStart: Int { min(23, max(0, quietHoursStart ?? 20)) }
@@ -423,9 +425,9 @@ enum FireVaultDeveloperFeatureCatalog {
         .init(id: "account.brief", page: "Account Detail", title: "Generate Account Brief"),
         .init(id: "account.map", page: "Account Detail", title: "Arrival Map"),
         .init(id: "account.notes", page: "Account Detail", title: "Notes"),
-        .init(id: "account.files", page: "Account Detail", title: "Photos & Documents"),
+        .init(id: "account.files", page: "Account Detail", title: "Files & Scans"),
         .init(id: "account.equipment", page: "Account Detail", title: "Equipment"),
-        .init(id: "account.locations", page: "Account Detail", title: "Saved Arrival Points"),
+        .init(id: "account.locations", page: "Account Detail", title: "Locations"),
         .init(id: "account.action.scan", page: "Account Detail", title: "Scan Action"),
         .init(id: "account.action.note", page: "Account Detail", title: "Note Action"),
         .init(id: "account.action.camera", page: "Account Detail", title: "Camera Action"),
@@ -576,6 +578,21 @@ final class FireVaultNativeSettingsStore: ObservableObject {
         merged.overlay = FireVaultOverlayEditorBridge.merge(into: updated.overlay)
         preferences = merged.normalized
         persist()
+    }
+
+    func restore(
+        _ backup: FireVaultNativePreferences,
+        settingsView backupSettingsView: FireVaultSettingsViewPreferences? = nil,
+        appearance backupAppearance: FireVaultAppearanceMode? = nil
+    ) {
+        preferences = backup.normalized
+        persist()
+        if let backupSettingsView {
+            saveSettingsView(backupSettingsView)
+        }
+        if let backupAppearance {
+            saveAppearance(backupAppearance)
+        }
     }
 
     func saveGPS(_ updated: FireVaultGPSPreferences) {

@@ -22,6 +22,7 @@ struct FireVaultIPadAccountsWorkspaceV2: View {
 
     @State private var searchText = ""
     @State private var sort: FireVaultIPadAccountSortV2 = .alphabetic
+    private let plusCodeSearchIsEnabled = FireVaultNativeSettingsStore().preferences.plusCodes.searchable
 
     private var favoriteCount: Int { payload.accounts.filter(\.favorite).count }
     private var mappedCount: Int { payload.accounts.filter { $0.coordinate != nil }.count }
@@ -30,8 +31,11 @@ struct FireVaultIPadAccountsWorkspaceV2: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let filtered = query.isEmpty
             ? payload.accounts
-            : payload.accounts.filter {
-                [$0.name, $0.address, $0.accountId, $0.category]
+            : payload.accounts.filter { account in
+                let locationCodes = plusCodeSearchIsEnabled
+                    ? store.accounts.first(where: { $0.id == account.id })?.locations.map(\.plusCode).joined(separator: " ") ?? ""
+                    : ""
+                return [account.name, account.address, account.accountId, account.category, locationCodes]
                     .joined(separator: " ")
                     .localizedCaseInsensitiveContains(query)
             }
@@ -443,7 +447,7 @@ struct FireVaultIPadAccountLocationsDetailsViewV2: View {
                         detailRow("Saved Locations", value: "\(account.locations.count)")
                         detailRow("Equipment", value: "\(account.equipment.count)")
                         detailRow("Notes", value: "\(account.notes.count)")
-                        detailRow("Photos & Documents", value: "\(account.documents.count)")
+                        detailRow("Files & Scans", value: "\(account.documents.count)")
                     }
                 }
 

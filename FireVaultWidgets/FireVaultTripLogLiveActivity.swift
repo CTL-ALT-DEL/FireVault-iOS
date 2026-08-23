@@ -84,6 +84,7 @@ struct FireVaultTripLogLiveActivity: Widget {
             .widgetURL(URL(string: "firevault://triplog"))
             .keylineTint(displayStatusColor(context.state))
         }
+        .supplementalActivityFamilies([.small])
     }
 
     private func liveStatus(
@@ -178,9 +179,50 @@ struct FireVaultTripLogLiveActivity: Widget {
 }
 
 private struct FireVaultTripLogLockScreenView: View {
+    @Environment(\.activityFamily) private var activityFamily
     let context: ActivityViewContext<FireVaultTripLogActivityAttributes>
 
+    @ViewBuilder
     var body: some View {
+        if activityFamily == .small {
+            carPlayView
+        } else {
+            lockScreenView
+        }
+    }
+
+    private var carPlayView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Image(systemName: statusSymbol)
+                    .foregroundStyle(statusColor)
+                Text(statusTitle)
+                    .font(.caption.bold())
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 0)
+            }
+
+            elapsed
+
+            if context.state.showsMetrics {
+                HStack(spacing: 10) {
+                    Label(
+                        String(format: "%.1f mi", context.state.distanceMiles),
+                        systemImage: "road.lanes"
+                    )
+                    Label(
+                        "\(context.state.stopCount) stops",
+                        systemImage: "mappin.and.ellipse"
+                    )
+                }
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(4)
+    }
+
+    private var lockScreenView: some View {
         VStack(spacing: 13) {
             HStack(spacing: 10) {
                 brand
@@ -261,12 +303,12 @@ private struct FireVaultTripLogLockScreenView: View {
             Text(context.state.timerReferenceDate, style: .timer)
                 .monospacedDigit()
                 .font(.system(size: 28, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(activityFamily == .small ? Color.primary : Color.white)
         } else {
             Text(context.state.formattedElapsedTime)
                 .monospacedDigit()
                 .font(.system(size: 28, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(activityFamily == .small ? Color.primary : Color.white)
         }
     }
 
@@ -316,7 +358,12 @@ private struct FireVaultTripLogActivityControls: View {
 
     var body: some View {
         HStack(spacing: compact ? 8 : 10) {
-            if status == .paused {
+            if status == .recording {
+                Button(intent: FireVaultPauseTripLogIntent()) {
+                    controlLabel("Pause", symbol: "pause.fill", color: .orange)
+                }
+                .buttonStyle(.plain)
+            } else if status == .paused {
                 Button(intent: FireVaultResumeTripLogIntent()) {
                     controlLabel("Resume", symbol: "play.fill", color: .green)
                 }

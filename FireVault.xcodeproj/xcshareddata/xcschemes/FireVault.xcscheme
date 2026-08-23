@@ -40,6 +40,17 @@
                ReferencedContainer = "container:FireVault.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "DC8B01E3300F1E3800372A8B"
+               BuildableName = "FireVaultUITests.xctest"
+               BlueprintName = "FireVaultUITests"
+               ReferencedContainer = "container:FireVault.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

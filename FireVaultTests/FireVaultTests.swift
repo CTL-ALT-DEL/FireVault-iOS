@@ -8,8 +8,7 @@
 import XCTest
 import CoreLocation
 import MapKit
-import PDFKit
-import UIKit
+import SwiftUI
 @testable import FireVault
 
 @MainActor
@@ -54,6 +53,178 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(settings.isFeatureVisible("nearby.map"))
         XCTAssertFalse(settings.isFeatureVisible("nearby.list"))
         XCTAssertTrue(settings.isFeatureVisible("tab.accounts"))
+    }
+
+    func testLegacySavedLocationDefaultsToWalkingDirections() throws {
+        let data = try XCTUnwrap(
+            """
+            {
+              "id":"legacy-pin",
+              "label":"Main Panel",
+              "subtitle":"Lobby",
+              "type":"Panel",
+              "plusCode":"85M5JR93+4C",
+              "latitude":43.615,
+              "longitude":-116.202,
+              "pinColor":"Blue"
+            }
+            """.data(using: .utf8)
+        )
+
+        let location = try JSONDecoder().decode(FireVaultWorkspaceLocation.self, from: data)
+
+        XCTAssertEqual(location.resolvedDirectionsMode, .walking)
+    }
+
+    func testLegacyTripLogDayDecodesWithoutBoundaryAddresses() throws {
+        struct LegacyDay: Codable {
+            var id = UUID()
+            var startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+            var endedAt: Date? = Date(timeIntervalSince1970: 1_700_003_600)
+            var isPaused = false
+            var points: [FireVaultBreadcrumbPoint] = []
+            var stops: [FireVaultBreadcrumbStop] = []
+        }
+
+        let data = try JSONEncoder().encode(LegacyDay())
+        let day = try JSONDecoder().decode(FireVaultBreadcrumbDay.self, from: data)
+
+        XCTAssertNil(day.startedAddress)
+        XCTAssertNil(day.endedAddress)
+        XCTAssertNil(day.startedLatitude)
+        XCTAssertNil(day.endedLatitude)
+    }
+
+    func testPlusCodeMatchesOfficialZurichReferenceAtNormalAndExtraPrecision() {
+        let coordinate = CLLocationCoordinate2D(latitude: 47.365590, longitude: 8.524997)
+        XCTAssertEqual(FireVaultPlusCode.encode(coordinate, length: 10), "8FVC9G8F+6X")
+        XCTAssertEqual(FireVaultPlusCode.encode(coordinate, length: 11), "8FVC9G8F+6XQ")
+    }
+
+    func testPlusCodeValidationNormalizesFullCodesAndRejectsAmbiguousShortCodes() {
+        XCTAssertEqual(FireVaultPlusCode.normalizedFullCode(" 8fvc9g8f+6xq "), "8FVC9G8F+6XQ")
+        XCTAssertNil(FireVaultPlusCode.normalizedFullCode("9G8F+6X"))
+        XCTAssertNil(FireVaultPlusCode.normalizedFullCode("8FVC9G8F+1X"))
+    }
+
+    func testPlusCodeStorageRegeneratesFromAuthoritativePinCoordinates() {
+        let code = FireVaultPlusCode.codeForStorage(
+            enteredCode: "8FVC9G8F+6X",
+            latitude: 43.615,
+            longitude: -116.202,
+            length: 11,
+            autoGenerate: true
+        )
+        XCTAssertEqual(code, FireVaultPlusCode.encode(.init(latitude: 43.615, longitude: -116.202), length: 11))
+        XCTAssertNotEqual(code, "8FVC9G8F+6X")
+    }
+
+    func testPlusCodeGoogleMapsURLUsesFreeMapsSearchURL() {
+        let url = FireVaultPlusCode.googleMapsURL(for: "8FVC9G8F+6X")
+        let components = url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+        XCTAssertEqual(components?.host, "www.google.com")
+        XCTAssertEqual(components?.queryItems?.first(where: { $0.name == "api" })?.value, "1")
+        XCTAssertEqual(components?.queryItems?.first(where: { $0.name == "query" })?.value, "8FVC9G8F+6X")
+        XCTAssertTrue(url?.absoluteString.contains("8FVC9G8F%2B6X") == true)
+        XCTAssertFalse(url?.absoluteString.contains("8FVC9G8F+6X") == true)
+    }
+
+    func testStoreRepairsLegacyStalePlusCodesWhenAccountsLoad() throws {
+        let suite = "FireVaultTests.PlusCodeMigration.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let coordinate = CLLocationCoordinate2D(latitude: 43.6177, longitude: -116.1968)
+        let account = FireVaultWorkspaceAccount(
+            id: "legacy-account",
+            name: "Legacy Site",
+            address: "Boise, ID",
+            category: "Commercial",
+            accountId: "LEGACY-1",
+            phone: "",
+            favorite: false,
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            tags: [],
+            notes: [],
+            documents: [],
+            equipment: [],
+            locations: [
+                .init(
+                    id: "legacy-location",
+                    label: "Main Panel",
+                    subtitle: "Lobby",
+                    type: "Panel",
+                    plusCode: "JRM3+4C",
+                    latitude: coordinate.latitude,
+                    longitude: coordinate.longitude,
+                    pinColor: "Red"
+                )
+            ],
+            recent: []
+        )
+        defaults.set(
+            try JSONEncoder().encode([account]),
+            forKey: "firevault.native.production-accounts.v1"
+        )
+
+        let store = FireVaultStore(defaults: defaults)
+        let repaired = try XCTUnwrap(store.accounts.first?.locations.first?.plusCode)
+        XCTAssertEqual(repaired, FireVaultPlusCode.encode(coordinate, length: 11))
+    }
+
+    func testWarmIvoryPaletteResolvesToCreamSurfacesInLightAppearance() {
+        let lightTraits = UITraitCollection(userInterfaceStyle: .light)
+        let darkTraits = UITraitCollection(userInterfaceStyle: .dark)
+        let lightCanvas = NativeShellPalette.backgroundUIColor.resolvedColor(with: lightTraits)
+        let lightSurface = NativeShellPalette.surfaceUIColor.resolvedColor(with: lightTraits)
+        let darkCanvas = NativeShellPalette.backgroundUIColor.resolvedColor(with: darkTraits)
+
+        let canvasComponents = rgba(lightCanvas)
+        let surfaceComponents = rgba(lightSurface)
+        let darkComponents = rgba(darkCanvas)
+
+        XCTAssertGreaterThan(canvasComponents.red, canvasComponents.blue)
+        XCTAssertGreaterThan(surfaceComponents.red, surfaceComponents.blue)
+        XCTAssertGreaterThan(surfaceComponents.red + surfaceComponents.green + surfaceComponents.blue,
+                             canvasComponents.red + canvasComponents.green + canvasComponents.blue)
+        XCTAssertLessThan(darkComponents.red + darkComponents.green + darkComponents.blue, 0.5)
+    }
+
+    func testWarmIvoryPrimaryTextAndInteractiveAccentMeetContrastTargets() {
+        let traits = UITraitCollection(userInterfaceStyle: .light)
+        let surface = NativeShellPalette.surfaceUIColor.resolvedColor(with: traits)
+        let primary = NativeShellPalette.primaryTextUIColor.resolvedColor(with: traits)
+        let accent = UIColor(NativeShellPalette.blue).resolvedColor(with: traits)
+
+        XCTAssertGreaterThanOrEqual(contrastRatio(primary, surface), 7.0)
+        XCTAssertGreaterThanOrEqual(contrastRatio(accent, surface), 4.5)
+    }
+
+    private func rgba(_ color: UIColor) -> (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        XCTAssertTrue(color.getRed(&red, green: &green, blue: &blue, alpha: &alpha))
+        return (red, green, blue, alpha)
+    }
+
+    private func contrastRatio(_ first: UIColor, _ second: UIColor) -> CGFloat {
+        let firstLuminance = relativeLuminance(first)
+        let secondLuminance = relativeLuminance(second)
+        return (max(firstLuminance, secondLuminance) + 0.05)
+            / (min(firstLuminance, secondLuminance) + 0.05)
+    }
+
+    private func relativeLuminance(_ color: UIColor) -> CGFloat {
+        let components = rgba(color)
+        func linear(_ value: CGFloat) -> CGFloat {
+            value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(components.red)
+            + 0.7152 * linear(components.green)
+            + 0.0722 * linear(components.blue)
     }
 
     func testTripLogLiveActivityTimerReferencePreservesElapsedDuration() {
@@ -209,6 +380,77 @@ final class FireVaultTests: XCTestCase {
         )
     }
 
+    func testLegacyWidgetSnapshotDecodesWithoutPortfolioFields() throws {
+        struct LegacySnapshot: Codable {
+            let updatedAt: Date
+            let tripState: FireVaultWidgetSnapshot.TripState
+            let tripStartedAt: Date?
+            let elapsedSeconds: TimeInterval
+            let distanceMiles: Double
+            let stopCount: Int
+            let accountName: String?
+            let accountID: String?
+            let accountCategory: String?
+        }
+
+        let legacy = LegacySnapshot(
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            tripState: .ready,
+            tripStartedAt: nil,
+            elapsedSeconds: 0,
+            distanceMiles: 0,
+            stopCount: 0,
+            accountName: "Legacy Site",
+            accountID: "LEGACY-1",
+            accountCategory: "Commercial"
+        )
+        let decoded = try JSONDecoder().decode(
+            FireVaultWidgetSnapshot.self,
+            from: JSONEncoder().encode(legacy)
+        )
+
+        XCTAssertEqual(decoded.accountName, "Legacy Site")
+        XCTAssertNil(decoded.cloudState)
+        XCTAssertNil(decoded.gpsQuality)
+        XCTAssertNil(decoded.accountDropPinCount)
+    }
+
+    func testWidgetPortfolioSnapshotExcludesPrivateFieldRecordsAndCoordinates() throws {
+        let data = try JSONEncoder().encode(FireVaultWidgetSnapshot.placeholder)
+        let encoded = try XCTUnwrap(String(data: data, encoding: .utf8))
+
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("notes"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("phone"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("documents"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("latitude"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("longitude"))
+    }
+
+    func testWidgetPortfolioPublishesFourDistinctKinds() {
+        XCTAssertEqual(FireVaultWidgetKind.allCases.count, 4)
+        XCTAssertEqual(Set(FireVaultWidgetKind.allCases.map(\.rawValue)).count, 4)
+        XCTAssertTrue(FireVaultWidgetKind.allCases.contains(.dashboard))
+        XCTAssertTrue(FireVaultWidgetKind.allCases.contains(.tripLog))
+        XCTAssertTrue(FireVaultWidgetKind.allCases.contains(.account))
+        XCTAssertTrue(FireVaultWidgetKind.allCases.contains(.cloud))
+    }
+
+    func testWidgetAccountDeepLinkPreservesRecordIdentifier() throws {
+        let url = try XCTUnwrap(URL(string: "firevault://account?id=account-ABC-123"))
+        let center = FireVaultWidgetDeepLinkCenter.shared
+
+        XCTAssertTrue(center.receive(url))
+        XCTAssertEqual(center.consume(), .account("account-ABC-123"))
+    }
+
+    func testWidgetCloudDeepLinkOpensSyncSettings() throws {
+        let url = try XCTUnwrap(URL(string: "firevault://sync"))
+        let center = FireVaultWidgetDeepLinkCenter.shared
+
+        XCTAssertTrue(center.receive(url))
+        XCTAssertEqual(center.consume(), .sync)
+    }
+
     func testTripLogIntegrityRemovesDuplicateRecordsAndRepairsTimes() {
         let dayID = UUID()
         let pointID = UUID()
@@ -337,6 +579,222 @@ final class FireVaultTests: XCTestCase {
         )
     }
 
+    func testProductionVaultShowsCloudSyncPendingBeforeFirstSync() throws {
+        let suite = "FireVaultTests.CloudSyncPending.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+
+        let store = FireVaultStore(defaults: defaults)
+
+        XCTAssertNil(store.cloudLastSyncedAt)
+        XCTAssertNil(store.cloudSyncErrorMessage)
+        XCTAssertEqual(store.cloudSyncStatusText, "Not synced yet")
+    }
+
+    func testProductionVaultRestoresLastSuccessfulCloudSyncTime() throws {
+        let suite = "FireVaultTests.CloudSyncRestore.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let lastSync = Date(timeIntervalSince1970: 1_700_000_000)
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defaults.set(lastSync, forKey: "firevault.native.cloud-last-synced-at.v1")
+
+        let store = FireVaultStore(defaults: defaults)
+
+        XCTAssertEqual(store.cloudLastSyncedAt, lastSync)
+        XCTAssertEqual(store.cloudSyncStatusText, "Up to date")
+    }
+
+    func testProductionVaultRestoresLastCloudCheckTime() throws {
+        let suite = "FireVaultTests.CloudCheckRestore.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let lastCheck = Date(timeIntervalSince1970: 1_700_000_123)
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defaults.set(lastCheck, forKey: "firevault.native.cloud-last-checked-at.v1")
+
+        let store = FireVaultStore(defaults: defaults)
+
+        XCTAssertEqual(store.cloudLastCheckedAt, lastCheck)
+    }
+
+    func testDeletingDemoCustomerAccountRemovesOnlySelectedLocalRecord() async throws {
+        let suite = "FireVaultTests.DeleteDemoCustomer.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var remoteDeleteWasCalled = false
+        let store = FireVaultStore(defaults: defaults) { _, _ in
+            remoteDeleteWasCalled = true
+            return .noCloudRecord
+        }
+        let account = store.addAccount()
+        let originalCount = store.accounts.count
+
+        try await store.deleteCustomerAccount(id: account.id)
+
+        XCTAssertFalse(remoteDeleteWasCalled)
+        XCTAssertEqual(store.accounts.count, originalCount - 1)
+        XCTAssertFalse(store.accounts.contains(where: { $0.id == account.id }))
+        XCTAssertNil(store.selectedAccountID)
+    }
+
+    func testDeletingLocalOnlyProductionCustomerRemovesItAfterCloudReportsNoMatch() async throws {
+        let suite = "FireVaultTests.DeleteLocalCustomer.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        var deletedLocalID: String?
+        let store = FireVaultStore(defaults: defaults) { account, _ in
+            deletedLocalID = account.id
+            return .noCloudRecord
+        }
+        let account = store.addAccount()
+
+        try await store.deleteCustomerAccount(id: account.id)
+
+        XCTAssertEqual(deletedLocalID, account.id)
+        XCTAssertTrue(store.accounts.isEmpty)
+        let reloaded = FireVaultStore(defaults: defaults) { _, _ in .noCloudRecord }
+        XCTAssertTrue(reloaded.accounts.isEmpty)
+    }
+
+    func testDeletingCloudLinkedCustomerPassesCloudIDAndExpectedOwner() async throws {
+        let suite = "FireVaultTests.DeleteCloudCustomer.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let ownerID = UUID()
+        let cloudID = UUID()
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defaults.set(ownerID.uuidString, forKey: "firevault.native.cloud-vault-owner-user-id.v1")
+        var receivedCloudID: String?
+        var receivedOwnerID: UUID?
+        let store = FireVaultStore(defaults: defaults) { account, expectedOwnerID in
+            receivedCloudID = account.cloudID
+            receivedOwnerID = expectedOwnerID
+            return .deleted(cloudID)
+        }
+        let account = store.addAccount()
+        let index = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        store.accounts[index].cloudID = cloudID.uuidString
+
+        try await store.deleteCustomerAccount(id: account.id)
+
+        XCTAssertEqual(receivedCloudID, cloudID.uuidString)
+        XCTAssertEqual(receivedOwnerID, ownerID)
+        XCTAssertTrue(store.accounts.isEmpty)
+        XCTAssertNotNil(store.cloudLastSyncedAt)
+        XCTAssertNotNil(store.cloudLastCheckedAt)
+    }
+
+    func testCloudDeletionFailurePreservesCustomerAccountAndSelection() async throws {
+        let suite = "FireVaultTests.DeleteCloudFailure.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults) { _, _ in
+            throw FireVaultRemoteAccountDeletionError.deletionNotConfirmed
+        }
+        let account = store.addAccount()
+
+        do {
+            try await store.deleteCustomerAccount(id: account.id)
+            XCTFail("Expected the cloud deletion to fail")
+        } catch {
+            XCTAssertEqual(error as? FireVaultRemoteAccountDeletionError, .deletionNotConfirmed)
+        }
+
+        XCTAssertTrue(store.accounts.contains(where: { $0.id == account.id }))
+        XCTAssertEqual(store.selectedAccountID, account.id)
+        XCTAssertNotNil(store.cloudSyncErrorMessage)
+    }
+
+    func testCloudVaultOwnershipRejectsDifferentLogin() throws {
+        let suite = "FireVaultTests.CloudOwnerMismatch.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let ownerID = UUID()
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defaults.set(ownerID.uuidString, forKey: "firevault.native.cloud-vault-owner-user-id.v1")
+        let store = FireVaultStore(defaults: defaults)
+        _ = store.addAccount()
+
+        XCTAssertThrowsError(
+            try store.validateCloudVaultOwnership(userID: UUID(), cloudRows: [])
+        ) { error in
+            XCTAssertEqual(error as? FireVaultCloudVaultAccessError, .linkedToDifferentLogin)
+        }
+        XCTAssertEqual(store.accounts.count, 1)
+        XCTAssertEqual(
+            defaults.string(forKey: "firevault.native.cloud-vault-owner-user-id.v1"),
+            ownerID.uuidString
+        )
+    }
+
+    func testCloudVaultOwnershipIsInferredFromVisibleLinkedRow() throws {
+        let suite = "FireVaultTests.CloudOwnerInference.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let account = store.addAccount()
+        let index = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        let cloudID = UUID()
+        let userID = UUID()
+        store.accounts[index].cloudID = cloudID.uuidString
+        let visibleRow = FireVaultCloudAccountRow(
+            id: cloudID,
+            accountName: account.name,
+            accountNumber: nil,
+            addressLine1: nil,
+            addressLine2: nil,
+            city: nil,
+            state: nil,
+            postalCode: nil,
+            country: "US",
+            latitude: nil,
+            longitude: nil,
+            phone: nil,
+            archived: false
+        )
+
+        XCTAssertNoThrow(
+            try store.validateCloudVaultOwnership(userID: userID, cloudRows: [visibleRow])
+        )
+        XCTAssertEqual(
+            defaults.string(forKey: "firevault.native.cloud-vault-owner-user-id.v1"),
+            userID.uuidString.lowercased()
+        )
+    }
+
+    func testDeletingDifferentCloudLoginPreservesLocalVault() throws {
+        let suite = "FireVaultTests.CloudDeleteMismatch.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defaults.set(UUID().uuidString, forKey: "firevault.native.cloud-vault-owner-user-id.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let account = store.addAccount()
+
+        XCTAssertFalse(store.eraseLocalAccountDataAfterCloudDeletion(for: UUID()))
+        XCTAssertEqual(store.accounts.map(\.id), [account.id])
+    }
+
+    func testDeletingOwningCloudLoginClearsLocalVaultBinding() throws {
+        let suite = "FireVaultTests.CloudDeleteOwner.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let ownerID = UUID()
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defaults.set(ownerID.uuidString, forKey: "firevault.native.cloud-vault-owner-user-id.v1")
+        let store = FireVaultStore(defaults: defaults)
+        _ = store.addAccount()
+
+        XCTAssertTrue(store.eraseLocalAccountDataAfterCloudDeletion(for: ownerID))
+        XCTAssertTrue(store.accounts.isEmpty)
+        XCTAssertNil(defaults.string(forKey: "firevault.native.cloud-vault-owner-user-id.v1"))
+    }
+
     func testAddingProductionAccountSelectsItWithoutFakeLocationData() throws {
         let suite = "FireVaultTests.AddProductionAccount.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -368,18 +826,20 @@ final class FireVaultTests: XCTestCase {
         store.accounts[index].longitude = -116.202
         store.accounts[index].tags = ["Priority"]
         store.accounts[index].notes = [.init(id: "note-1", title: "Panel", text: "Lobby", date: "Today")]
-        store.accounts[index].documents = [
+        store.accounts[index].documents = [.init(id: "doc-1", title: "Report", subtitle: "Annual", kind: "PDF", date: "Today")]
+        store.accounts[index].equipment = [.init(id: "equipment-1", title: "FACP", subtitle: "Lobby", status: "Normal")]
+        let locationCoordinate = CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)
+        store.accounts[index].locations = [
             .init(
-                id: "doc-1",
-                title: "Report",
-                subtitle: "Annual",
-                kind: "scan",
-                date: "Today",
-                mediaFileName: "annual-report.pdf"
+                id: "location-1",
+                label: "Panel",
+                subtitle: "Lobby",
+                type: "Equipment",
+                plusCode: FireVaultPlusCode.encode(locationCoordinate, length: 11),
+                latitude: locationCoordinate.latitude,
+                longitude: locationCoordinate.longitude
             )
         ]
-        store.accounts[index].equipment = [.init(id: "equipment-1", title: "FACP", subtitle: "Lobby", status: "Normal")]
-        store.accounts[index].locations = [.init(id: "location-1", label: "Panel", subtitle: "Lobby", type: "Equipment", plusCode: "", latitude: 43.615, longitude: -116.202)]
         store.accounts[index].recent = [.init(id: "recent-1", title: "Created", subtitle: "Test", kind: "account", date: "Today")]
 
         XCTAssertTrue(
@@ -405,7 +865,6 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(updated.tags, ["Priority"])
         XCTAssertEqual(updated.notes.map(\.id), ["note-1"])
         XCTAssertEqual(updated.documents.map(\.id), ["doc-1"])
-        XCTAssertEqual(updated.documents.first?.mediaFileName, "annual-report.pdf")
         XCTAssertEqual(updated.equipment.map(\.id), ["equipment-1"])
         XCTAssertEqual(updated.locations.map(\.id), ["location-1"])
         XCTAssertEqual(updated.recent.map(\.id), ["recent-1"])
@@ -450,322 +909,6 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(persisted.latitude, 42.8734)
         XCTAssertEqual(persisted.longitude, -106.4431)
         XCTAssertEqual(persisted.notes.map(\.id), ["note-1"])
-    }
-
-    func testCapturedAccountPhotoCanBeReopenedAfterStoreReload() throws {
-        let suite = "FireVaultTests.AccountPhoto.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let mediaRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FireVaultAccountPhoto-\(UUID().uuidString)", isDirectory: true)
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-            try? FileManager.default.removeItem(at: mediaRoot)
-        }
-        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
-        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
-        let account = store.addAccount()
-        let image = UIGraphicsImageRenderer(size: CGSize(width: 24, height: 18)).image { context in
-            UIColor.systemRed.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: 24, height: 18))
-        }
-
-        let document = try store.attachCapturedPhoto(image, to: account.id)
-        let mediaURL = try XCTUnwrap(store.mediaURL(accountID: account.id, documentID: document.id))
-
-        XCTAssertEqual(document.kind, "photo")
-        XCTAssertEqual(mediaURL.pathExtension.lowercased(), "jpg")
-        XCTAssertNotNil(UIImage(contentsOfFile: mediaURL.path))
-
-        let reloaded = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
-        let reopenedURL = try XCTUnwrap(reloaded.mediaURL(accountID: account.id, documentID: document.id))
-        XCTAssertEqual(reopenedURL, mediaURL)
-        XCTAssertNotNil(UIImage(contentsOfFile: reopenedURL.path))
-    }
-
-    func testScannedAccountDocumentProducesAReopenablePDF() throws {
-        let suite = "FireVaultTests.AccountScan.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let mediaRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FireVaultAccountScan-\(UUID().uuidString)", isDirectory: true)
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-            try? FileManager.default.removeItem(at: mediaRoot)
-        }
-        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
-        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
-        let account = store.addAccount()
-        let page = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 50)).image { context in
-            UIColor.white.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: 40, height: 50))
-        }
-
-        let document = try store.attachScannedDocument([page, page], to: account.id)
-        let mediaURL = try XCTUnwrap(store.mediaURL(accountID: account.id, documentID: document.id))
-        let data = try Data(contentsOf: mediaURL)
-
-        XCTAssertEqual(document.kind, "scan")
-        XCTAssertEqual(document.subtitle, "2 pages")
-        XCTAssertTrue(data.starts(with: Data("%PDF".utf8)))
-
-        let reloaded = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
-        XCTAssertEqual(reloaded.mediaURL(accountID: account.id, documentID: document.id), mediaURL)
-    }
-
-    func testDeletingAccountMediaRemovesItsFileAndPersistsMetadataRemoval() throws {
-        let suite = "FireVaultTests.DeleteAccountMedia.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let mediaRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FireVaultDeleteMedia-\(UUID().uuidString)", isDirectory: true)
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-            try? FileManager.default.removeItem(at: mediaRoot)
-        }
-        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
-        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
-        let account = store.addAccount()
-        let accountIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
-        store.accounts[accountIndex].notes = [
-            .init(id: "keep-note", title: "Access", text: "Call first", date: "Today")
-        ]
-        store.accounts[accountIndex].equipment = [
-            .init(id: "keep-equipment", title: "FACP", subtitle: "Lobby", status: "Normal")
-        ]
-        store.accounts[accountIndex].locations = [
-            .init(
-                id: "keep-location",
-                label: "Panel",
-                subtitle: "Lobby",
-                type: "Panel",
-                plusCode: "",
-                latitude: 43.615,
-                longitude: -116.202,
-                pinColor: "Red"
-            )
-        ]
-        let image = UIGraphicsImageRenderer(size: CGSize(width: 12, height: 12)).image { context in
-            UIColor.systemBlue.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: 12, height: 12))
-        }
-        let keep = try store.attachCapturedPhoto(image, to: account.id)
-        let remove = try store.attachCapturedPhoto(image, to: account.id)
-        let removedURL = try XCTUnwrap(store.mediaURL(accountID: account.id, documentID: remove.id))
-
-        XCTAssertTrue(try store.deleteDocument(accountID: account.id, documentID: remove.id))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: removedURL.path))
-        XCTAssertNotNil(store.mediaURL(accountID: account.id, documentID: keep.id))
-        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.documents.map(\.id), [keep.id])
-        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.recent.compactMap(\.sourceID), [keep.id])
-        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.notes.map(\.id), ["keep-note"])
-        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.equipment.map(\.id), ["keep-equipment"])
-        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.locations.map(\.id), ["keep-location"])
-
-        let reloaded = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
-        XCTAssertEqual(reloaded.accounts.first(where: { $0.id == account.id })?.documents.map(\.id), [keep.id])
-        XCTAssertEqual(reloaded.accounts.first(where: { $0.id == account.id })?.recent.compactMap(\.sourceID), [keep.id])
-    }
-
-    func testLegacyRecentActivityDecodesWithoutMediaSourceID() throws {
-        let json = """
-        {
-          "id": "recent-1",
-          "title": "Field photo",
-          "subtitle": "Saved before media links",
-          "kind": "photo",
-          "date": "Yesterday"
-        }
-        """
-
-        let recent = try JSONDecoder().decode(FireVaultWorkspaceRecent.self, from: Data(json.utf8))
-
-        XCTAssertNil(recent.sourceID)
-        XCTAssertEqual(recent.title, "Field photo")
-    }
-
-    func testLegacyMissingAccountMediaCanBeRemovedSafely() throws {
-        let suite = "FireVaultTests.LegacyAccountMedia.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let mediaRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FireVaultLegacyMedia-\(UUID().uuidString)", isDirectory: true)
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-            try? FileManager.default.removeItem(at: mediaRoot)
-        }
-        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
-        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
-        let account = store.addAccount()
-        store.addDocument(to: account.id, scan: false)
-        let legacy = try XCTUnwrap(store.accounts.first(where: { $0.id == account.id })?.documents.first)
-
-        XCTAssertNil(store.mediaURL(accountID: account.id, documentID: legacy.id))
-        XCTAssertTrue(try store.deleteDocument(accountID: account.id, documentID: legacy.id))
-        XCTAssertTrue(store.accounts.first(where: { $0.id == account.id })?.documents.isEmpty == true)
-    }
-
-    func testAccountMediaPathTraversalNeverResolvesOrDeletesOutsideMediaRoot() throws {
-        let suite = "FireVaultTests.AccountMediaTraversal.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let container = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FireVaultTraversal-\(UUID().uuidString)", isDirectory: true)
-        let mediaRoot = container.appendingPathComponent("Media", isDirectory: true)
-        let outsideFile = container.appendingPathComponent("outside.jpg")
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-            try? FileManager.default.removeItem(at: container)
-        }
-        try FileManager.default.createDirectory(at: mediaRoot, withIntermediateDirectories: true)
-        try Data("keep".utf8).write(to: outsideFile)
-        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
-        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
-        let account = store.addAccount()
-        let accountIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
-        let unsafe = FireVaultWorkspaceDocument(
-            id: "unsafe-document",
-            title: "Unsafe",
-            subtitle: "Legacy reference",
-            kind: "photo",
-            date: "Today",
-            mediaFileName: "../../outside.jpg"
-        )
-        store.accounts[accountIndex].documents = [unsafe]
-
-        XCTAssertNil(store.mediaURL(accountID: account.id, documentID: unsafe.id))
-        XCTAssertTrue(try store.deleteDocument(accountID: account.id, documentID: unsafe.id))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: outsideFile.path))
-    }
-
-    func testDeletingDuplicateMediaReferenceKeepsFileUntilLastReferenceIsDeleted() throws {
-        let suite = "FireVaultTests.DuplicateMediaReference.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let mediaRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FireVaultDuplicateMedia-\(UUID().uuidString)", isDirectory: true)
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-            try? FileManager.default.removeItem(at: mediaRoot)
-        }
-        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
-        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
-        let account = store.addAccount()
-        let image = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10)).image { context in
-            UIColor.systemGreen.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: 10, height: 10))
-        }
-        let original = try store.attachCapturedPhoto(image, to: account.id)
-        let originalURL = try XCTUnwrap(store.mediaURL(accountID: account.id, documentID: original.id))
-        let duplicate = FireVaultWorkspaceDocument(
-            id: "duplicate-reference",
-            title: "Duplicate reference",
-            subtitle: original.subtitle,
-            kind: original.kind,
-            date: original.date,
-            mediaFileName: original.mediaFileName
-        )
-        let accountIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
-        store.accounts[accountIndex].documents.append(duplicate)
-
-        XCTAssertTrue(try store.deleteDocument(accountID: account.id, documentID: duplicate.id))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: originalURL.path))
-        XCTAssertEqual(store.mediaURL(accountID: account.id, documentID: original.id), originalURL)
-
-        XCTAssertTrue(try store.deleteDocument(accountID: account.id, documentID: original.id))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: originalURL.path))
-    }
-
-    func testAccountMediaRejectsDirectoriesAndSymbolicLinks() throws {
-        let suite = "FireVaultTests.MediaNodeSafety.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let container = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FireVaultMediaNodes-\(UUID().uuidString)", isDirectory: true)
-        let mediaRoot = container.appendingPathComponent("Media", isDirectory: true)
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-            try? FileManager.default.removeItem(at: container)
-        }
-        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
-        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
-        let account = store.addAccount()
-        let accountDirectory = mediaRoot.appendingPathComponent(account.id, isDirectory: true)
-        let disguisedDirectory = accountDirectory.appendingPathComponent("archive.jpg", isDirectory: true)
-        let outsideFile = container.appendingPathComponent("outside.jpg")
-        let link = accountDirectory.appendingPathComponent("linked.jpg")
-        try FileManager.default.createDirectory(at: disguisedDirectory, withIntermediateDirectories: true)
-        try Data("private".utf8).write(to: outsideFile)
-        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outsideFile)
-
-        let directoryDocument = FireVaultWorkspaceDocument(
-            id: "directory-document",
-            title: "Directory",
-            subtitle: "Invalid media node",
-            kind: "photo",
-            date: "Today",
-            mediaFileName: "archive.jpg"
-        )
-        let linkDocument = FireVaultWorkspaceDocument(
-            id: "link-document",
-            title: "Link",
-            subtitle: "Invalid media node",
-            kind: "photo",
-            date: "Today",
-            mediaFileName: "linked.jpg"
-        )
-        let accountIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
-        store.accounts[accountIndex].documents = [directoryDocument, linkDocument]
-
-        XCTAssertNil(store.mediaURL(accountID: account.id, documentID: directoryDocument.id))
-        XCTAssertNil(store.mediaURL(accountID: account.id, documentID: linkDocument.id))
-        XCTAssertTrue(try store.deleteDocument(accountID: account.id, documentID: directoryDocument.id))
-        XCTAssertTrue(try store.deleteDocument(accountID: account.id, documentID: linkDocument.id))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: disguisedDirectory.path))
-        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: link.path), outsideFile.path)
-        XCTAssertEqual(try Data(contentsOf: outsideFile), Data("private".utf8))
-    }
-
-    func testUnsafeAccountIDsCannotShareASanitizedMediaDirectory() throws {
-        let suite = "FireVaultTests.MediaAccountIsolation.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let container = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FireVaultMediaAccountIsolation-\(UUID().uuidString)", isDirectory: true)
-        let mediaRoot = container.appendingPathComponent("Media", isDirectory: true)
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-            try? FileManager.default.removeItem(at: container)
-        }
-        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
-        let store = FireVaultStore(defaults: defaults, mediaRootURL: mediaRoot)
-        let first = store.addAccount()
-        let second = store.addAccount()
-        let firstIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == first.id }))
-        let secondIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == second.id }))
-        store.accounts[firstIndex].id = "site/a"
-        store.accounts[secondIndex].id = "site?a"
-
-        let legacyDirectory = mediaRoot.appendingPathComponent("site_a", isDirectory: true)
-        let sharedFile = legacyDirectory.appendingPathComponent("shared.jpg")
-        try FileManager.default.createDirectory(at: legacyDirectory, withIntermediateDirectories: true)
-        try Data("private".utf8).write(to: sharedFile)
-
-        let firstDocument = FireVaultWorkspaceDocument(
-            id: "first-document",
-            title: "First",
-            subtitle: "Unsafe restored reference",
-            kind: "photo",
-            date: "Today",
-            mediaFileName: "shared.jpg"
-        )
-        let secondDocument = FireVaultWorkspaceDocument(
-            id: "second-document",
-            title: "Second",
-            subtitle: "Unsafe restored reference",
-            kind: "photo",
-            date: "Today",
-            mediaFileName: "shared.jpg"
-        )
-        store.accounts[firstIndex].documents = [firstDocument]
-        store.accounts[secondIndex].documents = [secondDocument]
-
-        XCTAssertNil(store.mediaURL(accountID: "site/a", documentID: firstDocument.id))
-        XCTAssertNil(store.mediaURL(accountID: "site?a", documentID: secondDocument.id))
-        XCTAssertTrue(try store.deleteDocument(accountID: "site?a", documentID: secondDocument.id))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: sharedFile.path))
     }
 
     func testAccountNoteLifecyclePersistsWithoutChangingOtherAccountData() throws {
@@ -930,7 +1073,10 @@ final class FireVaultTests: XCTestCase {
             )
         )
         XCTAssertEqual(location.label, "Main Entrance")
-        XCTAssertEqual(location.plusCode, "85M5JR93+4C")
+        XCTAssertEqual(
+            location.plusCode,
+            FireVaultPlusCode.encode(.init(latitude: 43.6177, longitude: -116.1968), length: 11)
+        )
 
         XCTAssertTrue(
             store.updateLocation(
@@ -950,7 +1096,10 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(updatedLocation.label, "Fire Panel")
         XCTAssertEqual(updatedLocation.subtitle, "Electrical room")
         XCTAssertEqual(updatedLocation.type, "Panel")
-        XCTAssertEqual(updatedLocation.plusCode, "85M5JR94+5D")
+        XCTAssertEqual(
+            updatedLocation.plusCode,
+            FireVaultPlusCode.encode(.init(latitude: 43.618, longitude: -116.197), length: 11)
+        )
         XCTAssertEqual(updatedLocation.latitude, 43.618)
         XCTAssertEqual(updatedLocation.longitude, -116.197)
         XCTAssertTrue(updatedAccount.favorite)
@@ -1357,7 +1506,7 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(FireVaultBreadcrumbRules.isStationary(moved, comparedTo: first))
     }
 
-    func testFreshCoreLocationSpeedIsNotBlockedByMovementEvidence() throws {
+    func testCarPlaySpeedFallsToZeroWhenMovementEvidenceIsStale() throws {
         let now = Date(timeIntervalSince1970: 1_700_000_100)
         let location = testLocation(
             latitude: 43.615,
@@ -1368,1022 +1517,237 @@ final class FireVaultTests: XCTestCase {
         let speed = try XCTUnwrap(
             FireVaultBreadcrumbRules.resolvedLiveSpeed(
                 location: location,
+                lastMeaningfulMovementAt: now.addingTimeInterval(-9),
                 now: now
-            )
-        )
-
-        XCTAssertEqual(speed, 15)
-    }
-
-    func testTripLogDoesNotTreatSingleFastLocationAsMovementEvidence() {
-        let now = Date(timeIntervalSince1970: 1_700_000_100)
-        let location = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: now,
-            speed: 13.9
-        )
-
-        XCTAssertNil(
-            FireVaultBreadcrumbRules.updatedMeaningfulMovementDate(
-                for: location,
-                reference: nil,
-                previousMeaningfulMovementAt: nil,
-                now: now
-            )
-        )
-    }
-
-    func testTripLogUsesDisplacementForMeaningfulMovementEvidence() throws {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        let reference = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: start,
-            speed: 0
-        )
-        let moved = testLocation(
-            latitude: 43.6158,
-            longitude: -116.202,
-            timestamp: start.addingTimeInterval(20),
-            speed: 13.9
-        )
-
-        let movementAt = try XCTUnwrap(
-            FireVaultBreadcrumbRules.updatedMeaningfulMovementDate(
-                for: moved,
-                reference: reference,
-                previousMeaningfulMovementAt: nil,
-                now: moved.timestamp
-            )
-        )
-
-        XCTAssertEqual(movementAt, moved.timestamp)
-    }
-
-    func testTripLogShowsFirstFreshMovingSpeedImmediately() throws {
-        let now = Date(timeIntervalSince1970: 1_700_000_100)
-        let location = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: now,
-            speed: 13.9
-        )
-
-        let speed = try XCTUnwrap(
-            FireVaultBreadcrumbRules.resolvedLiveSpeed(
-                location: location,
-                now: now
-            )
-        )
-
-        XCTAssertEqual(speed, 13.9, accuracy: 0.001)
-    }
-
-    func testTripLogSpeedRecoversImmediatelyAfterAStop() throws {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        let sequence: [(offset: TimeInterval, speed: CLLocationSpeed)] = [
-            (0, 0),       // Trip starts while parked.
-            (2, 8.5),     // First moving fix must display immediately.
-            (15, 0),      // Stop sign.
-            (18, 0),
-            (20, 6.25)    // First fresh departure fix must display again.
-        ]
-
-        let resolved = try sequence.map { sample in
-            let timestamp = start.addingTimeInterval(sample.offset)
-            let location = testLocation(
-                latitude: 43.615 + sample.offset / 100_000,
-                longitude: -116.202,
-                timestamp: timestamp,
-                accuracy: 180,
-                speed: sample.speed
-            )
-            return try XCTUnwrap(
-                FireVaultBreadcrumbRules.resolvedLiveSpeed(
-                    location: location,
-                    now: timestamp
-                )
-            )
-        }
-
-        XCTAssertEqual(resolved, sequence.map(\.speed))
-    }
-
-    func testInvalidCoreLocationSpeedRemainsUnavailable() {
-        let now = Date(timeIntervalSince1970: 1_700_000_100)
-        let location = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: now,
-            speed: -1
-        )
-
-        XCTAssertNil(
-            FireVaultBreadcrumbRules.resolvedLiveSpeed(
-                location: location,
-                now: now
-            )
-        )
-    }
-
-    func testLiveSpeedReducerShowsFirstPositiveFixImmediately() throws {
-        let now = Date(timeIntervalSince1970: 1_700_000_100)
-        var reducer = FireVaultLiveSpeedReducer()
-        let snapshot = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: now,
-                accuracy: 180,
-                speed: 12.5
-            ),
-            receivedAt: now
-        )
-
-        XCTAssertEqual(try XCTUnwrap(snapshot.metersPerSecond), 12.5, accuracy: 0.001)
-        XCTAssertEqual(snapshot.source, .coreLocation)
-    }
-
-    func testLiveSpeedReducerDerivesMovementWhenRawSpeedIsUnavailable() throws {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var reducer = FireVaultLiveSpeedReducer()
-        _ = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start,
-                accuracy: 5,
-                speed: -1
-            ),
-            receivedAt: start
-        )
-        let snapshot = reducer.ingest(
-            testLocation(
-                latitude: 43.6153,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(2),
-                accuracy: 5,
-                speed: -1
-            ),
-            receivedAt: start.addingTimeInterval(2)
-        )
-
-        XCTAssertGreaterThan(try XCTUnwrap(snapshot.metersPerSecond), 1.5)
-        XCTAssertEqual(snapshot.source, .derived)
-    }
-
-    func testLiveSpeedReducerOverridesFrozenPositiveSpeedWithStationaryEvidence() {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var reducer = FireVaultLiveSpeedReducer()
-        _ = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start,
-                accuracy: 5,
-                speed: 13.9
-            ),
-            receivedAt: start
-        )
-        _ = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(2),
-                accuracy: 5,
-                speed: 13.9
-            ),
-            receivedAt: start.addingTimeInterval(2)
-        )
-        let stationary = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(4),
-                accuracy: 5,
-                speed: 13.9
-            ),
-            receivedAt: start.addingTimeInterval(4)
-        )
-
-        XCTAssertEqual(stationary.metersPerSecond, 0)
-        XCTAssertEqual(stationary.source, .stationary)
-
-    }
-
-    func testLiveSpeedReducerResumesOnFirstPositiveFixAfterStop() throws {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var reducer = FireVaultLiveSpeedReducer()
-        _ = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start,
-                speed: 0
-            ),
-            receivedAt: start
-        )
-        let departing = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(2),
-                speed: 8.5
-            ),
-            receivedAt: start.addingTimeInterval(2)
-        )
-
-        XCTAssertEqual(try XCTUnwrap(departing.metersPerSecond), 8.5, accuracy: 0.001)
-        XCTAssertEqual(departing.source, .coreLocation)
-    }
-
-    func testLiveSpeedReducerUsesCoordinateMovementWhenRawSpeedRemainsZero() throws {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var reducer = FireVaultLiveSpeedReducer()
-        _ = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start,
-                accuracy: 5,
-                speed: 0
-            ),
-            receivedAt: start
-        )
-        let departing = reducer.ingest(
-            testLocation(
-                latitude: 43.6152,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(2),
-                accuracy: 5,
-                speed: 0
-            ),
-            receivedAt: start.addingTimeInterval(2)
-        )
-
-        XCTAssertGreaterThan(try XCTUnwrap(departing.metersPerSecond), 1.5)
-        XCTAssertEqual(departing.source, .derived)
-    }
-
-    func testLiveSpeedReducerAccumulatesDepartureAcrossSubsecondFixes() throws {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var reducer = FireVaultLiveSpeedReducer()
-        _ = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start,
-                accuracy: 5,
-                speed: 0
-            ),
-            receivedAt: start
-        )
-        _ = reducer.ingest(
-            testLocation(
-                latitude: 43.61505,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(0.4),
-                accuracy: 5,
-                speed: 0
-            ),
-            receivedAt: start.addingTimeInterval(0.4)
-        )
-        _ = reducer.ingest(
-            testLocation(
-                latitude: 43.6151,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(0.8),
-                accuracy: 5,
-                speed: 0
-            ),
-            receivedAt: start.addingTimeInterval(0.8)
-        )
-        let departing = reducer.ingest(
-            testLocation(
-                latitude: 43.61515,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(1.2),
-                accuracy: 5,
-                speed: 0
-            ),
-            receivedAt: start.addingTimeInterval(1.2)
-        )
-
-        XCTAssertGreaterThan(try XCTUnwrap(departing.metersPerSecond), 1.5)
-        XCTAssertEqual(departing.source, .derived)
-    }
-
-    func testLiveSpeedReducerStopsFrozenPositiveSpeedWithSubsecondFixes() {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var reducer = FireVaultLiveSpeedReducer()
-        for offset in [0.0, 0.4, 0.8, 1.2, 1.6] {
-            _ = reducer.ingest(
-                testLocation(
-                    latitude: 43.615,
-                    longitude: -116.202,
-                    timestamp: start.addingTimeInterval(offset),
-                    accuracy: 5,
-                    speed: 13.9
-                ),
-                receivedAt: start.addingTimeInterval(offset)
-            )
-        }
-        let stationary = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(2),
-                accuracy: 5,
-                speed: 13.9
-            ),
-            receivedAt: start.addingTimeInterval(2)
-        )
-
-        XCTAssertEqual(stationary.metersPerSecond, 0)
-        XCTAssertEqual(stationary.source, .stationary)
-
-        for offset in [2.4, 2.8, 3.2, 10.4, 10.8, 11.2, 11.6] {
-            let stillStationary = reducer.ingest(
-                testLocation(
-                    latitude: 43.615,
-                    longitude: -116.202,
-                    timestamp: start.addingTimeInterval(offset),
-                    accuracy: 5,
-                    speed: 13.9
-                ),
-                receivedAt: start.addingTimeInterval(offset)
-            )
-            XCTAssertEqual(stillStationary.metersPerSecond, 0)
-            XCTAssertEqual(stillStationary.source, .stationary)
-        }
-    }
-
-    func testDerivedDepartureBeatsStaleLowPositiveRawSpeed() throws {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var reducer = FireVaultLiveSpeedReducer()
-        _ = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start,
-                accuracy: 5,
-                speed: 0
-            ),
-            receivedAt: start
-        )
-        let departing = reducer.ingest(
-            testLocation(
-                latitude: 43.6152,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(2),
-                accuracy: 5,
-                speed: 0.5
-            ),
-            receivedAt: start.addingTimeInterval(2)
-        )
-
-        XCTAssertGreaterThan(try XCTUnwrap(departing.metersPerSecond), 1.5)
-        XCTAssertEqual(departing.source, .derived)
-    }
-
-    func testLiveSpeedReducerExpiresFrozenReadingAfterEightSeconds() {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var reducer = FireVaultLiveSpeedReducer()
-        _ = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start,
-                speed: 13.9
-            ),
-            receivedAt: start
-        )
-        let stale = reducer.refresh(
-            at: start.addingTimeInterval(FireVaultBreadcrumbRules.maximumLiveSpeedAge + 0.1)
-        )
-
-        XCTAssertEqual(stale.metersPerSecond, 0)
-        XCTAssertEqual(stale.source, .stale)
-    }
-
-    func testLiveSpeedReducerDoesNotResurrectPositiveSpeedAfterSparseGap() {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var reducer = FireVaultLiveSpeedReducer()
-        _ = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start,
-                accuracy: 5,
-                speed: 13.9
-            ),
-            receivedAt: start
-        )
-        _ = reducer.refresh(
-            at: start.addingTimeInterval(FireVaultBreadcrumbRules.maximumLiveSpeedAge + 0.1)
-        )
-
-        let repeatedFrozenFix = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(12),
-                accuracy: 5,
-                speed: 13.9
-            ),
-            receivedAt: start.addingTimeInterval(12)
-        )
-
-        XCTAssertEqual(repeatedFrozenFix.metersPerSecond, 0)
-        XCTAssertEqual(repeatedFrozenFix.source, .stationary)
-    }
-
-    func testLiveSpeedReducerReleasesStaleZeroForSparseMovingFixes() throws {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var reducer = FireVaultLiveSpeedReducer()
-        _ = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start,
-                accuracy: 5,
-                speed: 13.9
-            ),
-            receivedAt: start
-        )
-        _ = reducer.refresh(
-            at: start.addingTimeInterval(FireVaultBreadcrumbRules.maximumLiveSpeedAge + 0.1)
-        )
-
-        let firstSparseMovingFix = reducer.ingest(
-            testLocation(
-                latitude: 43.617,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(12),
-                accuracy: 5,
-                speed: 13.9
-            ),
-            receivedAt: start.addingTimeInterval(12)
-        )
-        let secondSparseMovingFix = reducer.ingest(
-            testLocation(
-                latitude: 43.619,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(24),
-                accuracy: 5,
-                speed: 13.9
-            ),
-            receivedAt: start.addingTimeInterval(24)
-        )
-
-        XCTAssertEqual(try XCTUnwrap(firstSparseMovingFix.metersPerSecond), 13.9, accuracy: 0.01)
-        XCTAssertEqual(firstSparseMovingFix.source, .coreLocation)
-        XCTAssertEqual(try XCTUnwrap(secondSparseMovingFix.metersPerSecond), 13.9, accuracy: 0.01)
-        XCTAssertEqual(secondSparseMovingFix.source, .coreLocation)
-    }
-
-    func testLiveSpeedReducerRejectsSparsePoorAccuracyDriftAfterStaleLatch() {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var reducer = FireVaultLiveSpeedReducer()
-        _ = reducer.ingest(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start,
-                accuracy: 100,
-                speed: 13.9
-            ),
-            receivedAt: start
-        )
-        _ = reducer.refresh(
-            at: start.addingTimeInterval(FireVaultBreadcrumbRules.maximumLiveSpeedAge + 0.1)
-        )
-
-        let drift = reducer.ingest(
-            testLocation(
-                latitude: 43.61545,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(12),
-                accuracy: 100,
-                speed: 13.9
-            ),
-            receivedAt: start.addingTimeInterval(12)
-        )
-
-        XCTAssertEqual(drift.metersPerSecond, 0)
-        XCTAssertEqual(drift.source, .stationary)
-    }
-
-    func testCachedCallbackCannotReplaceOrRevalidateLatestTelemetry() {
-        let now = Date(timeIntervalSince1970: 1_700_000_100)
-        let latest = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: now.addingTimeInterval(-2),
-            speed: 4
-        )
-        let duplicate = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: latest.timestamp,
-            speed: 4
-        )
-        let older = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: now.addingTimeInterval(-7),
-            speed: 4
-        )
-
-        XCTAssertFalse(
-            FireVaultBreadcrumbRules.shouldAcceptLiveTelemetry(
-                duplicate,
-                after: latest,
-                now: now
-            )
-        )
-        XCTAssertFalse(
-            FireVaultBreadcrumbRules.shouldAcceptLiveTelemetry(
-                older,
-                after: latest,
-                now: now
-            )
-        )
-    }
-
-    func testConvergingFixUpdatesLiveTelemetryWithoutQualifyingForRouteStorage() {
-        let now = Date(timeIntervalSince1970: 1_700_000_100)
-        let converging = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: now,
-            accuracy: 250,
-            speed: 0
-        )
-
-        XCTAssertTrue(
-            FireVaultBreadcrumbRules.shouldAcceptNavigationTelemetry(
-                converging,
-                after: nil,
-                now: now
-            )
-        )
-        XCTAssertFalse(FireVaultBreadcrumbRules.hasNavigationQualityAccuracy(converging))
-        XCTAssertFalse(FireVaultBreadcrumbRules.accepts(converging, after: nil, now: now))
-
-        let unusablyCoarse = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: now,
-            accuracy: 600,
-            speed: 0
-        )
-        XCTAssertFalse(
-            FireVaultBreadcrumbRules.shouldAcceptNavigationTelemetry(
-                unusablyCoarse,
-                after: nil,
-                now: now
-            )
-        )
-        XCTAssertFalse(FireVaultBreadcrumbRules.hasNavigationQualityAccuracy(unusablyCoarse))
-
-        let precise = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: now,
-            accuracy: 12,
-            speed: 0
-        )
-        XCTAssertTrue(FireVaultBreadcrumbRules.hasNavigationQualityAccuracy(precise))
-    }
-
-    func testDelayedRouteBatchDoesNotQualifyAsLiveTelemetry() {
-        let now = Date(timeIntervalSince1970: 1_700_000_100)
-        let delayed = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: now.addingTimeInterval(-120),
-            accuracy: 10,
-            speed: 8
-        )
-
-        XCTAssertTrue(
-            FireVaultBreadcrumbRules.shouldAcceptRouteLocation(
-                delayed,
-                after: nil,
-                now: now
-            )
-        )
-        XCTAssertFalse(
-            FireVaultBreadcrumbRules.shouldAcceptNavigationTelemetry(
-                delayed,
-                after: nil,
-                now: now
-            )
-        )
-        XCTAssertTrue(FireVaultBreadcrumbRules.accepts(delayed, after: nil, now: now))
-        XCTAssertTrue(
-            FireVaultBreadcrumbRules.shouldEvaluateStop(delayed, after: nil, now: now)
-        )
-    }
-
-    func testGPSDiagnosticsHistoryEvictsOldestAtCapacity() {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var history = FireVaultGPSDiagnosticHistory()
-
-        for index in 0..<(FireVaultGPSDiagnosticHistory.capacity + 3) {
-            let timestamp = start.addingTimeInterval(Double(index))
-            XCTAssertTrue(history.append(
-                testLocation(
-                    latitude: 43.615 + Double(index) / 1_000_000,
-                    longitude: -116.202,
-                    timestamp: timestamp,
-                    speed: 1
-                ),
-                speedSnapshot: .unavailable,
-                receivedAt: timestamp
-            ))
-        }
-
-        XCTAssertEqual(history.samples.count, FireVaultGPSDiagnosticHistory.capacity)
-        XCTAssertEqual(history.samples.first?.time, start.addingTimeInterval(3))
-        XCTAssertEqual(
-            history.samples.last?.time,
-            start.addingTimeInterval(Double(FireVaultGPSDiagnosticHistory.capacity + 2))
-        )
-    }
-
-    func testGPSDiagnosticsHistoryRejectsDuplicateOutOfOrderAndStaleFixes() {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var history = FireVaultGPSDiagnosticHistory()
-        let initial = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: start
-        )
-
-        XCTAssertTrue(history.append(initial, speedSnapshot: .unavailable, receivedAt: start))
-        XCTAssertFalse(history.append(initial, speedSnapshot: .unavailable, receivedAt: start))
-        XCTAssertFalse(history.append(
-            testLocation(
-                latitude: 43.614,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(-1)
-            ),
-            speedSnapshot: .unavailable,
-            receivedAt: start.addingTimeInterval(1)
-        ))
-        XCTAssertFalse(history.append(
-            testLocation(
-                latitude: 43.616,
-                longitude: -116.202,
-                timestamp: start.addingTimeInterval(1)
-            ),
-            speedSnapshot: .unavailable,
-            receivedAt: start.addingTimeInterval(
-                FireVaultBreadcrumbRules.maximumLiveTelemetryAge + 2
-            )
-        ))
-        XCTAssertEqual(history.samples.count, 1)
-    }
-
-    func testGPSDiagnosticsHistoryPreservesUnavailableMeasurements() throws {
-        let now = Date(timeIntervalSince1970: 1_700_000_100)
-        var history = FireVaultGPSDiagnosticHistory()
-        XCTAssertTrue(history.append(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: now,
-                speed: -1
-            ),
-            speedSnapshot: .unavailable,
-            receivedAt: now
-        ))
-
-        let sample = try XCTUnwrap(history.samples.last)
-        XCTAssertNil(sample.altitudeFeet)
-        XCTAssertNil(sample.verticalAccuracyFeet)
-        XCTAssertNil(sample.resolvedSpeedMPH)
-        XCTAssertNil(sample.rawSpeedMPH)
-        XCTAssertNil(sample.derivedSpeedMPH)
-        XCTAssertNil(sample.speedAccuracyMPH)
-        XCTAssertNil(sample.courseDegrees)
-        XCTAssertNil(sample.courseAccuracyDegrees)
-    }
-
-    func testGPSDiagnosticsHistoryCapturesRealAccuracyAndTiming() throws {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var history = FireVaultGPSDiagnosticHistory()
-        let speedSnapshot = FireVaultLiveSpeedSnapshot(
-            metersPerSecond: 10,
-            source: .coreLocation,
-            sampleTimestamp: start,
-            receivedAt: start,
-            rawMetersPerSecond: 10,
-            derivedMetersPerSecond: 9.5
-        )
-        let first = CLLocation(
-            coordinate: .init(latitude: 43.615, longitude: -116.202),
-            altitude: 1_600,
-            horizontalAccuracy: 6,
-            verticalAccuracy: 4,
-            course: 312,
-            courseAccuracy: 5,
-            speed: 10,
-            speedAccuracy: 0.5,
-            timestamp: start
-        )
-        XCTAssertTrue(history.append(
-            first,
-            speedSnapshot: speedSnapshot,
-            receivedAt: start.addingTimeInterval(0.25)
-        ))
-
-        let sample = try XCTUnwrap(history.samples.last)
-        XCTAssertEqual(sample.horizontalAccuracyFeet, 19.685, accuracy: 0.01)
-        XCTAssertEqual(try XCTUnwrap(sample.verticalAccuracyFeet), 13.123, accuracy: 0.01)
-        XCTAssertEqual(try XCTUnwrap(sample.resolvedSpeedMPH), 22.369, accuracy: 0.01)
-        XCTAssertEqual(try XCTUnwrap(sample.rawSpeedMPH), 22.369, accuracy: 0.01)
-        XCTAssertEqual(try XCTUnwrap(sample.derivedSpeedMPH), 21.251, accuracy: 0.01)
-        XCTAssertEqual(try XCTUnwrap(sample.speedAccuracyMPH), 1.118, accuracy: 0.01)
-        XCTAssertEqual(sample.courseDegrees, 312)
-        XCTAssertEqual(sample.courseAccuracyDegrees, 5)
-        XCTAssertEqual(sample.callbackLatency, 0.25, accuracy: 0.001)
-        XCTAssertEqual(sample.speedSource, .coreLocation)
-    }
-
-    func testGPSDiagnosticsHistoryDoesNotChartMismatchedSpeedSnapshot() throws {
-        let now = Date(timeIntervalSince1970: 1_700_000_100)
-        let staleSnapshot = FireVaultLiveSpeedSnapshot(
-            metersPerSecond: 15,
-            source: .coreLocation,
-            sampleTimestamp: now.addingTimeInterval(-1),
-            receivedAt: now,
-            rawMetersPerSecond: 15,
-            derivedMetersPerSecond: nil
-        )
-        var history = FireVaultGPSDiagnosticHistory()
-        XCTAssertTrue(history.append(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: now,
-                speed: 15
-            ),
-            speedSnapshot: staleSnapshot,
-            receivedAt: now
-        ))
-
-        let sample = try XCTUnwrap(history.samples.last)
-        XCTAssertNil(sample.resolvedSpeedMPH)
-        XCTAssertNil(sample.rawSpeedMPH)
-        XCTAssertNil(sample.derivedSpeedMPH)
-        XCTAssertEqual(sample.speedSource, .unavailable)
-    }
-
-    func testGPSDiagnosticsHistoryCalculatesSecondFixMotionMetrics() throws {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var history = FireVaultGPSDiagnosticHistory()
-        let first = CLLocation(
-            coordinate: .init(latitude: 43.615, longitude: -116.202),
-            altitude: 1_600,
-            horizontalAccuracy: 5,
-            verticalAccuracy: 4,
-            course: -1,
-            speed: -1,
-            timestamp: start
-        )
-        let second = CLLocation(
-            coordinate: .init(latitude: 43.6151, longitude: -116.202),
-            altitude: 1_610,
-            horizontalAccuracy: 5,
-            verticalAccuracy: 4,
-            course: -1,
-            speed: -1,
-            timestamp: start.addingTimeInterval(2)
-        )
-
-        XCTAssertTrue(history.append(first, speedSnapshot: .unavailable, receivedAt: start))
-        XCTAssertTrue(history.append(
-            second,
-            speedSnapshot: .unavailable,
-            receivedAt: start.addingTimeInterval(2)
-        ))
-
-        let sample = try XCTUnwrap(history.samples.last)
-        XCTAssertEqual(sample.updateInterval, 2)
-        XCTAssertGreaterThan(try XCTUnwrap(sample.distanceFromPreviousFeet), 30)
-        XCTAssertEqual(
-            try XCTUnwrap(sample.verticalRateFeetPerMinute),
-            984.252,
-            accuracy: 0.02
-        )
-    }
-
-    func testGPSDiagnosticsAggregatesExcludeEvictedPreWindowGap() throws {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        var history = FireVaultGPSDiagnosticHistory()
-        XCTAssertTrue(history.append(
-            testLocation(
-                latitude: 43.615,
-                longitude: -116.202,
-                timestamp: start
-            ),
-            speedSnapshot: .unavailable,
-            receivedAt: start
-        ))
-
-        for index in 1...FireVaultGPSDiagnosticHistory.capacity {
-            let timestamp = start.addingTimeInterval(100 + Double(index))
-            XCTAssertTrue(history.append(
-                testLocation(
-                    latitude: 43.615 + Double(index) / 1_000_000,
-                    longitude: -116.202,
-                    timestamp: timestamp
-                ),
-                speedSnapshot: .unavailable,
-                receivedAt: timestamp
-            ))
-        }
-
-        XCTAssertEqual(history.samples.count, FireVaultGPSDiagnosticHistory.capacity)
-        XCTAssertEqual(try XCTUnwrap(history.longestUpdateGap), 1, accuracy: 0.001)
-        XCTAssertEqual(try XCTUnwrap(history.averageUpdateInterval), 1, accuracy: 0.001)
-    }
-
-    func testTripLogFrozenSpeedAgesToZero() throws {
-        let timestamp = Date(timeIntervalSince1970: 1_700_000_100)
-        let lastMovingFix = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: timestamp,
-            speed: 13.9
-        )
-
-        let speed = try XCTUnwrap(
-            FireVaultBreadcrumbRules.resolvedLiveSpeed(
-                location: lastMovingFix,
-                now: timestamp.addingTimeInterval(
-                    FireVaultBreadcrumbRules.maximumLiveSpeedAge + 0.1
-                )
             )
         )
 
         XCTAssertEqual(speed, 0)
     }
 
-    func testTripLogRejectsOldAndFutureLiveLocations() {
-        let now = Date(timeIntervalSince1970: 1_700_000_100)
-        let old = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: now.addingTimeInterval(-61)
-        )
-        let future = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: now.addingTimeInterval(6)
-        )
-
-        XCTAssertFalse(FireVaultBreadcrumbRules.isUsableLiveLocation(old, now: now))
-        XCTAssertFalse(FireVaultBreadcrumbRules.isUsableLiveLocation(future, now: now))
-    }
-
-    func testTripLogShowsConvergingLiveFixWithoutPersistingIt() {
-        let now = Date()
-        let coarse = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: now,
-            accuracy: 250
-        )
-
-        XCTAssertTrue(FireVaultBreadcrumbRules.isUsableLiveLocation(coarse, now: now))
-        XCTAssertFalse(FireVaultBreadcrumbRules.accepts(coarse, after: nil))
-        XCTAssertFalse(FireVaultBreadcrumbRules.shouldEvaluateStop(coarse, after: nil))
-    }
-
-    func testNewestGPSReceiverWinsInsteadOfStalePreferredReceiver() throws {
-        let old = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: Date(timeIntervalSince1970: 1_700_000_000)
-        )
-        let fresh = testLocation(
-            latitude: 43.616,
-            longitude: -116.203,
-            timestamp: Date(timeIntervalSince1970: 1_700_000_030)
-        )
-
-        let selected = try XCTUnwrap(FireVaultBreadcrumbRules.newestLocation(old, fresh))
-        XCTAssertEqual(selected.timestamp, fresh.timestamp)
-    }
-
-    func testTripLogGPSNoiseDoesNotRefreshMovementEvidence() {
-        let start = Date(timeIntervalSince1970: 1_700_000_100)
-        let reference = testLocation(
-            latitude: 43.615,
-            longitude: -116.202,
-            timestamp: start,
-            accuracy: 40,
-            speed: 13.9
-        )
-        let noisy = testLocation(
-            latitude: 43.61515,
-            longitude: -116.202,
-            timestamp: start.addingTimeInterval(10),
-            accuracy: 40,
-            speed: 13.9
-        )
-
-        XCTAssertNil(
-            FireVaultBreadcrumbRules.updatedMeaningfulMovementDate(
-                for: noisy,
-                reference: reference,
-                previousMeaningfulMovementAt: nil,
-                now: noisy.timestamp
-            )
-        )
-    }
-
-    func testTripLogEvaluatesStationaryStopsMoreOftenThanRoutePersistence() {
-        let start = Date().addingTimeInterval(-20)
+    func testCarPlayLiveSpeedEvidenceDoesNotUseRouteArchiveSpacing() {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
         let first = testLocation(
             latitude: 43.615,
             longitude: -116.202,
-            timestamp: start
+            timestamp: timestamp,
+            speed: 8
         )
-        let tenSecondsLater = testLocation(
+        // About 12 metres north: enough for the driving location manager's
+        // update cadence, but intentionally far below the 75 m archive spacing.
+        let moved = testLocation(
+            latitude: 43.615108,
+            longitude: -116.202,
+            timestamp: timestamp.addingTimeInterval(2),
+            speed: 8
+        )
+
+        XCTAssertLessThan(
+            moved.distance(from: first),
+            FireVaultBreadcrumbRules.minimumPointDistance
+        )
+        XCTAssertTrue(
+            FireVaultBreadcrumbRules.providesLiveMovementEvidence(
+                moved,
+                comparedTo: first
+            )
+        )
+    }
+
+    func testCarPlaySpeedDisplaysFreshMeasuredDrivingSpeed() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let location = testLocation(
             latitude: 43.615,
             longitude: -116.202,
-            timestamp: start.addingTimeInterval(FireVaultBreadcrumbRules.stopEvaluationInterval)
+            timestamp: now,
+            speed: 8
         )
 
-        XCTAssertTrue(FireVaultBreadcrumbRules.shouldEvaluateStop(first, after: nil))
-        XCTAssertTrue(FireVaultBreadcrumbRules.shouldEvaluateStop(tenSecondsLater, after: first))
-        XCTAssertFalse(FireVaultBreadcrumbRules.accepts(tenSecondsLater, after: first))
+        let speed = try XCTUnwrap(
+            FireVaultBreadcrumbRules.resolvedLiveSpeed(
+                location: location,
+                lastMeaningfulMovementAt: now,
+                now: now
+            )
+        )
+        XCTAssertEqual(speed, 8)
     }
 
-    func testTripLogLocationWatchdogRecoversOnlyAfterSustainedSilence() {
-        let start = Date(timeIntervalSince1970: 1_700_000_000)
+    func testCarPlayArrivalUsesQuarterMileEntryAndHalfMileResetHysteresis() {
+        XCTAssertTrue(FireVaultCarPlayArrivalPolicy.hasArrived(distanceMeters: 402.336))
+        XCTAssertFalse(FireVaultCarPlayArrivalPolicy.hasArrived(distanceMeters: 402.337))
+        XCTAssertFalse(FireVaultCarPlayArrivalPolicy.shouldClearArrival(distanceMeters: 804.672))
+        XCTAssertTrue(FireVaultCarPlayArrivalPolicy.shouldClearArrival(distanceMeters: 804.673))
+    }
 
-        XCTAssertFalse(
-            FireVaultBreadcrumbRules.shouldRecoverLocationStream(
-                trackingStartedAt: start,
-                lastLocationReceivedAt: nil,
-                lastRecoveryAt: nil,
-                now: start.addingTimeInterval(14)
-            )
+    func testCarPlayArrivalPinsPutDrivingDestinationsFirst() {
+        let pins = [
+            (label: "North Riser", type: "Riser"),
+            (label: "Main FACP", type: "Panel"),
+            (label: "Service Parking", type: "POI"),
+            (label: "Front Entrance", type: "Entrance")
+        ]
+        let sortedLabels = pins.sorted {
+            FireVaultCarPlayArrivalPolicy.pinPriority(label: $0.label, type: $0.type)
+                < FireVaultCarPlayArrivalPolicy.pinPriority(label: $1.label, type: $1.type)
+        }.map(\.label)
+
+        XCTAssertEqual(sortedLabels, ["Service Parking", "Front Entrance", "Main FACP", "North Riser"])
+    }
+
+    func testCarPlayDrivingHeadingUsesGlanceableCardinalLabels() {
+        XCTAssertEqual(FireVaultCarPlayPresentation.heading(course: -1), "Unavailable")
+        XCTAssertEqual(FireVaultCarPlayPresentation.heading(course: 0), "N • 0°")
+        XCTAssertEqual(FireVaultCarPlayPresentation.heading(course: 44), "NE • 44°")
+        XCTAssertEqual(FireVaultCarPlayPresentation.heading(course: 181), "S • 181°")
+        XCTAssertEqual(FireVaultCarPlayPresentation.heading(course: 359.8), "N • 0°")
+    }
+
+    func testCarPlayLocationAgeStaysCompact() {
+        XCTAssertEqual(FireVaultCarPlayPresentation.locationAge(seconds: 0.6), "Just now")
+        XCTAssertEqual(FireVaultCarPlayPresentation.locationAge(seconds: 12), "12 sec ago")
+        XCTAssertEqual(FireVaultCarPlayPresentation.locationAge(seconds: 60), "1 min ago")
+        XCTAssertEqual(FireVaultCarPlayPresentation.locationAge(seconds: 82), "1m 22s ago")
+    }
+
+    func testCarPlayDetailsOmitEmptySeparators() {
+        XCTAssertEqual(
+            FireVaultCarPlayPresentation.joined(["#A-104", " ", nil, "120 Main St"]),
+            "#A-104 • 120 Main St"
         )
-        XCTAssertTrue(
-            FireVaultBreadcrumbRules.shouldRecoverLocationStream(
-                trackingStartedAt: start,
-                lastLocationReceivedAt: nil,
-                lastRecoveryAt: nil,
-                now: start.addingTimeInterval(15)
-            )
+    }
+
+    func testCarPlayPresentationCadenceMeetsDrivingTaskLimits() {
+        XCTAssertGreaterThanOrEqual(
+            FireVaultCarPlayRefreshPolicy.minimumInterfaceInterval,
+            10
         )
-        XCTAssertFalse(
-            FireVaultBreadcrumbRules.shouldRecoverLocationStream(
-                trackingStartedAt: start,
-                lastLocationReceivedAt: start,
-                lastRecoveryAt: start.addingTimeInterval(15),
-                now: start.addingTimeInterval(29)
-            )
+        XCTAssertGreaterThanOrEqual(
+            FireVaultCarPlayRefreshPolicy.minimumPointOfInterestInterval,
+            60
         )
-        XCTAssertTrue(
-            FireVaultBreadcrumbRules.shouldRecoverLocationStream(
-                trackingStartedAt: start,
-                lastLocationReceivedAt: start,
-                lastRecoveryAt: start.addingTimeInterval(15),
-                now: start.addingTimeInterval(30)
+    }
+
+    func testLiveSpeedRejectsPoorAccuracyEvenWhenCoreLocationReportsSpeed() {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let location = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: now,
+            accuracy: 180,
+            speed: 15
+        )
+
+        XCTAssertNil(
+            FireVaultBreadcrumbRules.resolvedLiveSpeed(
+                location: location,
+                lastMeaningfulMovementAt: now,
+                now: now
             )
         )
     }
 
-    func testTripLogEscalatesToHardReceiverResetAfterTwoSoftAttempts() {
-        XCTAssertFalse(
-            FireVaultBreadcrumbRules.requiresHardLocationRecovery(
-                consecutiveRecoveryCount: 0
+    func testLiveSpeedRejectsCachedLocationAfterSignalLoss() {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let location = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: timestamp,
+            speed: 12
+        )
+
+        XCTAssertNil(
+            FireVaultBreadcrumbRules.resolvedLiveSpeed(
+                location: location,
+                lastMeaningfulMovementAt: timestamp,
+                now: timestamp.addingTimeInterval(9)
             )
         )
-        XCTAssertFalse(
-            FireVaultBreadcrumbRules.requiresHardLocationRecovery(
-                consecutiveRecoveryCount: 1
-            )
+    }
+
+    func testSharedLiveSpeedTrackerExpiresFrozenSpeedAtAStop() throws {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let driving = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: timestamp,
+            speed: 10
         )
-        XCTAssertTrue(
-            FireVaultBreadcrumbRules.requiresHardLocationRecovery(
-                consecutiveRecoveryCount: 2
-            )
+        let stoppedButFrozen = testLocation(
+            latitude: 43.615001,
+            longitude: -116.202,
+            timestamp: timestamp.addingTimeInterval(9),
+            speed: 10
         )
-        XCTAssertTrue(
-            FireVaultBreadcrumbRules.requiresHardLocationRecovery(
-                consecutiveRecoveryCount: 3
-            )
+        var tracker = FireVaultLiveSpeedTracker()
+
+        XCTAssertEqual(
+            try XCTUnwrap(tracker.ingest(driving, now: timestamp)),
+            10
         )
+        XCTAssertEqual(
+            try XCTUnwrap(
+                tracker.ingest(
+                    stoppedButFrozen,
+                    now: stoppedButFrozen.timestamp
+                )
+            ),
+            0
+        )
+    }
+
+    func testSharedLiveSpeedTrackerRecoversAfterFreshMovement() throws {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let first = testLocation(
+            latitude: 43.615,
+            longitude: -116.202,
+            timestamp: timestamp,
+            speed: 0
+        )
+        let moving = testLocation(
+            latitude: 43.615108,
+            longitude: -116.202,
+            timestamp: timestamp.addingTimeInterval(2),
+            speed: 8
+        )
+        var tracker = FireVaultLiveSpeedTracker()
+
+        _ = tracker.ingest(first, now: timestamp)
+        XCTAssertEqual(
+            try XCTUnwrap(tracker.ingest(moving, now: moving.timestamp)),
+            8
+        )
+    }
+
+    func testSharedNearbyGPSRemainsOwnedWhenEitherSceneDisconnects() {
+        var requests = FireVaultLocationService.LiveRequestRegistry()
+        requests.request(.handset, highAccuracy: false)
+        requests.request(.carPlay, highAccuracy: true)
+
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests.wantsTracking)
+        XCTAssertTrue(requests.wantsHighAccuracy)
+
+        requests.release(.handset)
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertTrue(requests.wantsTracking)
+        XCTAssertTrue(requests.wantsHighAccuracy)
+
+        requests.release(.carPlay)
+        XCTAssertEqual(requests.count, 0)
+        XCTAssertFalse(requests.wantsTracking)
+        XCTAssertFalse(requests.wantsHighAccuracy)
+    }
+
+    func testSharedNearbyGPSUsesHighestRequestedAccuracy() {
+        var requests = FireVaultLocationService.LiveRequestRegistry()
+        requests.request(.handset, highAccuracy: true)
+        requests.request(.carPlay, highAccuracy: false)
+        XCTAssertTrue(requests.wantsHighAccuracy)
+
+        requests.release(.handset)
+        XCTAssertFalse(requests.wantsHighAccuracy)
+        XCTAssertTrue(requests.wantsTracking)
     }
 
     func testBreadcrumbDepartureRequiresConsistentEvidence() {
@@ -2421,32 +1785,6 @@ final class FireVaultTests: XCTestCase {
             FireVaultBreadcrumbRules.confirmsDeparture(
                 from: origin,
                 with: [firstJump, scatteredSecond]
-            )
-        )
-    }
-
-    func testBreadcrumbDepartureRejectsAccuracySizedStationaryDrift() {
-        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
-        let origin = CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)
-        let firstDrift = testLocation(
-            latitude: 43.6164,
-            longitude: -116.202,
-            timestamp: timestamp,
-            accuracy: 100,
-            speed: 0
-        )
-        let secondDrift = testLocation(
-            latitude: 43.61642,
-            longitude: -116.20201,
-            timestamp: timestamp.addingTimeInterval(30),
-            accuracy: 100,
-            speed: 0
-        )
-
-        XCTAssertFalse(
-            FireVaultBreadcrumbRules.confirmsDeparture(
-                from: origin,
-                with: [firstDrift, secondDrift]
             )
         )
     }
@@ -2555,83 +1893,6 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(report.visits.first?.departure, end)
     }
 
-    func testTripLogMergeCombinesSplitRecordingsAndCoalescesBoundaryStop() throws {
-        let start = Date(timeIntervalSince1970: 1_785_000_000)
-        let firstStop = FireVaultBreadcrumbStop(
-            arrival: start.addingTimeInterval(20 * 60),
-            departure: start.addingTimeInterval(30 * 60),
-            latitude: 43.615,
-            longitude: -116.202,
-            accountID: "A-1",
-            accountName: "Central Library",
-            accountAddress: "100 Main Street",
-            technicianNote: "Checked panel."
-        )
-        let continuedStop = FireVaultBreadcrumbStop(
-            arrival: start.addingTimeInterval(36 * 60),
-            departure: start.addingTimeInterval(44 * 60),
-            latitude: 43.61502,
-            longitude: -116.20201,
-            accountID: "A-1",
-            accountName: "Central Library",
-            accountAddress: "100 Main Street",
-            technicianNote: "Completed testing."
-        )
-        let finalStop = FireVaultBreadcrumbStop(
-            arrival: start.addingTimeInterval(75 * 60),
-            departure: start.addingTimeInterval(82 * 60),
-            latitude: 43.625,
-            longitude: -116.212,
-            customTitle: "Supply House"
-        )
-        let firstTrip = FireVaultBreadcrumbDay(
-            name: "Morning Route",
-            startedAt: start,
-            endedAt: start.addingTimeInterval(32 * 60),
-            points: [
-                .init(timestamp: start, latitude: 43.61, longitude: -116.20, horizontalAccuracy: 8),
-                .init(timestamp: start.addingTimeInterval(30 * 60), latitude: 43.615, longitude: -116.202, horizontalAccuracy: 8)
-            ],
-            stops: [firstStop]
-        )
-        let secondTrip = FireVaultBreadcrumbDay(
-            name: "Afternoon Route",
-            startedAt: start.addingTimeInterval(35 * 60),
-            endedAt: start.addingTimeInterval(90 * 60),
-            points: [
-                .init(timestamp: start.addingTimeInterval(35 * 60), latitude: 43.615, longitude: -116.202, horizontalAccuracy: 8),
-                .init(timestamp: start.addingTimeInterval(90 * 60), latitude: 43.63, longitude: -116.22, horizontalAccuracy: 8)
-            ],
-            stops: [continuedStop, finalStop]
-        )
-
-        let merged = try XCTUnwrap(FireVaultTripLogIntegrity.mergedDay([secondTrip, firstTrip]))
-
-        XCTAssertEqual(merged.id, firstTrip.id)
-        XCTAssertEqual(merged.startedAt, firstTrip.startedAt)
-        XCTAssertEqual(merged.endedAt, secondTrip.endedAt)
-        XCTAssertEqual(merged.points.count, 4)
-        XCTAssertEqual(merged.stops.count, 2)
-        XCTAssertEqual(merged.stops.first?.arrival, firstStop.arrival)
-        XCTAssertEqual(merged.stops.first?.departure, continuedStop.departure)
-        XCTAssertTrue(try XCTUnwrap(merged.stops.first?.technicianNote).contains("Checked panel"))
-        XCTAssertTrue(try XCTUnwrap(merged.stops.first?.technicianNote).contains("Completed testing"))
-        XCTAssertEqual(merged.name, "Morning Route + Afternoon Route")
-    }
-
-    func testTripLogMergeRejectsActiveOrDifferentDayRecordings() {
-        let start = Date(timeIntervalSince1970: 1_785_000_000)
-        let active = FireVaultBreadcrumbDay(startedAt: start)
-        let completed = FireVaultBreadcrumbDay(startedAt: start, endedAt: start.addingTimeInterval(600))
-        let tomorrow = FireVaultBreadcrumbDay(
-            startedAt: start.addingTimeInterval(24 * 60 * 60),
-            endedAt: start.addingTimeInterval(25 * 60 * 60)
-        )
-
-        XCTAssertNil(FireVaultTripLogIntegrity.mergedDay([active, completed]))
-        XCTAssertNil(FireVaultTripLogIntegrity.mergedDay([completed, tomorrow]))
-    }
-
     func testMissingStopDeparturesUseNextArrivalBeforeWorkdayEnd() throws {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let first = FireVaultBreadcrumbStop(
@@ -2706,7 +1967,7 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(store.accounts.contains(where: { $0.id == account.id }))
     }
 
-    func testRedesignedDailyPDFPreservesSixStandardStops() throws {
+    func testRedesignedDailyPDFKeepsSixStandardStopsOnOnePage() throws {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let stops = (0..<6).map { index in
             let arrival = start.addingTimeInterval(Double(index * 35 * 60))
@@ -2720,29 +1981,9 @@ final class FireVaultTests: XCTestCase {
                 accountAddress: "\(index + 1) Main Street"
             )
         }
-        var points: [FireVaultBreadcrumbPoint] = []
-        for index in 0..<36 {
-            let indexValue = Double(index)
-            let timestamp = start.addingTimeInterval(indexValue * 8 * 60)
-            let latitude = 43.615 + indexValue * 0.0005
-            let longitude = -116.202 - indexValue * 0.0004
-            let altitude = 810 + sin(indexValue / 4) * 26
-            let speed = Double(index % 9) * 1.4
-            points.append(
-                FireVaultBreadcrumbPoint(
-                    timestamp: timestamp,
-                    latitude: latitude,
-                    longitude: longitude,
-                    horizontalAccuracy: 9,
-                    altitude: altitude,
-                    speedMetersPerSecond: speed
-                )
-            )
-        }
         let day = FireVaultBreadcrumbDay(
             startedAt: start,
             endedAt: start.addingTimeInterval(5 * 60 * 60),
-            points: points,
             stops: stops
         )
         let report = FireVaultBreadcrumbReport(
@@ -2751,36 +1992,19 @@ final class FireVaultTests: XCTestCase {
             companyName: "Western States Fire Protection",
             includeCoordinates: true
         )
-        let mapImage = UIGraphicsImageRenderer(size: .init(width: 528, height: 148)).image { renderer in
-            UIColor(red: 0.91, green: 0.95, blue: 0.90, alpha: 1).setFill()
-            renderer.fill(.init(x: 0, y: 0, width: 528, height: 148))
-            UIColor(white: 1, alpha: 0.7).setStroke()
-            renderer.cgContext.setLineWidth(8)
-            for y in stride(from: CGFloat(20), through: CGFloat(132), by: 28) {
-                renderer.cgContext.move(to: .init(x: 0, y: y))
-                renderer.cgContext.addLine(to: .init(x: 528, y: y + 8))
-            }
-            renderer.cgContext.strokePath()
-            let route = UIBezierPath()
-            route.move(to: .init(x: 38, y: 118))
-            route.addCurve(to: .init(x: 488, y: 32), controlPoint1: .init(x: 175, y: 16), controlPoint2: .init(x: 342, y: 140))
-            UIColor.systemBlue.setStroke()
-            route.lineWidth = 5
-            route.stroke()
-        }
         let data = FireVaultTripLogPDFRenderer.daily(
             report: report,
             detail: .detailed,
-            mapImage: mapImage
+            mapImage: nil
         )
         let document = try XCTUnwrap(
             CGPDFDocument(CGDataProvider(data: data as CFData)!)
         )
 
-        XCTAssertGreaterThanOrEqual(document.numberOfPages, 1)
+        XCTAssertEqual(document.numberOfPages, 1)
         let images = FireVaultTripLogImageRenderer.images(from: data)
         let image = try XCTUnwrap(images.first)
-        XCTAssertEqual(images.count, document.numberOfPages)
+        XCTAssertEqual(images.count, 1)
         XCTAssertGreaterThan(image.size.width, 600)
         XCTAssertGreaterThan(image.size.height, 790)
 
@@ -2792,200 +2016,6 @@ final class FireVaultTests: XCTestCase {
         imageAttachment.name = "FireVault-Inline-Email-JPG"
         imageAttachment.lifetime = .keepAlways
         add(imageAttachment)
-    }
-
-    func testDailyPDFPaginatesEveryStopInsteadOfSummarizingOverflow() throws {
-        let start = Date(timeIntervalSince1970: 1_700_000_000)
-        let stops = (0..<32).map { index in
-            let arrival = start.addingTimeInterval(Double(index * 20 * 60))
-            return FireVaultBreadcrumbStop(
-                arrival: arrival,
-                departure: arrival.addingTimeInterval(8 * 60),
-                latitude: 43.615 + Double(index) * 0.001,
-                longitude: -116.202 - Double(index) * 0.001,
-                accountID: "STOP-\(index + 1)",
-                accountName: "Account \(index + 1)",
-                accountAddress: "\(index + 1) Main Street",
-                technicianNote: index.isMultiple(of: 3) ? "Verified site access and panel condition." : nil
-            )
-        }
-        let report = FireVaultBreadcrumbReport(
-            day: .init(
-                startedAt: start,
-                endedAt: start.addingTimeInterval(11 * 60 * 60),
-                stops: stops
-            ),
-            technicianName: "David Bannerman",
-            companyName: "Bannerman US LLC",
-            includeCoordinates: true
-        )
-        let data = FireVaultTripLogPDFRenderer.daily(
-            report: report,
-            detail: .detailed,
-            mapImage: nil
-        )
-        let document = try XCTUnwrap(
-            CGPDFDocument(CGDataProvider(data: data as CFData)!)
-        )
-
-        XCTAssertGreaterThanOrEqual(document.numberOfPages, 3)
-        XCTAssertEqual(
-            FireVaultTripLogImageRenderer.images(from: data).count,
-            document.numberOfPages
-        )
-    }
-
-    func testRedesignedWeeklyPDFUsesOverviewAndCompleteDailyPages() throws {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let monday = try XCTUnwrap(
-            calendar.date(from: DateComponents(year: 2026, month: 8, day: 10, hour: 8))
-        )
-        var days: [FireVaultBreadcrumbDay] = []
-        for dayIndex in 0..<3 {
-            let start = try XCTUnwrap(calendar.date(byAdding: .day, value: dayIndex, to: monday))
-            var stops: [FireVaultBreadcrumbStop] = []
-            for stopIndex in 0..<3 {
-                let arrival = start.addingTimeInterval(Double((stopIndex + 1) * 75 * 60))
-                let city = stopIndex == 2 ? "Meridian" : "Boise"
-                stops.append(
-                    FireVaultBreadcrumbStop(
-                        arrival: arrival,
-                        departure: arrival.addingTimeInterval(Double((stopIndex + 4) * 60)),
-                        latitude: 43.615 + Double(dayIndex) * 0.01 + Double(stopIndex) * 0.002,
-                        longitude: -116.202 - Double(dayIndex) * 0.01 - Double(stopIndex) * 0.002,
-                        accountID: "D\(dayIndex)-S\(stopIndex)",
-                        accountName: "Day \(dayIndex + 1) Account \(stopIndex + 1)",
-                        accountAddress: "\(100 + stopIndex) Main Street, \(city), ID 83702"
-                    )
-                )
-            }
-            days.append(
-                FireVaultBreadcrumbDay(
-                    name: ["Monday Service Route", "Tuesday Inspection Route", "Wednesday Follow-Up"][dayIndex],
-                    startedAt: start,
-                    endedAt: start.addingTimeInterval(8 * 60 * 60),
-                    points: [
-                        .init(timestamp: start, latitude: 43.61 + Double(dayIndex) * 0.01, longitude: -116.20, horizontalAccuracy: 8),
-                        .init(timestamp: start.addingTimeInterval(8 * 60 * 60), latitude: 43.63 + Double(dayIndex) * 0.01, longitude: -116.23, horizontalAccuracy: 8)
-                    ],
-                    stops: stops
-                )
-            )
-        }
-        let report = FireVaultTripLogWeeklyReport(
-            days: days,
-            anchorDate: monday,
-            technicianName: "David Bannerman",
-            companyName: "Bannerman US LLC",
-            includeCoordinates: true,
-            generatedAt: monday.addingTimeInterval(7 * 24 * 60 * 60),
-            calendar: calendar
-        )
-        let mapImage = UIGraphicsImageRenderer(size: .init(width: 528, height: 160)).image { renderer in
-            UIColor(red: 0.91, green: 0.95, blue: 0.90, alpha: 1).setFill()
-            renderer.fill(.init(x: 0, y: 0, width: 528, height: 160))
-            let route = UIBezierPath()
-            route.move(to: .init(x: 32, y: 128))
-            route.addCurve(to: .init(x: 496, y: 34), controlPoint1: .init(x: 160, y: 18), controlPoint2: .init(x: 360, y: 152))
-            UIColor.systemBlue.setStroke()
-            route.lineWidth = 5
-            route.stroke()
-        }
-        let data = FireVaultTripLogPDFRenderer.weekly(
-            report: report,
-            detail: .detailed,
-            mapImage: mapImage
-        )
-        let document = try XCTUnwrap(
-            CGPDFDocument(CGDataProvider(data: data as CFData)!)
-        )
-        let images = FireVaultTripLogImageRenderer.images(from: data)
-
-        XCTAssertEqual(report.dailyReports.count, 3)
-        XCTAssertEqual(
-            report.dailyReports.first?.cityRouteText,
-            "Recorded GPS location – Recorded GPS location"
-        )
-        XCTAssertGreaterThanOrEqual(document.numberOfPages, 3)
-        XCTAssertEqual(images.count, document.numberOfPages)
-
-        let pdfAttachment = XCTAttachment(data: data, uniformTypeIdentifier: "com.adobe.pdf")
-        pdfAttachment.name = "FireVault-Weekly-Overview-And-Daily-Breakdown.pdf"
-        pdfAttachment.lifetime = .keepAlways
-        add(pdfAttachment)
-        for (index, image) in images.prefix(2).enumerated() {
-            let attachment = XCTAttachment(image: image)
-            attachment.name = index == 0 ? "FireVault-Weekly-Overview" : "FireVault-Weekly-Daily-Page"
-            attachment.lifetime = .keepAlways
-            add(attachment)
-        }
-    }
-
-    func testWeeklyCompactReportPaginatesEveryTrip() throws {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let monday = try XCTUnwrap(
-            calendar.date(from: DateComponents(year: 2026, month: 8, day: 10, hour: 6))
-        )
-        let trips = (0..<16).map { index in
-            let start = monday.addingTimeInterval(Double(index) * 45 * 60)
-            let stopArrival = start.addingTimeInterval(5 * 60)
-            return FireVaultBreadcrumbDay(
-                name: "Trip \(index + 1)",
-                startedAt: start,
-                endedAt: start.addingTimeInterval(30 * 60),
-                points: [
-                    .init(timestamp: start, latitude: 43.61, longitude: -116.20, horizontalAccuracy: 8),
-                    .init(timestamp: start.addingTimeInterval(30 * 60), latitude: 43.62, longitude: -116.22, horizontalAccuracy: 8)
-                ],
-                stops: [
-                    .init(
-                        arrival: stopArrival,
-                        departure: stopArrival.addingTimeInterval(8 * 60),
-                        latitude: 43.615,
-                        longitude: -116.21,
-                        accountID: "ACCOUNT-\(index)",
-                        accountName: "Account \(index + 1)",
-                        accountAddress: "100 Main Street, Boise, ID 83702"
-                    )
-                ]
-            )
-        }
-        let report = FireVaultTripLogWeeklyReport(
-            days: trips,
-            anchorDate: monday,
-            technicianName: "David Bannerman",
-            companyName: "Bannerman US LLC",
-            includeCoordinates: true,
-            generatedAt: monday.addingTimeInterval(7 * 24 * 60 * 60),
-            calendar: calendar
-        )
-        let data = FireVaultTripLogPDFRenderer.weekly(
-            report: report,
-            detail: .compact,
-            mapImage: nil
-        )
-        let searchablePDF = try XCTUnwrap(PDFKit.PDFDocument(data: data))
-        let searchableText = searchablePDF.string ?? ""
-        let document = try XCTUnwrap(
-            CGPDFDocument(CGDataProvider(data: data as CFData)!)
-        )
-        let images = FireVaultTripLogImageRenderer.images(from: data)
-
-        XCTAssertEqual(report.dailyReports.count, 16)
-        XCTAssertGreaterThanOrEqual(document.numberOfPages, 2)
-        XCTAssertEqual(images.count, document.numberOfPages)
-        XCTAssertTrue(searchableText.contains("Account 1"))
-        XCTAssertTrue(searchableText.contains("Account 16"))
-        XCTAssertTrue(searchableText.contains("START"))
-        XCTAssertTrue(searchableText.contains("END"))
-        for (index, image) in images.enumerated() {
-            let attachment = XCTAttachment(image: image)
-            attachment.name = "FireVault-Weekly-16-Trips-Page-\(index + 1)"
-            attachment.lifetime = .keepAlways
-            add(attachment)
-        }
     }
 
     func testBreadcrumbPermissionExplainsContinuousBackgroundRecording() {
@@ -3099,437 +2129,8 @@ final class FireVaultTests: XCTestCase {
         )
 
         XCTAssertEqual(stop.accountName, "Central Library")
-        XCTAssertNil(stop.accountCategory)
         XCTAssertNil(stop.technicianNote)
         XCTAssertFalse(stop.isPersonalStop)
-    }
-
-    func testTripLogArchiveCreatedBeforeReportEndpointsStillDecodes() throws {
-        let legacyJSON = """
-        {
-          "id": "5A591C4A-F321-43AE-B2EF-A019F31E1784",
-          "startedAt": "2026-08-15T14:00:00Z",
-          "endedAt": "2026-08-15T15:00:00Z",
-          "isPaused": false,
-          "points": [],
-          "stops": [
-            {
-              "id": "DE0677D9-BF97-4EC2-AE9D-C799E8F2D049",
-              "arrival": "2026-08-15T14:20:00Z",
-              "departure": "2026-08-15T14:30:00Z",
-              "latitude": 43.615,
-              "longitude": -116.202,
-              "accountID": "account-1",
-              "accountName": "Central Library",
-              "accountAddress": "100 Main Street, Boise, ID 83702"
-            }
-          ]
-        }
-        """
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-
-        let day = try decoder.decode(
-            FireVaultBreadcrumbDay.self,
-            from: Data(legacyJSON.utf8)
-        )
-
-        XCTAssertNil(day.reportEndpoints)
-        XCTAssertNil(try XCTUnwrap(day.stops.first).accountCategory)
-    }
-
-    func testTripEndpointResolverCapturesKnownStartAndEndLocations() throws {
-        let start = Date(timeIntervalSince1970: 1_786_800_000)
-        let startAccount = FireVaultWorkspaceAccount(
-            id: "station-1",
-            name: "Pioneer Station",
-            address: "10 First Avenue, Boise, ID 83702",
-            category: "Public Safety",
-            accountId: "FV-100",
-            phone: "",
-            favorite: false,
-            latitude: 43.615,
-            longitude: -116.202,
-            tags: [],
-            notes: [],
-            documents: [],
-            equipment: [],
-            locations: [],
-            recent: []
-        )
-        let endAccount = FireVaultWorkspaceAccount(
-            id: "clinic-1",
-            name: "Mountain Clinic",
-            address: "500 Health Way, Meridian, ID 83642",
-            category: "Healthcare",
-            accountId: "FV-200",
-            phone: "",
-            favorite: false,
-            latitude: 43.625,
-            longitude: -116.222,
-            tags: [],
-            notes: [],
-            documents: [],
-            equipment: [],
-            locations: [],
-            recent: []
-        )
-        let accountStop = FireVaultBreadcrumbStop(
-            arrival: start.addingTimeInterval(15 * 60),
-            departure: start.addingTimeInterval(25 * 60),
-            latitude: 43.620,
-            longitude: -116.212,
-            accountID: endAccount.id,
-            accountName: endAccount.name,
-            accountAddress: endAccount.address,
-            accountCategory: endAccount.category
-        )
-        let identifiedStop = FireVaultBreadcrumbStop(
-            arrival: start.addingTimeInterval(35 * 60),
-            departure: start.addingTimeInterval(40 * 60),
-            latitude: 43.622,
-            longitude: -116.216,
-            customTitle: "Supply House"
-        )
-        let day = FireVaultBreadcrumbDay(
-            startedAt: start,
-            endedAt: start.addingTimeInterval(60 * 60),
-            points: [
-                .init(
-                    timestamp: start,
-                    latitude: 43.615,
-                    longitude: -116.202,
-                    horizontalAccuracy: 6,
-                    altitude: 1_500,
-                    speedMetersPerSecond: 12
-                ),
-                .init(
-                    timestamp: start.addingTimeInterval(30 * 60),
-                    latitude: 43.620,
-                    longitude: -116.212,
-                    horizontalAccuracy: 7,
-                    altitude: 1_550,
-                    speedMetersPerSecond: 14
-                ),
-                .init(
-                    timestamp: start.addingTimeInterval(60 * 60),
-                    latitude: 43.625,
-                    longitude: -116.222,
-                    horizontalAccuracy: 6,
-                    altitude: 1_600,
-                    speedMetersPerSecond: 10
-                )
-            ],
-            stops: [accountStop, identifiedStop]
-        )
-
-        let endpoints = try XCTUnwrap(
-            FireVaultTripEndpointResolver.resolve(
-                day: day,
-                accounts: [startAccount, endAccount],
-                resolvedAt: start.addingTimeInterval(65 * 60)
-            )
-        )
-
-        XCTAssertEqual(endpoints.start.title, startAccount.name)
-        XCTAssertEqual(endpoints.start.address, startAccount.address)
-        XCTAssertEqual(endpoints.start.source, .account)
-        XCTAssertEqual(endpoints.start.timestamp, day.startedAt)
-        XCTAssertEqual(endpoints.end.title, endAccount.name)
-        XCTAssertEqual(endpoints.end.address, endAccount.address)
-        XCTAssertEqual(endpoints.end.source, .account)
-        XCTAssertEqual(endpoints.end.timestamp, day.endedAt)
-    }
-
-    func testPreparingReportDaysPersistsAndReusesEndpoints() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FireVaultTripEndpointTests-\(UUID().uuidString)", isDirectory: true)
-        let archiveURL = root.appendingPathComponent("trip-log.json")
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        let start = Date(timeIntervalSince1970: 1_786_800_000)
-        let account = FireVaultWorkspaceAccount(
-            id: "account-1",
-            name: "Central Library",
-            address: "100 Main Street, Boise, ID 83702",
-            category: "Government",
-            accountId: "FV-42",
-            phone: "",
-            favorite: false,
-            latitude: 43.615,
-            longitude: -116.202,
-            tags: [],
-            notes: [],
-            documents: [],
-            equipment: [],
-            locations: [],
-            recent: []
-        )
-        let stop = FireVaultBreadcrumbStop(
-            arrival: start.addingTimeInterval(10 * 60),
-            departure: start.addingTimeInterval(20 * 60),
-            latitude: 43.615,
-            longitude: -116.202,
-            accountID: account.id,
-            accountName: account.name,
-            accountAddress: account.address
-        )
-        let day = FireVaultBreadcrumbDay(
-            startedAt: start,
-            endedAt: start.addingTimeInterval(30 * 60),
-            points: [
-                .init(timestamp: start, latitude: 43.615, longitude: -116.202, horizontalAccuracy: 8),
-                .init(timestamp: start.addingTimeInterval(30 * 60), latitude: 43.620, longitude: -116.210, horizontalAccuracy: 8)
-            ],
-            stops: [stop]
-        )
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-        try encoder.encode([day]).write(to: archiveURL, options: .atomic)
-
-        let firstStore = FireVaultBreadcrumbStore(archiveURL: archiveURL, liveActivitiesEnabled: false)
-        _ = firstStore.prepareReportDays(anchorDayID: day.id, accounts: [account])
-        let firstEndpoints = try XCTUnwrap(firstStore.days.first?.reportEndpoints)
-        XCTAssertEqual(firstStore.days.first?.stops.first?.accountCategory, "Government")
-
-        var changedAccount = account
-        changedAccount.name = "Renamed After Report"
-        changedAccount.category = "Education"
-        let reloadedStore = FireVaultBreadcrumbStore(archiveURL: archiveURL, liveActivitiesEnabled: false)
-        _ = reloadedStore.prepareReportDays(anchorDayID: day.id, accounts: [changedAccount])
-        let reusedEndpoints = try XCTUnwrap(reloadedStore.days.first?.reportEndpoints)
-
-        XCTAssertEqual(reusedEndpoints.schemaVersion, firstEndpoints.schemaVersion)
-        XCTAssertEqual(reusedEndpoints.start, firstEndpoints.start)
-        XCTAssertEqual(reusedEndpoints.end, firstEndpoints.end)
-        XCTAssertLessThan(abs(reusedEndpoints.resolvedAt.timeIntervalSince(firstEndpoints.resolvedAt)), 1)
-    }
-
-    func testTripEndpointResolverRejectsStalePointsAndUsesNearbyStops() throws {
-        let start = Date(timeIntervalSince1970: 1_786_800_000)
-        let startStop = FireVaultBreadcrumbStop(
-            arrival: start.addingTimeInterval(5 * 60),
-            departure: start.addingTimeInterval(10 * 60),
-            latitude: 43.615,
-            longitude: -116.202,
-            customTitle: "Starting Depot"
-        )
-        let endStop = FireVaultBreadcrumbStop(
-            arrival: start.addingTimeInterval(50 * 60),
-            departure: start.addingTimeInterval(58 * 60),
-            latitude: 43.625,
-            longitude: -116.222,
-            customTitle: "Ending Warehouse"
-        )
-        let day = FireVaultBreadcrumbDay(
-            startedAt: start,
-            endedAt: start.addingTimeInterval(60 * 60),
-            points: [
-                .init(timestamp: start.addingTimeInterval(20 * 60), latitude: 40, longitude: -110, horizontalAccuracy: 8),
-                .init(timestamp: start.addingTimeInterval(40 * 60), latitude: 41, longitude: -111, horizontalAccuracy: 8)
-            ],
-            stops: [startStop, endStop]
-        )
-
-        let endpoints = try XCTUnwrap(FireVaultTripEndpointResolver.resolve(day: day, accounts: []))
-
-        XCTAssertEqual(endpoints.start.source, .recordedStop)
-        XCTAssertEqual(endpoints.start.title, "Starting Depot")
-        XCTAssertEqual(endpoints.end.source, .recordedStop)
-        XCTAssertEqual(endpoints.end.title, "Ending Warehouse")
-    }
-
-    func testTripEndpointResolverUsesUnavailableEndpointsWhenAllEvidenceIsStale() throws {
-        let start = Date(timeIntervalSince1970: 1_786_800_000)
-        let day = FireVaultBreadcrumbDay(
-            startedAt: start,
-            endedAt: start.addingTimeInterval(60 * 60),
-            points: [
-                .init(timestamp: start.addingTimeInterval(20 * 60), latitude: 43.615, longitude: -116.202, horizontalAccuracy: 8),
-                .init(timestamp: start.addingTimeInterval(40 * 60), latitude: 43.625, longitude: -116.222, horizontalAccuracy: 8)
-            ],
-            stops: [
-                .init(
-                    arrival: start.addingTimeInterval(25 * 60),
-                    departure: start.addingTimeInterval(35 * 60),
-                    latitude: 43.620,
-                    longitude: -116.212,
-                    customTitle: "Mid-Trip Stop"
-                )
-            ]
-        )
-
-        let endpoints = try XCTUnwrap(FireVaultTripEndpointResolver.resolve(day: day, accounts: []))
-
-        XCTAssertEqual(endpoints.start.source, .unavailable)
-        XCTAssertEqual(endpoints.end.source, .unavailable)
-    }
-
-    func testCoordinateEndpointAddressRespectsReportCoordinatePreference() {
-        let endpoint = FireVaultTripEndpoint(
-            timestamp: Date(timeIntervalSince1970: 1_786_800_000),
-            latitude: 43.615_123,
-            longitude: -116.202_456,
-            title: "Recorded GPS location",
-            address: "Approximate recorded location",
-            city: "",
-            category: nil,
-            source: .coordinate,
-            isPrivate: false
-        )
-
-        XCTAssertEqual(endpoint.reportAddress(includesCoordinates: false), "Approximate recorded location")
-        XCTAssertEqual(endpoint.reportAddress(includesCoordinates: true), "43.615123, -116.202456")
-    }
-
-    func testTripReportsIncludeStartStopsAndEndInMapAndTextExports() throws {
-        let start = Date(timeIntervalSince1970: 1_786_800_000)
-        let startEndpoint = FireVaultTripEndpoint(
-            timestamp: start,
-            latitude: 43.615,
-            longitude: -116.202,
-            title: "FireVault Office",
-            address: "10 First Avenue, Boise, ID 83702",
-            city: "Boise",
-            category: "Office",
-            source: .account,
-            isPrivate: false
-        )
-        let endEndpoint = FireVaultTripEndpoint(
-            timestamp: start.addingTimeInterval(60 * 60),
-            latitude: 43.625,
-            longitude: -116.222,
-            title: "Mountain Clinic",
-            address: "500 Health Way, Meridian, ID 83642",
-            city: "Meridian",
-            category: "Healthcare",
-            source: .account,
-            isPrivate: false
-        )
-        let endpoints = FireVaultTripReportEndpoints(
-            resolvedAt: start.addingTimeInterval(60 * 60),
-            start: startEndpoint,
-            end: endEndpoint
-        )
-        let stop = FireVaultBreadcrumbStop(
-            arrival: start.addingTimeInterval(20 * 60),
-            departure: start.addingTimeInterval(35 * 60),
-            latitude: 43.620,
-            longitude: -116.212,
-            accountID: "account-1",
-            accountName: "Central Library",
-            accountAddress: "100 Main Street, Boise, ID 83702",
-            accountCategory: "Government"
-        )
-        let day = FireVaultBreadcrumbDay(
-            startedAt: start,
-            endedAt: start.addingTimeInterval(60 * 60),
-            points: [
-                .init(timestamp: start, latitude: 43.615, longitude: -116.202, horizontalAccuracy: 8),
-                .init(timestamp: start.addingTimeInterval(60 * 60), latitude: 43.625, longitude: -116.222, horizontalAccuracy: 8)
-            ],
-            stops: [stop],
-            reportEndpoints: endpoints
-        )
-        let report = FireVaultBreadcrumbReport(
-            day: day,
-            technicianName: "Taylor",
-            companyName: "Bannerman US LLC",
-            includeCoordinates: true,
-            generatedAt: start.addingTimeInterval(60 * 60)
-        )
-        let weekly = FireVaultTripLogWeeklyReport(
-            days: [day],
-            anchorDate: start,
-            technicianName: "Taylor",
-            companyName: "Bannerman US LLC",
-            includeCoordinates: true,
-            generatedAt: start.addingTimeInterval(60 * 60)
-        )
-        let csv = try XCTUnwrap(String(data: report.csvData, encoding: .utf8))
-
-        XCTAssertEqual(report.mapMarkers.map(\.kind), [.start, .stop, .end])
-        XCTAssertEqual(report.mapMarkers.map(\.markerText), ["S", "1", "E"])
-        XCTAssertTrue(report.plainText.contains("Start: FireVault Office"))
-        XCTAssertTrue(report.plainText.contains("1. Central Library"))
-        XCTAssertTrue(report.plainText.contains("End: Mountain Clinic"))
-        let dailyStart = try XCTUnwrap(report.plainText.range(of: "Start: FireVault Office"))
-        let dailyStop = try XCTUnwrap(report.plainText.range(of: "1. Central Library"))
-        let dailyEnd = try XCTUnwrap(report.plainText.range(of: "End: Mountain Clinic"))
-        XCTAssertLessThan(dailyStart.lowerBound, dailyStop.lowerBound)
-        XCTAssertLessThan(dailyStop.lowerBound, dailyEnd.lowerBound)
-        XCTAssertTrue(csv.contains("\"START\""))
-        XCTAssertTrue(csv.contains("\"STOP 1\""))
-        XCTAssertTrue(csv.contains("\"Central Library\""))
-        XCTAssertTrue(csv.contains("\"END\""))
-        let csvStart = try XCTUnwrap(csv.range(of: "\"START\""))
-        let csvStop = try XCTUnwrap(csv.range(of: "\"STOP 1\""))
-        let csvEnd = try XCTUnwrap(csv.range(of: "\"END\""))
-        XCTAssertLessThan(csvStart.lowerBound, csvStop.lowerBound)
-        XCTAssertLessThan(csvStop.lowerBound, csvEnd.lowerBound)
-        XCTAssertTrue(weekly.plainText.contains("Start: FireVault Office"))
-        XCTAssertTrue(weekly.plainText.contains("End: Mountain Clinic"))
-        let weeklyStart = try XCTUnwrap(weekly.plainText.range(of: "Start: FireVault Office"))
-        let weeklyStop = try XCTUnwrap(
-            weekly.plainText.range(of: "  \(report.visits[0].arrivalText)  Central Library")
-        )
-        let weeklyEnd = try XCTUnwrap(weekly.plainText.range(of: "End: Mountain Clinic"))
-        XCTAssertLessThan(weeklyStart.lowerBound, weeklyStop.lowerBound)
-        XCTAssertLessThan(weeklyStop.lowerBound, weeklyEnd.lowerBound)
-    }
-
-    func testTripReportCoordinatePrivacyRemovesEveryMapGeometryInput() throws {
-        let start = Date(timeIntervalSince1970: 1_786_900_000)
-        let day = FireVaultBreadcrumbDay(
-            startedAt: start,
-            endedAt: start.addingTimeInterval(3_600),
-            points: [
-                .init(timestamp: start, latitude: 43.615_123, longitude: -116.202_456, horizontalAccuracy: 8),
-                .init(timestamp: start.addingTimeInterval(3_600), latitude: 43.625_789, longitude: -116.222_987, horizontalAccuracy: 8)
-            ],
-            stops: [
-                .init(
-                    arrival: start.addingTimeInterval(1_200),
-                    departure: start.addingTimeInterval(1_800),
-                    latitude: 43.620_555,
-                    longitude: -116.212_555,
-                    accountID: "A-PRIVATE-TEST",
-                    accountName: "Central Library",
-                    accountAddress: "100 Main Street"
-                )
-            ]
-        )
-        let report = FireVaultBreadcrumbReport(
-            day: day,
-            technicianName: "Taylor",
-            companyName: "Bannerman US LLC",
-            includeCoordinates: false,
-            generatedAt: start.addingTimeInterval(3_600)
-        )
-
-        XCTAssertTrue(report.routePoints.isEmpty)
-        XCTAssertTrue(report.mapStops.isEmpty)
-        XCTAssertTrue(report.mapMarkers.isEmpty)
-        XCTAssertNil(report.endpoints.start.latitude)
-        XCTAssertNil(report.endpoints.start.longitude)
-        XCTAssertNil(report.endpoints.end.latitude)
-        XCTAssertNil(report.endpoints.end.longitude)
-        XCTAssertTrue(report.visits.allSatisfy { $0.latitude == nil && $0.longitude == nil })
-
-        let pdf = FireVaultTripLogPDFRenderer.daily(
-            report: report,
-            detail: .compact,
-            mapImage: nil
-        )
-        XCTAssertFalse(pdf.isEmpty)
-        XCTAssertFalse(FireVaultTripLogImageRenderer.images(from: pdf).isEmpty)
-        let csv = try XCTUnwrap(String(data: report.csvData, encoding: .utf8))
-        XCTAssertFalse(csv.contains("43.615123"))
-        XCTAssertFalse(csv.contains("-116.202456"))
-        XCTAssertFalse(csv.contains("43.620555"))
-        XCTAssertFalse(csv.contains("-116.212555"))
     }
 
     func testBreadcrumbReportRedactsEveryPersonalStopDetail() throws {
@@ -3583,10 +2184,6 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(redacted.technicianNote.isEmpty)
         XCTAssertNil(redacted.latitude)
         XCTAssertNil(redacted.longitude)
-        XCTAssertFalse(report.mapMarkers.contains(where: { marker in
-            abs(marker.latitude - personalStop.latitude) < 0.000_001
-                && abs(marker.longitude - personalStop.longitude) < 0.000_001
-        }))
         XCTAssertFalse(report.plainText.contains("Private Location Name"))
         XCTAssertFalse(report.plainText.contains("Secret personal note"))
         XCTAssertFalse(csv.contains("Private Address"))
@@ -4295,28 +2892,8 @@ final class FireVaultTests: XCTestCase {
         XCTAssertGreaterThan(region.span.longitudeDelta, 0)
     }
 
-    func testLiveNearbyDoesNotThrottleLiveSpeedByDistance() {
-        XCTAssertEqual(
-            FireVaultLocationService.liveNearbyDistanceFilter,
-            kCLDistanceFilterNone
-        )
-    }
-
-    func testDiagnosticsRestoresNearbyReceiverConfiguration() {
-        let service = FireVaultLocationService()
-
-        service.startLiveNearbyUpdates(highAccuracy: false)
-        service.startDiagnosticsUpdates(highAccuracy: true)
-        XCTAssertEqual(service.diagnosticsActivityTypeText, "Other")
-        XCTAssertEqual(service.diagnosticsDesiredAccuracy, kCLLocationAccuracyBest)
-
-        service.stopDiagnosticsUpdates()
-
-        XCTAssertEqual(service.diagnosticsActivityTypeText, "Automotive navigation")
-        XCTAssertEqual(service.diagnosticsDesiredAccuracy, kCLLocationAccuracyHundredMeters)
-        XCTAssertEqual(service.diagnosticsDistanceFilter, FireVaultLocationService.liveNearbyDistanceFilter)
-        XCTAssertFalse(service.diagnosticsAutomaticPausingEnabled)
-        service.stopLiveNearbyUpdates()
+    func testLiveNearbyUsesDrivingDistanceRefreshThreshold() {
+        XCTAssertEqual(FireVaultLocationService.liveNearbyDistanceFilter, 50)
     }
 
     func testNearbyAccountCameraUsesTightAccountZoom() {
@@ -4382,6 +2959,38 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(store.accounts.first(where: { $0.id == account.id })?.tags.contains("Commercial") == true)
     }
 
+    func testDeletingCategoryRemovesAccountCategoryTagsAndPersistedRuleResult() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        store.exitDemoMode()
+        let account = store.addAccount()
+        let retiredCategory = "Retired Customer"
+        let rule = FireVaultCategoryRule(
+            field: .accountName,
+            condition: .contains,
+            value: "New Account",
+            categoryTag: retiredCategory
+        )
+
+        store.configureCategoryRules([rule])
+        XCTAssertEqual(store.accounts.first(where: { $0.id == account.id })?.category, retiredCategory)
+        XCTAssertTrue(store.accounts.first(where: { $0.id == account.id })?.tags.contains(retiredCategory) == true)
+
+        XCTAssertEqual(store.removeCategories(["  retired customer  "]), 1)
+
+        let cleaned = try XCTUnwrap(store.accounts.first(where: { $0.id == account.id }))
+        XCTAssertEqual(cleaned.category, "")
+        XCTAssertFalse(cleaned.tags.contains { $0.caseInsensitiveCompare(retiredCategory) == .orderedSame })
+
+        let reloaded = FireVaultStore(defaults: defaults)
+        reloaded.exitDemoMode()
+        let persisted = try XCTUnwrap(reloaded.accounts.first(where: { $0.id == account.id }))
+        XCTAssertEqual(persisted.category, "")
+        XCTAssertFalse(persisted.tags.contains { $0.caseInsensitiveCompare(retiredCategory) == .orderedSame })
+    }
+
     func testAssigningCategoryAgainReenablesCategoryRules() throws {
         let suite = "FireVaultTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -4445,6 +3054,168 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(FireVaultGooglePlacesError.notAuthenticated.localizedDescription.contains("Sign in"))
         XCTAssertTrue(FireVaultGooglePlacesError.noMatches.localizedDescription.contains("manually"))
         XCTAssertTrue(FireVaultGooglePlacesError.unavailable.localizedDescription.contains("try again"))
+    }
+
+    func testFullVaultBackupRoundTripsAccountsSettingsTripLogAndMediaIntegrity() throws {
+        var preferences = FireVaultNativePreferences()
+        preferences.technician.name = "Backup Technician"
+        let day = FireVaultBreadcrumbDay(
+            startedAt: Date(timeIntervalSince1970: 1_786_000_000),
+            endedAt: Date(timeIntervalSince1970: 1_786_003_600)
+        )
+        let media = FireVaultVaultMediaRecord(
+            accountID: "sample-account",
+            fileName: "sample.jpg",
+            data: Data("field-photo".utf8)
+        )
+        let payload = FireVaultVaultBackupPayload(
+            appVersion: "1.08.60",
+            accounts: [],
+            preferences: preferences,
+            settingsView: FireVaultSettingsViewPreferences(mode: .advanced),
+            appearance: .light,
+            tripLogDays: [day],
+            media: [media]
+        )
+
+        let decoded = try FireVaultVaultBackupPayload.decode(payload.encoded())
+
+        XCTAssertEqual(decoded.preferences.technician.name, "Backup Technician")
+        XCTAssertEqual(decoded.settingsView.mode, .advanced)
+        XCTAssertEqual(decoded.appearance, .light)
+        XCTAssertEqual(decoded.tripLogDays, [day])
+        XCTAssertEqual(decoded.media, [media])
+    }
+
+    func testFullVaultBackupRejectsTamperedMedia() throws {
+        var media = FireVaultVaultMediaRecord(
+            accountID: "sample-account",
+            fileName: "sample.jpg",
+            data: Data("original".utf8)
+        )
+        media.data = Data("tampered".utf8)
+        let payload = FireVaultVaultBackupPayload(
+            appVersion: "1.08.60",
+            accounts: [],
+            preferences: FireVaultNativePreferences(),
+            settingsView: FireVaultSettingsViewPreferences(),
+            appearance: .dark,
+            tripLogDays: [],
+            media: [media]
+        )
+
+        XCTAssertThrowsError(try FireVaultVaultBackupPayload.decode(payload.encoded()))
+    }
+
+    func testProductionAccountArchiveMigratesAndReloadsOutsideUserDefaults() async throws {
+        let suite = "FireVaultTests.AccountArchive.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultAccountArchive-\(UUID().uuidString)", isDirectory: true)
+        let archiveURL = directory.appendingPathComponent("accounts.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = FireVaultStore(defaults: defaults, accountArchiveURL: archiveURL)
+        let account = store.addAccount()
+        let persistenceDeadline = ContinuousClock.now + .seconds(2)
+        while ContinuousClock.now < persistenceDeadline,
+              FireVaultAccountArchive.load(from: archiveURL)?.contains(where: { $0.id == account.id }) != true {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        defaults.removeObject(forKey: "firevault.native.production-accounts.v1")
+
+        let reloaded = FireVaultStore(defaults: defaults, accountArchiveURL: archiveURL)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archiveURL.path))
+        XCTAssertEqual(reloaded.accounts.map(\.id), [account.id])
+    }
+
+    func testTripLogRouteSamplingUsesBatteryConsciousDensity() {
+        XCTAssertEqual(FireVaultBreadcrumbRules.minimumPointDistance, 75)
+        XCTAssertEqual(FireVaultBreadcrumbRules.maximumPointInterval, 120)
+    }
+
+    func testHelpCatalogCoversEveryTopicWithActionableSteps() {
+        let topics = FireVaultHelpCatalog.topics
+
+        XCTAssertEqual(topics.count, FireVaultHelpTopicID.allCases.count)
+        XCTAssertEqual(Set(topics.map(\.id)).count, topics.count)
+        XCTAssertTrue(topics.allSatisfy { $0.steps.count >= 4 })
+
+        for topic in topics {
+            XCTAssertFalse(topic.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            XCTAssertFalse(topic.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            XCTAssertFalse(topic.successDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            XCTAssertEqual(Set(topic.steps.map(\.id)).count, topic.steps.count)
+            XCTAssertTrue(topic.steps.allSatisfy {
+                !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && !$0.detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            })
+        }
+    }
+
+    func testHelpCatalogUsesCurrentInAppControlNames() throws {
+        let sync = try XCTUnwrap(FireVaultHelpCatalog.topic(.cloudSync))
+        let trip = try XCTUnwrap(FireVaultHelpCatalog.topic(.tripLog))
+        let accounts = try XCTUnwrap(FireVaultHelpCatalog.topic(.accounts))
+        let privacy = try XCTUnwrap(FireVaultHelpCatalog.topic(.privacy))
+
+        XCTAssertTrue(sync.searchableText.contains("settings → technician profile"))
+        XCTAssertTrue(sync.searchableText.contains("sync now"))
+        XCTAssertTrue(sync.searchableText.contains("last checked"))
+        XCTAssertTrue(sync.searchableText.contains("last successful sync"))
+        XCTAssertTrue(trip.searchableText.contains("recording → start trip log"))
+        XCTAssertTrue(trip.searchableText.contains("stop trip log"))
+        XCTAssertTrue(accounts.searchableText.contains("delete customer account"))
+        XCTAssertTrue(privacy.searchableText.contains("settings → security → account data & deletion"))
+        XCTAssertTrue(privacy.searchableText.contains("delete account and data"))
+    }
+
+    func testHelpCatalogDoesNotAdvertiseUnreleasedPurchasingOrMediaCloudSync() {
+        let allHelp = FireVaultHelpCatalog.topics.map(\.searchableText).joined(separator: " ")
+
+        XCTAssertFalse(allHelp.contains("$29"))
+        XCTAssertFalse(allHelp.contains("$49"))
+        XCTAssertFalse(allHelp.contains("buy pro"))
+        XCTAssertTrue(allHelp.contains("photos and scans follow the destinations configured"))
+        XCTAssertTrue(allHelp.contains("connected storage remains inactive until it is configured"))
+    }
+
+    func testHelpSearchFindsRelevantTaskGuides() {
+        XCTAssertEqual(FireVaultHelpCatalog.matching("delete customer").map(\.id), [.accounts, .privacy])
+        XCTAssertTrue(FireVaultHelpCatalog.matching("precise location").contains { $0.id == .tripLog })
+        XCTAssertTrue(FireVaultHelpCatalog.matching("drop pins").contains { $0.id == .carPlay })
+        XCTAssertEqual(FireVaultHelpCatalog.matching("no-such-help-topic"), [])
+    }
+
+    func testHelpExternalResourcesUseOfficialAppleHTTPSPages() {
+        let resources = FireVaultHelpCatalog.topics.flatMap(\.resources)
+
+        XCTAssertFalse(resources.isEmpty)
+        XCTAssertTrue(resources.allSatisfy { resource in
+            resource.url.scheme == "https" && resource.url.host == "support.apple.com"
+        })
+    }
+
+    func testAboutScreenCreditsBannermanUSLLC() {
+        XCTAssertEqual(FireVaultPublisherInfo.name, "Bannerman US LLC")
+        XCTAssertEqual(FireVaultPublisherInfo.website, "bannerman.us")
+        XCTAssertEqual(FireVaultPublisherInfo.websiteURL.absoluteString, "https://bannerman.us")
+        XCTAssertEqual(FireVaultPublisherInfo.supportEmail, "David@Bannerman.us")
+        XCTAssertEqual(FireVaultPublisherInfo.supportEmailURL.scheme, "mailto")
+    }
+
+    func testAboutScreenUsesEmbeddedBuildTimestampInsteadOfInstallTime() {
+        XCTAssertEqual(
+            FireVaultBuildInfo.displayText(infoDictionary: [
+                "FireVaultBuildDate": "\"Aug 22 2026\"",
+                "FireVaultBuildTime": "\"18:04:15\""
+            ]),
+            "Aug 22 2026 at 18:04:15"
+        )
+        XCTAssertEqual(FireVaultBuildInfo.displayText(infoDictionary: [:]), "Unavailable")
     }
 
     private func testLocation(

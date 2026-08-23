@@ -573,13 +573,17 @@ private struct FireVaultIPadAccountsWorkspace: View {
 
     @State private var searchText = ""
     @State private var sort: FireVaultIPadAccountSort = .alphabetic
+    private let plusCodeSearchIsEnabled = FireVaultNativeSettingsStore().preferences.plusCodes.searchable
 
     private var accounts: [FireVaultNativeAccount] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let filtered = query.isEmpty
             ? payload.accounts
-            : payload.accounts.filter {
-                [$0.name, $0.address, $0.accountId, $0.category]
+            : payload.accounts.filter { account in
+                let locationCodes = plusCodeSearchIsEnabled
+                    ? store.accounts.first(where: { $0.id == account.id })?.locations.map(\.plusCode).joined(separator: " ") ?? ""
+                    : ""
+                return [account.name, account.address, account.accountId, account.category, locationCodes]
                     .joined(separator: " ")
                     .localizedCaseInsensitiveContains(query)
             }
@@ -989,15 +993,11 @@ private struct FireVaultIPadAccountWorkspace: View {
             .buttonStyle(.borderedProminent)
 
             Button("Scan", systemImage: "doc.viewfinder") {
-                store.selectCaptureAccount(account.id)
-                store.requestCapture(.scan)
-                store.closeAccount(to: .photo)
+                store.addDocument(to: account.id, scan: true)
             }
             .buttonStyle(.bordered)
 
             Button("Photo", systemImage: "camera.fill") {
-                store.selectCaptureAccount(account.id)
-                store.requestCapture(.photo)
                 store.closeAccount(to: .photo)
             }
             .buttonStyle(.bordered)
@@ -1043,7 +1043,7 @@ private struct FireVaultIPadAccountWorkspace: View {
     @ViewBuilder
     private var documentsSection: some View {
         if !account.documents.isEmpty {
-            accountSection(title: "PHOTOS & DOCUMENTS", symbol: "photo.on.rectangle.angled") {
+            accountSection(title: "FILES & SCANS", symbol: "doc.viewfinder") {
                 ForEach(account.documents.prefix(6)) { document in
                     LabeledContent(document.title, value: document.subtitle)
                         .font(.subheadline)

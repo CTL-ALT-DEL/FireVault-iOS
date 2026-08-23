@@ -21,7 +21,6 @@ struct FireVaultIPadBreadcrumbsView: View {
     @State private var selectedStop: FireVaultIPadStopSelection?
     @State private var confirmsEnd = false
     @State private var showsReport = false
-    @State private var showsHistory = false
 
     private var selectedDay: FireVaultBreadcrumbDay? {
         if let selectedDayID {
@@ -95,6 +94,10 @@ struct FireVaultIPadBreadcrumbsView: View {
         .onAppear {
             selectedDayID = breadcrumbs.today?.id ?? breadcrumbs.days.first?.id
         }
+        .task(id: selectedDay?.id) {
+            guard let dayID = selectedDay?.id else { return }
+            breadcrumbs.resolveMissingBoundaryAddresses(for: dayID)
+        }
         .sheet(item: $selectedStop) { selection in
             FireVaultBreadcrumbStopEditor(
                 breadcrumbs: breadcrumbs,
@@ -117,15 +120,6 @@ struct FireVaultIPadBreadcrumbsView: View {
                     ),
                     availableDays: breadcrumbs.days
                 )
-            }
-        }
-        .sheet(isPresented: $showsHistory) {
-            FireVaultTripLogHistoryCalendarView(
-                breadcrumbs: breadcrumbs,
-                selectedDayID: selectedDayID
-            ) { dayID in
-                selectedDayID = dayID
-                showsHistory = false
             }
         }
         .accessibilityIdentifier("ipad-breadcrumbs-workspace")
@@ -209,8 +203,17 @@ struct FireVaultIPadBreadcrumbsView: View {
     }
 
     private var historyMenu: some View {
-        Button {
-            showsHistory = true
+        Menu {
+            ForEach(breadcrumbs.days) { day in
+                Button {
+                    selectedDayID = day.id
+                } label: {
+                    Label(
+                        day.startedAt.formatted(date: .abbreviated, time: .omitted),
+                        systemImage: day.isActive ? "record.circle" : "calendar"
+                    )
+                }
+            }
         } label: {
             VStack(spacing: 4) {
                 Image(systemName: "calendar.badge.clock")
@@ -226,12 +229,6 @@ struct FireVaultIPadBreadcrumbsView: View {
 
     private var reportButton: some View {
         Button {
-            if let selectedDay {
-                breadcrumbs.prepareReportDays(
-                    anchorDayID: selectedDay.id,
-                    accounts: store.accounts
-                )
-            }
             showsReport = true
         } label: {
             VStack(spacing: 4) {
@@ -254,6 +251,9 @@ struct FireVaultIPadBreadcrumbsView: View {
                     selectedDayID = breadcrumbs.activeDay?.id
                 }
             } else if breadcrumbs.isRecording {
+                Button("Pause Recording", systemImage: "pause.fill") {
+                    breadcrumbs.pauseWorkday()
+                }
                 Button("Stop Trip Log", systemImage: "stop.fill", role: .destructive) {
                     confirmsEnd = true
                 }
@@ -321,8 +321,6 @@ struct FireVaultIPadBreadcrumbsView: View {
                                     Circle().stroke(.white.opacity(0.9), lineWidth: 2)
                                 }
                                 .shadow(radius: 5)
-                                .frame(width: 44, height: 44)
-                                .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -334,7 +332,6 @@ struct FireVaultIPadBreadcrumbsView: View {
                 }
             }
             .mapStyle(.hybrid(elevation: .realistic))
-            .id(day.id)
             .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
             .shadow(
                 color: colorScheme == .light ? .black.opacity(0.22) : .clear,
@@ -400,7 +397,9 @@ struct FireVaultIPadBreadcrumbsView: View {
                 timelineRow(
                     time: day.startedAt,
                     title: "Workday Started",
-                    subtitle: "Route recording began",
+                    subtitle: day.startedAddress
+                        ?? day.points.first.map { "Near \($0.coordinate.fireVaultCoordinateLabel)" }
+                        ?? "Waiting for starting address",
                     symbol: "play.fill",
                     tint: NativeShellPalette.green
                 )
@@ -426,7 +425,9 @@ struct FireVaultIPadBreadcrumbsView: View {
                     timelineRow(
                         time: endedAt,
                         title: "Workday Ended",
-                        subtitle: miles(day.totalDistanceMeters),
+                        subtitle: [day.endedAddress, miles(day.totalDistanceMeters)]
+                            .compactMap { $0 }
+                            .joined(separator: " • "),
                         symbol: "stop.fill",
                         tint: NativeShellPalette.red
                     )

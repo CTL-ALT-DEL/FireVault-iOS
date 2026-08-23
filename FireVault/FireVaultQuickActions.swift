@@ -91,7 +91,9 @@ enum FireVaultWidgetDeepLink: Equatable {
     case tripLog
     case startTripLog
     case accounts
+    case account(String)
     case photo
+    case sync
 }
 
 @MainActor
@@ -116,8 +118,17 @@ final class FireVaultWidgetDeepLinkCenter: ObservableObject {
             pendingLink = .tripLog
         case ("accounts", _):
             pendingLink = .accounts
+        case ("account", _):
+            guard let accountID = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "id" })?
+                .value,
+                  !accountID.isEmpty else { return false }
+            pendingLink = .account(accountID)
         case ("photo", _):
             pendingLink = .photo
+        case ("sync", _):
+            pendingLink = .sync
         default:
             return false
         }
@@ -130,7 +141,6 @@ final class FireVaultWidgetDeepLinkCenter: ObservableObject {
     }
 }
 
-@MainActor
 final class FireVaultAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
@@ -143,23 +153,10 @@ final class FireVaultAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        FireVaultQuickActionCenter.shared.installShortcutItems(on: application)
-        let tripLog = FireVaultBreadcrumbStore.shared
-        if tripLog.activeDay?.isPaused == false {
-            // Recreate the Core Location and background activity sessions
-            // before loading the account repository. Apple requires an active
-            // session to be reinstated immediately after a background relaunch.
-            tripLog.restoreActiveReceiver()
-            let store = FireVaultStore()
-            tripLog.attachAccountsToActiveReceiver(store.accounts)
+        Task { @MainActor in
+            FireVaultQuickActionCenter.shared.installShortcutItems(on: application)
         }
         return true
-    }
-
-    func applicationDidEnterBackground(_ application: UIApplication) {
-        let tripLog = FireVaultBreadcrumbStore.shared
-        tripLog.prepareForBackgroundTracking()
-        tripLog.flushPendingRoutePersistence()
     }
 
     func application(

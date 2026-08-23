@@ -8,6 +8,11 @@ import UserNotifications
 final class FireVaultNotificationService {
     static let shared = FireVaultNotificationService()
 
+    private enum Category {
+        static let tripLogAttention = "firevault.triplog.attention"
+        static let handsetOnly = "firevault.handset-only"
+    }
+
     private enum Identifier {
         static let recording = "firevault.triplog.recording"
         static let paused = "firevault.triplog.paused"
@@ -17,12 +22,29 @@ final class FireVaultNotificationService {
 
     private let center = UNUserNotificationCenter.current()
 
+    private init() {
+        center.setNotificationCategories([
+            UNNotificationCategory(
+                identifier: Category.tripLogAttention,
+                actions: [],
+                intentIdentifiers: [],
+                options: [.allowInCarPlay]
+            ),
+            UNNotificationCategory(
+                identifier: Category.handsetOnly,
+                actions: [],
+                intentIdentifiers: [],
+                options: []
+            )
+        ])
+    }
+
     func authorizationStatus() async -> UNAuthorizationStatus {
         await center.notificationSettings().authorizationStatus
     }
 
     func requestAuthorization() async throws -> Bool {
-        try await center.requestAuthorization(options: [.alert, .badge, .sound])
+        try await center.requestAuthorization(options: [.alert, .badge, .sound, .carPlay])
     }
 
     func tripLogStarted(preferences: FireVaultNotificationPreferences) {
@@ -42,11 +64,23 @@ final class FireVaultNotificationService {
             ? "Review your active workday and end Trip Log when you are finished."
             : "FireVault Pro is still recording today’s Trip Log."
         content.sound = .default
+        content.categoryIdentifier = Category.tripLogAttention
         let trigger = UNCalendarNotificationTrigger(
             dateMatching: Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: reminderDate),
             repeats: false
         )
         center.add(.init(identifier: Identifier.recording, content: content, trigger: trigger))
+    }
+
+    func tripLogPaused(preferences: FireVaultNotificationPreferences) {
+        center.removePendingNotificationRequests(withIdentifiers: [Identifier.recording, Identifier.paused])
+        guard preferences.isEnabled, preferences.pausedReminderEnabled else { return }
+        schedule(
+            identifier: Identifier.paused,
+            title: "Trip Log is paused",
+            body: "Resume Trip Log before continuing your route.",
+            after: 15 * 60
+        )
     }
 
     func tripLogEnded() {
@@ -64,6 +98,7 @@ final class FireVaultNotificationService {
             ? "Trip Log confirmed an on-site account stop."
             : "Trip Log confirmed your arrival at \(stop.accountName ?? "an account")."
         content.sound = .default
+        content.categoryIdentifier = Category.handsetOnly
         center.add(.init(
             identifier: Identifier.arrival(stop.id),
             content: content,
@@ -80,6 +115,7 @@ final class FireVaultNotificationService {
         content.title = "Trip Log stop needs review"
         content.body = "Confirm, identify, or disregard this stop when it is safe to use your iPhone."
         content.sound = .default
+        content.categoryIdentifier = Category.handsetOnly
         content.userInfo = ["tripLogStopID": stop.id.uuidString]
         center.add(.init(
             identifier: Identifier.review(stop.id),
@@ -133,6 +169,7 @@ final class FireVaultNotificationService {
         content.title = title
         content.body = body
         content.sound = .default
+        content.categoryIdentifier = Category.tripLogAttention
         center.add(.init(
             identifier: identifier,
             content: content,
@@ -172,6 +209,7 @@ struct NativeNotificationSettingsView: View {
 
             Section("Trip Log") {
                 Toggle("Still recording reminder", isOn: optionalBinding(\.tripLogStillRecording, default: true))
+                Toggle("Paused reminder", isOn: optionalBinding(\.tripLogPaused, default: true))
                 Toggle("Arrival notifications", isOn: optionalBinding(\.arrivalAlerts, default: false))
                 Toggle("Unknown stop review", isOn: optionalBinding(\.unknownStopReview, default: false))
                 Picker("End-of-day reminder", selection: optionalIntBinding(\.endOfDayHour, default: 18)) {
@@ -252,7 +290,7 @@ struct NativeNotificationSettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Live Activity Test")
                                 .font(.headline)
-                            Text("Preview recording and completed states")
+                            Text("Preview recording, paused, and completed states")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -268,6 +306,7 @@ struct NativeNotificationSettingsView: View {
             }
 #endif
         }
+        .fireVaultThemedCollection()
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaPadding(.bottom, 82)
@@ -315,6 +354,7 @@ struct NativeNotificationSettingsView: View {
 #if DEBUG
 private enum FireVaultNotificationTestTemplate: String, CaseIterable, Identifiable {
     case recording = "Trip Log Recording"
+    case paused = "Trip Log Paused"
     case inspection = "Upcoming Inspection"
     case failure = "Report/Sync Failure"
     case security = "Security Alert"
@@ -324,6 +364,7 @@ private enum FireVaultNotificationTestTemplate: String, CaseIterable, Identifiab
     var title: String {
         switch self {
         case .recording: "Trip Log is still recording"
+        case .paused: "Trip Log is paused"
         case .inspection: "Inspection coming up"
         case .failure: "FireVault needs attention"
         case .security: "New FireVault sign-in"
@@ -333,6 +374,7 @@ private enum FireVaultNotificationTestTemplate: String, CaseIterable, Identifiab
     var body: String {
         switch self {
         case .recording: "Review your active workday and end Trip Log when you are finished."
+        case .paused: "Resume Trip Log before continuing your route."
         case .inspection: "An upcoming inspection is ready for review."
         case .failure: "A report, sync, or backup operation could not be completed."
         case .security: "Review recent account activity in FireVault Pro."
@@ -405,6 +447,7 @@ private struct FireVaultNotificationDeveloperView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .fireVaultThemedCollection()
         .navigationTitle("Notification Lab")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaPadding(.bottom, 82)
@@ -473,6 +516,11 @@ private struct FireVaultLiveActivityDeveloperView: View {
                 }
                 .tint(.red)
 
+                Button("Show Paused", systemImage: "pause.circle.fill") {
+                    show(.paused)
+                }
+                .tint(.orange)
+
                 Button("Show Completed", systemImage: "checkmark.circle.fill") {
                     sampleDay.endedAt = Date()
                     FireVaultTripLogLiveActivityController.end(
@@ -502,6 +550,7 @@ private struct FireVaultLiveActivityDeveloperView: View {
                 }
             }
         }
+        .fireVaultThemedCollection()
         .navigationTitle("Live Activity Lab")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaPadding(.bottom, 82)
