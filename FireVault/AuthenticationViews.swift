@@ -118,6 +118,28 @@ final class FireVaultAuthentication: ObservableObject {
         }
     }
 
+    func deleteAccount(store: FireVaultStore) async {
+        guard !isWorking else { return }
+        clearMessages()
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            let session = try await SupabaseManager.client.auth.session
+            let userID = session.user.id
+            _ = try await SupabaseManager.client.functions.invoke("delete-account")
+            let removedLocalVault = store.eraseLocalAccountDataAfterCloudDeletion(for: userID)
+            try? await SupabaseManager.client.auth.signOut()
+            signedInEmail = ""
+            confirmationMessage = removedLocalVault
+                ? "Your FireVault account and its local account records were deleted."
+                : "Your cloud account was deleted. This iPhone's local vault belongs to a different login and was kept safely on the device."
+            phase = .signedOut
+        } catch {
+            errorMessage = friendlyMessage(for: error)
+        }
+    }
+
+
     func clearMessages() {
         errorMessage = nil
         confirmationMessage = nil
