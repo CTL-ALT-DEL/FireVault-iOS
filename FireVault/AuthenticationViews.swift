@@ -396,11 +396,10 @@ private struct FireVaultAuthenticationView: View {
     }
 }
 
-struct FireVaultAccountSettingsView: View {
+struct FireVaultAccountProfileSections: View {
     @EnvironmentObject private var authentication: FireVaultAuthentication
     @ObservedObject var store: FireVaultStore
     @State private var showsSignOutConfirmation = false
-    @State private var showsDeleteConfirmation = false
 
     private var accountEmail: String {
         let email = authentication.signedInEmail.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -432,44 +431,55 @@ struct FireVaultAccountSettingsView: View {
     }
 
     var body: some View {
-        Form {
+        Group {
             Section("FireVault Account") {
-                LabeledContent {
-                    Text(accountEmail)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.trailing)
-                } label: {
-                    Label("Signed in as", systemImage: "person.crop.circle.fill")
+                HStack(spacing: 12) {
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(NativeShellPalette.green)
+                        .frame(width: 34)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Signed in as")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(accountEmail)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                    }
                 }
 
-                Label {
-                    Text("This account securely connects your iPhone, CSV imports, and FireVault web portal.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } icon: {
-                    Image(systemName: "checkmark.shield.fill")
-                        .foregroundStyle(NativeShellPalette.green)
-                }
+                Text("Connects this device, customer records, CSV imports, and the FireVault portal.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
-                LabeledContent {
-                    Label(store.cloudSyncStatusText, systemImage: cloudSyncSymbol)
+                HStack(spacing: 12) {
+                    Image(systemName: cloudSyncSymbol)
+                        .font(.title3.weight(.semibold))
                         .foregroundStyle(cloudSyncTint)
-                } label: {
-                    Text("Status")
+                        .frame(width: 30)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Account records")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(store.cloudSyncStatusText)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(cloudSyncTint)
+                    }
+
+                    Spacer(minLength: 4)
+                    if store.isCloudSyncing { ProgressView() }
                 }
 
-                LabeledContent("Last successful sync") {
-                    Text(lastSyncText)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.trailing)
-                }
-
-                LabeledContent("Last checked") {
-                    Text(lastCheckedText)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.trailing)
+                HStack(spacing: 12) {
+                    syncTimestamp(title: "Last synced", value: lastSyncText)
+                    Divider().frame(height: 34)
+                    syncTimestamp(title: "Last checked", value: lastCheckedText)
                 }
 
                 Button {
@@ -477,15 +487,12 @@ struct FireVaultAccountSettingsView: View {
                         await store.syncAccountsNow()
                     }
                 } label: {
-                HStack {
+                    HStack {
                         Label(
                             store.isCloudSyncing ? "Syncing…" : "Sync Now",
                             systemImage: "arrow.triangle.2.circlepath"
                         )
                         Spacer()
-                        if store.isCloudSyncing {
-                            ProgressView()
-                        }
                     }
                 }
                 .disabled(store.isCloudSyncing || store.demoMode)
@@ -508,7 +515,7 @@ struct FireVaultAccountSettingsView: View {
                 Text(
                     store.demoMode
                         ? "Demo data stays on this iPhone."
-                        : "FireVault checks your account data when the app opens or becomes active. Tap Sync Now after website changes to refresh immediately."
+                        : "FireVault checks automatically. Use Sync Now after portal changes or whenever you want an immediate check."
                 )
             }
 
@@ -528,19 +535,7 @@ struct FireVaultAccountSettingsView: View {
             } footer: {
                 Text("Signing out disconnects this device from your FireVault account. Local information remains on this device.")
             }
-            Section {
-                Button("Delete Account", role: .destructive) {
-                    showsDeleteConfirmation = true
-                }
-                .disabled(authentication.isWorking || store.isCloudSyncing)
-            } header: {
-                Text("Delete FireVault Account")
-            } footer: {
-                Text("Permanently deletes your FireVault cloud account and its data, then removes local account records from this iPhone.")
-            }
         }
-        .navigationTitle("Account & Sign-In")
-        .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
             "Sign out of FireVault Pro?",
             isPresented: $showsSignOutConfirmation,
@@ -555,6 +550,49 @@ struct FireVaultAccountSettingsView: View {
         } message: {
             Text("You will return to the Log In or Sign Up screen.")
         }
+    }
+
+    private func syncTimestamp(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct FireVaultAccountDeletionView: View {
+    @EnvironmentObject private var authentication: FireVaultAuthentication
+    @ObservedObject var store: FireVaultStore
+    @State private var showsDeleteConfirmation = false
+
+    var body: some View {
+        Form {
+            Section {
+                Label("Permanent account deletion", systemImage: "exclamationmark.shield.fill")
+                    .foregroundStyle(.orange)
+                Text("This removes your FireVault cloud sign-in and associated cloud data. Local account records are cleared only when they belong to this login.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Button("Delete FireVault Account", role: .destructive) {
+                    showsDeleteConfirmation = true
+                }
+                .disabled(authentication.isWorking || store.isCloudSyncing)
+            } footer: {
+                Text("This action is provided separately from customer-account deletion and cannot be undone.")
+            }
+        }
+        .navigationTitle("Account Deletion")
+        .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
             "Permanently delete your FireVault account?",
             isPresented: $showsDeleteConfirmation,

@@ -2525,22 +2525,6 @@ struct NativeSettingsView: View {
 
     private var profileSection: some View {
         Section {
-            NavigationLink {
-                FireVaultAccountSettingsView(store: store)
-            } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Account & Sign-In")
-                        Text("Sync, sign out, or delete your account")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "person.crop.circle.badge.checkmark")
-                        .foregroundStyle(NativeShellPalette.green)
-                }
-            }
-
             DisclosureGroup(isExpanded: Binding(
                 get: { isTechnicianGroupExpanded },
                 set: { isExpanded in
@@ -2551,9 +2535,18 @@ struct NativeSettingsView: View {
                 }
             )) {
                 NavigationLink {
-                    NativeTechnicianSettingsView(settings: settings)
+                    NativeTechnicianSettingsView(settings: settings, store: store)
                 } label: {
-                    Label("Technician Profile", systemImage: "person.text.rectangle")
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Technician Profile")
+                            Text("Profile, sign-in, and account sync")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "person.text.rectangle")
+                    }
                 }
 
                 NavigationLink {
@@ -2712,7 +2705,7 @@ struct NativeSettingsView: View {
     @ViewBuilder
     private func nativeDestination(_ id: String) -> some View {
         switch id {
-        case "tech": NativeTechnicianSettingsView(settings: settings)
+        case "tech": NativeTechnicianSettingsView(settings: settings, store: store)
         case "overlay": NativeOverlaySettingsView(settings: settings)
         case "gps": NativeGPSSettingsView(settings: settings, locationService: locationService)
         case "plusCodes": NativePlusCodeSettingsView(settings: settings, locationService: locationService)
@@ -2727,7 +2720,7 @@ struct NativeSettingsView: View {
         case "backup": NativeBackupRestoreView(store: store, settings: settings, breadcrumbs: breadcrumbs)
         case "webdav": NativeWebDAVSettingsView(settings: settings)
         case "privacy": NativePrivacySettingsView(settings: settings)
-        case "security": NativeSecuritySettingsView(settings: settings)
+        case "security": NativeSecuritySettingsView(settings: settings, store: store)
         case "manual": NativeManualView()
         case "demo": NativeDemoSettingsView(store: store)
         case "about":
@@ -2853,7 +2846,6 @@ struct FireVaultIPadSettingsWorkspace: View {
                             symbol: "person.crop.circle.fill",
                             tint: NativeShellPalette.blue,
                             items: [
-                                ("account", "Account & Sign-In", "person.crop.circle.badge.checkmark"),
                                 ("tech", "Technician Profile", "person.text.rectangle"),
                                 ("settingsView", "Preferred Settings View", "rectangle.3.group"),
                                 ("appearance", "Appearance", "circle.lefthalf.filled")
@@ -2937,8 +2929,7 @@ struct FireVaultIPadSettingsWorkspace: View {
     @ViewBuilder
     private func destination(_ id: String) -> some View {
         switch id {
-        case "account": FireVaultAccountSettingsView(store: store)
-        case "tech": NativeTechnicianSettingsView(settings: settings)
+        case "tech": NativeTechnicianSettingsView(settings: settings, store: store)
         case "settingsView": NativeSettingsViewPreferencesView(settings: settings)
         case "appearance": NativeAppearanceSettingsView(settings: settings)
         case "overlay": NativeOverlaySettingsView(settings: settings)
@@ -2955,7 +2946,7 @@ struct FireVaultIPadSettingsWorkspace: View {
         case "backup": NativeBackupRestoreView(store: store, settings: settings, breadcrumbs: breadcrumbs)
         case "webdav": NativeWebDAVSettingsView(settings: settings)
         case "privacy": NativePrivacySettingsView(settings: settings)
-        case "security": NativeSecuritySettingsView(settings: settings)
+        case "security": NativeSecuritySettingsView(settings: settings, store: store)
         case "manual": NativeManualView()
         case "demo": NativeDemoSettingsView(store: store)
         case "about":

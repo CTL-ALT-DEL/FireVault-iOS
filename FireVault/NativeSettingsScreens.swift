@@ -170,12 +170,14 @@ struct NativeSettingsViewPreferencesView: View {
 
 struct NativeTechnicianSettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var store: FireVaultStore
     @State private var draft: FireVaultNativePreferences
     @FocusState private var focused: Bool
     @State private var showsSubscriptionSetupMessage = false
 
-    init(settings: FireVaultNativeSettingsStore) {
+    init(settings: FireVaultNativeSettingsStore, store: FireVaultStore) {
         self.settings = settings
+        self.store = store
         _draft = State(initialValue: settings.preferences)
     }
 
@@ -190,6 +192,8 @@ struct NativeTechnicianSettingsView: View {
                 TextField("Phone", text: $draft.technician.phone).keyboardType(.phonePad).focused($focused)
                 TextField("Email", text: $draft.technician.email).keyboardType(.emailAddress).textInputAutocapitalization(.never).focused($focused)
             }
+
+            FireVaultAccountProfileSections(store: store)
 
             Section {
                 VStack(alignment: .leading, spacing: 12) {

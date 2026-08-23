@@ -3162,13 +3162,14 @@ final class FireVaultTests: XCTestCase {
         let accounts = try XCTUnwrap(FireVaultHelpCatalog.topic(.accounts))
         let privacy = try XCTUnwrap(FireVaultHelpCatalog.topic(.privacy))
 
-        XCTAssertTrue(sync.searchableText.contains("settings → account & sign-in"))
+        XCTAssertTrue(sync.searchableText.contains("settings → technician profile"))
         XCTAssertTrue(sync.searchableText.contains("sync now"))
         XCTAssertTrue(sync.searchableText.contains("last checked"))
         XCTAssertTrue(sync.searchableText.contains("last successful sync"))
         XCTAssertTrue(trip.searchableText.contains("recording → start trip log"))
         XCTAssertTrue(trip.searchableText.contains("stop trip log"))
         XCTAssertTrue(accounts.searchableText.contains("delete customer account"))
+        XCTAssertTrue(privacy.searchableText.contains("settings → security → account data & deletion"))
         XCTAssertTrue(privacy.searchableText.contains("delete account and data"))
     }
 

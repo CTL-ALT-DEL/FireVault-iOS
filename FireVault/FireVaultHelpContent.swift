@@ -86,7 +86,7 @@ enum FireVaultHelpCatalog {
             visual: .quickStart,
             steps: [
                 .init("quick-login", "Log in", "Open FireVault Pro and use Log In. If the main tabs are already visible, you are signed in."),
-                .init("quick-sync", "Check the vault", "Open Settings → Account & Sign-In, then tap Sync Now. Wait for Status to read Up to date."),
+                .init("quick-sync", "Check the vault", "Open Settings → Technician Profile, then tap Sync Now. Wait for account-record status to read Up to date."),
                 .init("quick-accounts", "Find an account", "Open Accounts and search by name, address, or account ID. Tap a result to open its field workspace."),
                 .init("quick-trip", "Start the workday", "Open Trip Log, tap Recording, then Start Trip Log. The status changes from READY to RECORDING.")
             ],
@@ -129,7 +129,7 @@ enum FireVaultHelpCatalog {
             tint: "purple",
             visual: .cloudSync,
             steps: [
-                .init("sync-open", "Open cloud status", "Go to Settings → Account & Sign-In."),
+                .init("sync-open", "Open cloud status", "Go to Settings → Technician Profile and find Cloud Sync below your contact information."),
                 .init("sync-run", "Run a manual check", "Tap Sync Now. Keep FireVault open while the progress indicator is visible."),
                 .init("sync-read", "Read the result", "Up to date means the account-record sync finished. Last checked is the latest attempt; Last successful sync is the latest completed sync."),
                 .init("sync-retry", "Retry safely", "If Status says Needs attention, check the connection and sign-in, then tap Sync Now again. FireVault keeps local records when a sync fails.")
@@ -261,7 +261,7 @@ enum FireVaultHelpCatalog {
                 .init("privacy-lock", "Lock private screens", "Open Settings → Privacy Lock to require device authentication and optionally hide content in the app switcher."),
                 .init("privacy-backup", "Create a protected backup", "Open Settings → Backup & Restore, create the backup, and save the exported file somewhere you control."),
                 .init("privacy-customer", "Delete one customer", "Open that customer and choose Delete Customer Account. This removes only the selected customer and its field records."),
-                .init("privacy-login", "Delete the FireVault sign-in", "Open Settings → Account & Sign-In → Delete Account, then confirm Delete Account and Data. This permanently removes the cloud sign-in and its data, then clears local account records.")
+                .init("privacy-login", "Delete the FireVault sign-in", "Open Settings → Security → Account Data & Deletion, choose Delete FireVault Account, then confirm Delete Account and Data. This permanently removes the cloud sign-in and its data, then clears matching local account records.")
             ],
             successTitle: "Pause before permanent deletion",
             successDetail: "Both deletion choices are intentionally named differently. Read the confirmation carefully and make a backup first when recovery may matter.",
@@ -280,7 +280,7 @@ enum FireVaultHelpCatalog {
             tint: "red",
             visual: .troubleshooting,
             steps: [
-                .init("fix-sync", "Sync says Needs attention", "Confirm the iPhone is online and you are signed in. Open Settings → Account & Sign-In, read the error, then tap Sync Now again."),
+                .init("fix-sync", "Sync says Needs attention", "Confirm the iPhone is online and you are signed in. Open Settings → Technician Profile, read the Cloud Sync error, then tap Sync Now again."),
                 .init("fix-gps", "Trip Log is waiting for GPS", "Keep the workday active, move into open sky if possible, and confirm Precise Location is on. Open Settings → GPS & Maps → GPS Diagnostics for live accuracy."),
                 .init("fix-carplay", "CarPlay shows no nearby accounts", "Open the customer on iPhone and add valid coordinates or adjust its map pin. Reopen FireVault in CarPlay after the account is mapped."),
                 .init("fix-widget", "A widget looks stale", "Open FireVault once, confirm the desired account or Trip Log state, then return to the Home Screen. iOS refreshes widgets on its own schedule."),

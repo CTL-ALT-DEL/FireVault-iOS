@@ -961,10 +961,12 @@ struct NativePrivacySettingsView: View {
 
 struct NativeSecuritySettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var store: FireVaultStore
     @State private var draft: FireVaultNativePreferences
 
-    init(settings: FireVaultNativeSettingsStore) {
+    init(settings: FireVaultNativeSettingsStore, store: FireVaultStore) {
         self.settings = settings
+        self.store = store
         _draft = State(initialValue: settings.preferences)
     }
 
@@ -1006,6 +1008,14 @@ struct NativeSecuritySettingsView: View {
                 Text("FireVault Pro stores its local vault inside the iOS application sandbox. Device authentication uses Apple’s secure system interface; FireVault Pro never receives or stores biometric data.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+            }
+
+            Section("Account Management") {
+                NavigationLink {
+                    FireVaultAccountDeletionView(store: store)
+                } label: {
+                    Label("Account Data & Deletion", systemImage: "person.crop.circle.badge.minus")
+                }
             }
         }
         .nativeSettingsForm(title: "Security") { settings.save(draft) }
