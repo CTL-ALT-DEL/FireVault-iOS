@@ -1,12 +1,10 @@
 # FireVault Current Build
 
-**Current development candidate: 1.08.59 (119)**
+**Current development candidate: 1.08.60 (120)**
 
-Build 1.08.59 (119) hardens Trip Log against repeated Core Location stalls. It
-keeps the background continuity receiver active for the full workday, reasserts
-that receiver before app suspension, and performs a true receiver rebuild after
-two unanswered soft recovery attempts. It must compile, run, and pass the Xcode
-test suite before replacing the latest tested build below.
+Build 1.08.60 (120) adds native Cloudflare Turnstile verification to Supabase
+sign-in, sign-up, and password-recovery requests. It must compile, run, and pass
+the Xcode test suite before replacing the latest tested build below.
 
 **Latest tested build: 1.08.57 (117)**
 
@@ -17,6 +15,14 @@ candidates must compile, run, and pass validation before replacing it.
 This is the only number to use when deciding whether an installed copy is current.
 In FireVault, open **Settings → About FireVault** and compare the displayed version
 and build with the number above.
+
+## Included in 1.08.60 (120)
+
+- Opens a compact in-app Turnstile challenge before protected account requests
+- Sends a fresh, single-use CAPTCHA token with Supabase sign-in and sign-up
+- Adds protected password-reset email requests from the native sign-in screen
+- Keeps passwords and account form data outside the verification WebView
+- Provides retry, expiration, network-error, and cancellation handling
 
 ## Included in 1.08.59 (119)
 
