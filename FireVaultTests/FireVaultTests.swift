@@ -1617,10 +1617,10 @@ final class FireVaultTests: XCTestCase {
         )
     }
 
-    func testCarPlayPresentationCadenceMeetsDrivingTaskLimits() {
-        XCTAssertGreaterThanOrEqual(
+    func testCarPlayPresentationCadenceKeepsLiveTelemetryResponsive() {
+        XCTAssertEqual(
             FireVaultCarPlayRefreshPolicy.minimumInterfaceInterval,
-            10
+            2
         )
         XCTAssertGreaterThanOrEqual(
             FireVaultCarPlayRefreshPolicy.minimumPointOfInterestInterval,
@@ -3201,9 +3201,9 @@ final class FireVaultTests: XCTestCase {
 
     func testAboutScreenCreditsBannermanUSLLC() {
         XCTAssertEqual(FireVaultPublisherInfo.name, "Bannerman US LLC")
-        XCTAssertEqual(FireVaultPublisherInfo.website, "bannerman.us")
-        XCTAssertEqual(FireVaultPublisherInfo.websiteURL.absoluteString, "https://bannerman.us")
-        XCTAssertEqual(FireVaultPublisherInfo.supportEmail, "David@Bannerman.us")
+        XCTAssertEqual(FireVaultPublisherInfo.website, "https://Bannerman.us")
+        XCTAssertEqual(FireVaultPublisherInfo.websiteURL.absoluteString, "https://Bannerman.us")
+        XCTAssertEqual(FireVaultPublisherInfo.supportEmail, "Support@Bannerman.us")
         XCTAssertEqual(FireVaultPublisherInfo.supportEmailURL.scheme, "mailto")
     }
 

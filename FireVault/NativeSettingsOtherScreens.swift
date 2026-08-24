@@ -1727,7 +1727,7 @@ struct NativeManualView: View {
 
             Spacer(minLength: 8)
 
-            Link(destination: URL(string: "mailto:David@Bannerman.us?subject=FireVault%20Pro%20Help")!) {
+            Link(destination: URL(string: "mailto:Support@Bannerman.us?subject=FireVault%20Pro%20Help")!) {
                 Text("Email")
                     .font(.subheadline.bold())
                     .padding(.horizontal, 14)

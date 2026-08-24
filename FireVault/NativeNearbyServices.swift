@@ -332,7 +332,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         guard location.horizontalAccuracy >= 0 else { return }
         if let latestLocation, latestLocation.timestamp > location.timestamp { return }
         latestLocation = location
-        liveSpeedMetersPerSecond = nil
+        liveSpeedMetersPerSecond = liveSpeedTracker.ingest(location)
         coordinate = location.coordinate
         FireVaultSiriLocationCache.store(location)
         isLocating = false

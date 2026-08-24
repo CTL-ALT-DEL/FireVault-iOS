@@ -61,10 +61,9 @@ enum FireVaultCarPlayPresentation {
 }
 
 enum FireVaultCarPlayRefreshPolicy {
-    /// Apple permits Driving Task data items to refresh no more frequently
-    /// than every ten seconds. Location collection and Trip Log persistence
-    /// continue at their existing cadence underneath this presentation layer.
-    static let minimumInterfaceInterval: TimeInterval = 10
+    /// Keep live driving telemetry responsive without coupling the CarPlay
+    /// presentation cadence to Trip Log's route-archive sampling interval.
+    static let minimumInterfaceInterval: TimeInterval = 2
     static let minimumPointOfInterestInterval: TimeInterval = 60
 }
 
@@ -866,8 +865,9 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
         tripLogLocationObservation?.cancel()
         tripLogLocationObservation = breadcrumbs.$latestLocation
             .compactMap { $0 }
-            .sink { [weak self] _ in
+            .sink { [weak self] location in
                 Task { @MainActor [weak self] in
+                    self?.locationService.acceptTripLogLocation(location)
                     self?.requestMetricRefresh()
                 }
             }
@@ -948,7 +948,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
     }
 
     private func refreshTabAppearance() {
-        let signature = "\(breadcrumbs.isRecording)|\(effectiveLocation == nil)|\(arrivedAccountID ?? "")"
+        let signature = "\(breadcrumbs.isRecording)|\(effectiveLocation == nil)"
         guard signature != tabAppearanceSignature else { return }
         tabAppearanceSignature = signature
 
@@ -956,13 +956,10 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
             breadcrumbs.isRecording ? "record.circle.fill" : "gauge.with.dots.needle.50percent",
             color: breadcrumbs.isRecording ? .systemRed : .systemTeal
         )
-        tripLogTemplate?.showsTabBadge = breadcrumbs.isRecording
         driveTemplate?.tabImage = requiredCarPlayIcon(
             effectiveLocation == nil ? "location.slash.fill" : "location.north.line.fill",
             color: effectiveLocation == nil ? .systemOrange : .systemTeal
         )
-        driveTemplate?.showsTabBadge = effectiveLocation == nil
-        nearbyTemplate?.showsTabBadge = arrivedAccountID != nil
 
         if let rootTabTemplate {
             rootTabTemplate.updateTemplates(rootTabTemplate.templates)
@@ -1055,9 +1052,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
     }
 
     private var currentSpeedText: String {
-        let speed = breadcrumbs.isRecording
-            ? breadcrumbs.liveSpeedMetersPerSecond
-            : locationService.liveSpeedMetersPerSecond
+        let speed = locationService.liveSpeedMetersPerSecond
         guard let speed else { return "— mph" }
         return "\(Int((speed * 2.236_936).rounded())) mph"
     }

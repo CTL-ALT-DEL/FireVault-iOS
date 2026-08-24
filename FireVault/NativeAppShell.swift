@@ -105,11 +105,11 @@ struct FireVaultVersionInfo: Equatable {
 
 enum FireVaultPublisherInfo {
     static let name = "Bannerman US LLC"
-    static let website = "bannerman.us"
-    static let supportEmail = "David@Bannerman.us"
+    static let website = "https://Bannerman.us"
+    static let supportEmail = "Support@Bannerman.us"
 
     static var websiteURL: URL {
-        URL(string: "https://bannerman.us")!
+        URL(string: website)!
     }
 
     static var supportEmailURL: URL {
@@ -3703,7 +3703,7 @@ private struct NativeAboutFireVaultView: View {
                             .foregroundStyle(NativeShellPalette.blue)
                     }
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Bannerman US LLC, bannerman dot us")
+                    .accessibilityLabel("Bannerman US LLC, https Bannerman dot us")
 
                     Spacer(minLength: 8)
 
