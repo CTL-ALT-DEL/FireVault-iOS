@@ -818,6 +818,52 @@ final class FireVaultStore: ObservableObject {
     }
 
     @discardableResult
+    func attachCapturedVideo(at sourceURL: URL, to accountID: String) throws -> FireVaultWorkspaceDocument {
+        guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
+            throw FireVaultMediaError.accountUnavailable
+        }
+
+        let fileName = "\(UUID().uuidString).mp4"
+        let destinationURL = try mediaURL(accountID: accountID, fileName: fileName)
+        do {
+            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+        } catch {
+            throw FireVaultMediaError.writeFailed(error.localizedDescription)
+        }
+
+        let document = FireVaultWorkspaceDocument(
+            id: UUID().uuidString,
+            title: "Field video",
+            subtitle: "Video with FireVault Pro overlay",
+            kind: "video",
+            date: Date().formatted(date: .abbreviated, time: .shortened),
+            mediaFileName: fileName
+        )
+        accounts[index].documents.insert(document, at: 0)
+        accounts[index].recent.insert(
+            .init(
+                id: UUID().uuidString,
+                title: document.title,
+                subtitle: document.subtitle,
+                kind: "video",
+                date: "Now"
+            ),
+            at: 0
+        )
+        persist()
+        return document
+    }
+
+    func mediaURL(accountID: String, documentID: String) -> URL? {
+        guard let document = accounts
+            .first(where: { $0.id == accountID })?
+            .documents.first(where: { $0.id == documentID }),
+              let fileName = document.mediaFileName,
+              fileName == URL(fileURLWithPath: fileName).lastPathComponent else { return nil }
+        return try? mediaURL(accountID: accountID, fileName: fileName)
+    }
+
+    @discardableResult
     func attachScannedDocument(_ pages: [UIImage], to accountID: String) throws -> FireVaultWorkspaceDocument {
         guard !pages.isEmpty else { throw FireVaultMediaError.emptyScan }
         guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {

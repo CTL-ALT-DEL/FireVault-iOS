@@ -64,7 +64,9 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSCameraUsageDescription</key>
-	<string>FireVault Pro uses the camera to photograph and scan fire alarm equipment and site documents.</string>
+	<string>FireVault Pro uses the camera to photograph and record fire alarm equipment and site conditions.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>FireVault Pro uses the microphone when you record field videos.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>FireVault Pro uses Face ID to protect your signed-in field workspace.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

@@ -1333,14 +1333,18 @@ struct NativeCameraCaptureView: UIViewControllerRepresentable {
     let preferences: FireVaultOverlayPreferences
     let technicianName: String
     let account: FireVaultWorkspaceAccount?
+    var startsInVideoMode = false
     let onCapture: (UIImage) -> Void
+    let onVideoCapture: (URL) -> Void
     let onCancel: () -> Void
     func makeUIViewController(context: Context) -> FireVaultCameraViewController {
         FireVaultCameraViewController(
             preferences: preferences,
             technicianName: technicianName,
             account: account,
+            startsInVideoMode: startsInVideoMode,
             onCapture: onCapture,
+            onVideoCapture: onVideoCapture,
             onCancel: onCancel
         )
     }
@@ -1380,13 +1384,18 @@ private struct FireVaultCameraLiveOverlay: View {
     }
 }
 
-final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptureDelegate {
+final class FireVaultCameraViewController: UIViewController,
+    AVCapturePhotoCaptureDelegate,
+    AVCaptureFileOutputRecordingDelegate {
     private let session = AVCaptureSession()
     private let photoOutput = AVCapturePhotoOutput()
+    private let movieOutput = AVCaptureMovieFileOutput()
     private let sessionQueue = DispatchQueue(label: "us.bannerman.firevault.camera")
     private let photoCanvas = UIView()
     private let previewLayer: AVCaptureVideoPreviewLayer
     private let onCapture: (UIImage) -> Void
+    private let onVideoCapture: (URL) -> Void
+    private let startsInVideoMode: Bool
     private let onCancel: () -> Void
     private var overlayHost: UIHostingController<AnyView>?
     private var configured = false
@@ -1398,15 +1407,21 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
     private let flashButton = UIButton(type: .system)
     private let zoomSlider = UISlider()
     private let lensControl = UISegmentedControl()
+    private let captureModeControl = UISegmentedControl(items: ["PHOTO", "VIDEO"])
+    private let shutter = UIButton(type: .system)
 
     init(
         preferences: FireVaultOverlayPreferences,
         technicianName: String,
         account: FireVaultWorkspaceAccount?,
+        startsInVideoMode: Bool,
         onCapture: @escaping (UIImage) -> Void,
+        onVideoCapture: @escaping (URL) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.onCapture = onCapture
+        self.onVideoCapture = onVideoCapture
+        self.startsInVideoMode = startsInVideoMode
         self.onCancel = onCancel
         previewLayer = AVCaptureVideoPreviewLayer(session: session)
         super.init(nibName: nil, bundle: nil)
@@ -1456,7 +1471,6 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
         view.addSubview(cancel)
         cancel.translatesAutoresizingMaskIntoConstraints = false
 
-        let shutter = UIButton(type: .system)
         shutter.setImage(UIImage(systemName: "camera.fill"), for: .normal)
         shutter.tintColor = .black
         shutter.backgroundColor = .white
@@ -1468,6 +1482,16 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
         view.addSubview(shutter)
         shutter.translatesAutoresizingMaskIntoConstraints = false
 
+        captureModeControl.selectedSegmentIndex = startsInVideoMode ? 1 : 0
+        captureModeControl.selectedSegmentTintColor = .white
+        captureModeControl.backgroundColor = UIColor.black.withAlphaComponent(0.58)
+        captureModeControl.setTitleTextAttributes([.foregroundColor: UIColor.black], for: .selected)
+        captureModeControl.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .normal)
+        captureModeControl.addTarget(self, action: #selector(changeCaptureMode), for: .valueChanged)
+        captureModeControl.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(captureModeControl)
+        changeCaptureMode()
+
         configureCameraControls()
 
         NSLayoutConstraint.activate([
@@ -1478,7 +1502,10 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
             shutter.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             shutter.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
             shutter.widthAnchor.constraint(equalToConstant: 68),
-            shutter.heightAnchor.constraint(equalToConstant: 68)
+            shutter.heightAnchor.constraint(equalToConstant: 68),
+            captureModeControl.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            captureModeControl.bottomAnchor.constraint(equalTo: shutter.topAnchor, constant: -12),
+            captureModeControl.widthAnchor.constraint(equalToConstant: 176)
         ])
     }
 
@@ -1563,7 +1590,7 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
             flashButton.widthAnchor.constraint(equalToConstant: 44),
             flashButton.heightAnchor.constraint(equalToConstant: 44),
             lensControl.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            lensControl.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -92),
+            lensControl.bottomAnchor.constraint(equalTo: captureModeControl.topAnchor, constant: -12),
             lensControl.widthAnchor.constraint(lessThanOrEqualToConstant: 210),
             zoomSlider.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             zoomSlider.bottomAnchor.constraint(equalTo: lensControl.topAnchor, constant: -10),
@@ -1647,17 +1674,28 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
     private func requestCameraAndStart() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
-            configureAndStart()
+            requestMicrophoneAndStart()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 guard granted else {
                     DispatchQueue.main.async { self?.onCancel() }
                     return
                 }
-                self?.configureAndStart()
+                self?.requestMicrophoneAndStart()
             }
         default:
             onCancel()
+        }
+    }
+
+    private func requestMicrophoneAndStart() {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio) { [weak self] _ in
+                self?.configureAndStart()
+            }
+        default:
+            configureAndStart()
         }
     }
 
@@ -1666,13 +1704,24 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
             guard let self else { return }
             if !configured {
                 session.beginConfiguration()
-                session.sessionPreset = .photo
+                session.sessionPreset = session.canSetSessionPreset(.hd1920x1080)
+                    ? .hd1920x1080
+                    : .high
                 defer { session.commitConfiguration() }
                 guard let camera = preferredCamera(),
                       let input = try? AVCaptureDeviceInput(device: camera),
-                      session.canAddInput(input), session.canAddOutput(photoOutput) else { return }
+                      session.canAddInput(input),
+                      session.canAddOutput(photoOutput),
+                      session.canAddOutput(movieOutput) else { return }
                 session.addInput(input)
                 session.addOutput(photoOutput)
+                session.addOutput(movieOutput)
+                if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
+                   let microphone = AVCaptureDevice.default(for: .audio),
+                   let audioInput = try? AVCaptureDeviceInput(device: microphone),
+                   session.canAddInput(audioInput) {
+                    session.addInput(audioInput)
+                }
                 videoInput = input
                 activeCamera = camera
                 configured = true
@@ -1682,9 +1731,27 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
         }
     }
 
-    @objc private func cancelCapture() { onCancel() }
+    @objc private func cancelCapture() {
+        if movieOutput.isRecording {
+            movieOutput.stopRecording()
+        } else {
+            onCancel()
+        }
+    }
+
+    @objc private func changeCaptureMode() {
+        let isVideo = captureModeControl.selectedSegmentIndex == 1
+        shutter.setImage(UIImage(systemName: isVideo ? "video.fill" : "camera.fill"), for: .normal)
+        shutter.backgroundColor = isVideo ? .systemRed : .white
+        shutter.tintColor = isVideo ? .white : .black
+        shutter.accessibilityLabel = isVideo ? "Record video" : "Take photo"
+    }
 
     @objc private func capturePhoto() {
+        if captureModeControl.selectedSegmentIndex == 1 {
+            toggleVideoRecording()
+            return
+        }
         updateVideoRotation()
         let settings = AVCapturePhotoSettings()
         settings.flashMode = photoOutput.supportedFlashModes.contains(flashMode) ? flashMode : .off
@@ -1704,6 +1771,24 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
         if let connection = photoOutput.connection(with: .video), connection.isVideoRotationAngleSupported(angle) {
             connection.videoRotationAngle = angle
         }
+        if let connection = movieOutput.connection(with: .video), connection.isVideoRotationAngleSupported(angle) {
+            connection.videoRotationAngle = angle
+        }
+    }
+
+    private func toggleVideoRecording() {
+        if movieOutput.isRecording {
+            movieOutput.stopRecording()
+            return
+        }
+        updateVideoRotation()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVault-Capture-\(UUID().uuidString).mov")
+        movieOutput.startRecording(to: url, recordingDelegate: self)
+        captureModeControl.isEnabled = false
+        lensControl.isEnabled = false
+        shutter.setImage(UIImage(systemName: "stop.fill"), for: .normal)
+        shutter.accessibilityLabel = "Stop recording"
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
@@ -1712,6 +1797,24 @@ final class FireVaultCameraViewController: UIViewController, AVCapturePhotoCaptu
             return
         }
         onCapture(image)
+    }
+
+    func fileOutput(
+        _ output: AVCaptureFileOutput,
+        didFinishRecordingTo outputFileURL: URL,
+        from connections: [AVCaptureConnection],
+        error: Error?
+    ) {
+        captureModeControl.isEnabled = true
+        lensControl.isEnabled = true
+        shutter.setImage(UIImage(systemName: "video.fill"), for: .normal)
+        shutter.accessibilityLabel = "Record video"
+        guard error == nil else {
+            try? FileManager.default.removeItem(at: outputFileURL)
+            onCancel()
+            return
+        }
+        onVideoCapture(outputFileURL)
     }
 }
 

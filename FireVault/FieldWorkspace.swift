@@ -10,6 +10,7 @@ import Combine
 import MapKit
 import UniformTypeIdentifiers
 import UIKit
+import AVKit
 
 struct FireVaultWorkspaceAccount: Codable, Identifiable, Equatable {
     var id: String
@@ -2141,11 +2142,21 @@ private struct FilesScansView: View {
             } else {
                 ForEach(account.documents) { document in
                     NavigationLink {
-                        NativeRecordDetailView(
-                            title: document.title,
-                            subtitle: document.subtitle,
-                            symbol: documentSymbol(document.kind)
-                        )
+                        if document.kind == "video",
+                           let url = store.mediaURL(accountID: account.id, documentID: document.id) {
+                            FireVaultVideoDetailView(
+                                accountID: account.id,
+                                document: document,
+                                url: url,
+                                store: store
+                            )
+                        } else {
+                            NativeRecordDetailView(
+                                title: document.title,
+                                subtitle: document.subtitle,
+                                symbol: documentSymbol(document.kind)
+                            )
+                        }
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: documentSymbol(document.kind))
@@ -2191,11 +2202,61 @@ private struct FilesScansView: View {
     }
 
     private func documentSymbol(_ kind: String) -> String {
-        switch kind { case "scan": return "doc.viewfinder"; case "photo": return "photo"; default: return "doc" }
+        switch kind { case "scan": return "doc.viewfinder"; case "photo": return "photo"; case "video": return "video.fill"; default: return "doc" }
     }
 
     private func documentTint(_ kind: String) -> Color {
-        switch kind { case "scan": return FieldWorkspacePalette.blue; case "photo": return FieldWorkspacePalette.purple; default: return FieldWorkspacePalette.green }
+        switch kind { case "scan": return FieldWorkspacePalette.blue; case "photo", "video": return FieldWorkspacePalette.purple; default: return FieldWorkspacePalette.green }
+    }
+}
+
+private struct FireVaultVideoDetailView: View {
+    let accountID: String
+    let document: FireVaultWorkspaceDocument
+    let url: URL
+    @ObservedObject var store: FireVaultStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirmsDeletion = false
+
+    var body: some View {
+        VStack(spacing: 18) {
+            VideoPlayer(player: AVPlayer(url: url))
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                .nativeSurfaceCard(cornerRadius: 18)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(document.title).font(.headline)
+                Text([document.subtitle, document.date].filter { !$0.isEmpty }.joined(separator: " • "))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 12) {
+                ShareLink(item: url) {
+                    Label("Share Video", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Delete", systemImage: "trash", role: .destructive) {
+                    confirmsDeletion = true
+                }
+                .buttonStyle(.bordered)
+            }
+            Spacer()
+        }
+        .padding(16)
+        .background(FieldWorkspacePalette.background)
+        .navigationTitle("Field Video")
+        .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog("Delete this field video?", isPresented: $confirmsDeletion) {
+            Button("Delete Video", role: .destructive) {
+                if store.deleteDocument(accountID: accountID, documentID: document.id) {
+                    dismiss()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 }
 

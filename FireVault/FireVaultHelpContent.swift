@@ -208,9 +208,9 @@ enum FireVaultHelpCatalog {
             tint: "amber",
             visual: .fieldCapture,
             steps: [
-                .init("capture-account", "Choose the customer first", "Open an account for notes, equipment, files, scans, and locations. Use the Photo tab for a new camera, scan, or photo-library capture."),
-                .init("capture-overlay", "Check the overlay", "Before field photos, review Settings → Photo Overlay so the visible account information and logo are useful and not intrusive."),
-                .init("capture-save", "Save to the right place", "Select the customer when prompted and confirm the save result. Review the item under that account’s Files & Scans workspace."),
+                .init("capture-account", "Choose the customer first", "Open an account for notes, equipment, files, scans, and locations. Use the Photo tab for a new photo, video, scan, or photo-library capture."),
+                .init("capture-overlay", "Check the overlay", "Before field photos or videos, review Settings → Photo Overlay so the visible account information and logo are useful and not intrusive."),
+                .init("capture-save", "Save to the right place", "Select the customer when prompted and confirm the save result. Photos, overlaid videos, and scans appear under that account’s Files & Scans workspace."),
                 .init("capture-pin", "Place precise arrival pins", "Open the account’s Arrival Map or Locations workspace. Add a location, name its purpose, and drag the pin to the actual entrance, parking area, panel, or riser.")
             ],
             successTitle: "Storage is explicit",

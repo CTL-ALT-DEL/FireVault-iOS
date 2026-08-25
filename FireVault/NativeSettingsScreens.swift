@@ -13,7 +13,7 @@ import UIKit
 enum NativeSettingsCatalog {
     static let groups: [FireVaultNativeSettingsGroup] = [
         group("field", "Field Tools", "Photos, maps, GPS, and Plus Codes", "wrench.and.screwdriver", "green", [
-            item("overlay", "Photo Overlay", "Configure field-photo labels", "camera.filters"),
+            item("overlay", "Photo Overlay", "Configure photo and video labels", "camera.filters"),
             item("gps", "GPS & Maps", "Apple Maps, accuracy, and Nearby radius", "location"),
             item("plusCodes", "Plus Codes", "Offline location-code preferences", "plus.square.dashed"),
             item("notifications", "Notifications", "Trip Log, service, and system alerts", "bell.badge")

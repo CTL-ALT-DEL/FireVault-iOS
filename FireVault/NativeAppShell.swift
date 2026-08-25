@@ -10,6 +10,7 @@ import Combine
 import Charts
 import MapKit
 import PhotosUI
+import AVKit
 import UIKit
 import VisionKit
 
@@ -1827,6 +1828,9 @@ struct NativePhotoView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedItem: PhotosPickerItem?
     @State private var selectedImage: UIImage?
+    @State private var selectedVideoURL: URL?
+    @State private var selectedVideoDocumentID: String?
+    @State private var isProcessingVideo = false
     @State private var scannedPages: [UIImage] = []
     @State private var captureRoute: CaptureRoute?
     @State private var mediaKind: MediaKind = .photo
@@ -1838,6 +1842,7 @@ struct NativePhotoView: View {
     @State private var pendingCaptureIntent: CaptureIntent?
     @State private var mediaAccountID: String?
     @State private var saveStatus = ""
+    @State private var cameraStartsInVideoMode = false
 
     private enum CaptureRoute: String, Identifiable {
         case camera
@@ -1848,10 +1853,12 @@ struct NativePhotoView: View {
     private enum MediaKind {
         case photo
         case scan
+        case video
     }
 
     private enum CaptureIntent {
         case camera
+        case video
         case scanner
         case photoLibrary
     }
@@ -1863,6 +1870,10 @@ struct NativePhotoView: View {
     private var mediaAccount: FireVaultWorkspaceAccount? {
         guard let mediaAccountID else { return nil }
         return store.accounts.first { $0.id == mediaAccountID }
+    }
+
+    private var hasMediaPreview: Bool {
+        selectedImage != nil || selectedVideoURL != nil
     }
 
     private var technicianName: String {
@@ -1877,7 +1888,7 @@ struct NativePhotoView: View {
                 VStack(spacing: 14) {
                     destinationAccountCard
 
-                    if horizontalSizeClass == .regular, selectedImage != nil {
+                    if horizontalSizeClass == .regular, hasMediaPreview {
                         HStack(alignment: .top, spacing: 18) {
                             previewColumn
                                 .frame(maxWidth: .infinity)
@@ -1886,7 +1897,7 @@ struct NativePhotoView: View {
                                 .frame(width: 380)
                         }
                     } else {
-                        if selectedImage != nil {
+                        if hasMediaPreview {
                             previewColumn
                         }
 
@@ -1946,7 +1957,9 @@ struct NativePhotoView: View {
                         preferences: settings.preferences.overlay,
                         technicianName: technicianName,
                         account: destinationAccount,
+                        startsInVideoMode: cameraStartsInVideoMode,
                         onCapture: acceptPhoto,
+                        onVideoCapture: acceptVideo,
                         onCancel: { captureRoute = nil }
                     )
                     .ignoresSafeArea()
@@ -1970,6 +1983,31 @@ struct NativePhotoView: View {
     @ViewBuilder
     private var previewColumn: some View {
         VStack(spacing: 10) {
+            if let selectedVideoURL {
+                VideoPlayer(player: AVPlayer(url: selectedVideoURL))
+                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                    .frame(maxHeight: 420)
+                    .nativeSurfaceCard(cornerRadius: NativeShellMetrics.mapRadius)
+                    .accessibilityLabel("Field video with baked FireVault Pro overlay")
+
+                HStack(spacing: 10) {
+                    ShareLink(item: selectedVideoURL) {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Delete", systemImage: "trash", role: .destructive) {
+                        deleteSelectedVideo()
+                    }
+                    .buttonStyle(.bordered)
+
+                    Spacer()
+                    Label("Saved", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(NativeShellPalette.green)
+                }
+                .font(.caption.bold())
+            }
+
             if let selectedImage {
                 imagePreview(selectedImage)
 
@@ -2021,6 +2059,26 @@ struct NativePhotoView: View {
                     intent: .camera
                 )
                 .accessibilityIdentifier("native-take-photo")
+
+                captureActionRow(
+                    title: "Record Video",
+                    subtitle: "Record 1080p field video with the same customer overlay",
+                    symbol: "video.fill",
+                    tint: NativeShellPalette.purple,
+                    intent: .video
+                )
+                .accessibilityIdentifier("native-record-video")
+
+                if isProcessingVideo {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Applying customer overlay…")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .accessibilityElement(children: .combine)
+                }
 
                 captureActionRow(
                     title: "Scan Document",
@@ -2216,6 +2274,10 @@ struct NativePhotoView: View {
     private func launchCapture(_ intent: CaptureIntent) {
         switch intent {
         case .camera:
+            cameraStartsInVideoMode = false
+            openCamera()
+        case .video:
+            cameraStartsInVideoMode = true
             openCamera()
         case .scanner:
             openScanner()
@@ -2262,6 +2324,8 @@ struct NativePhotoView: View {
         do {
             try store.attachCapturedPhoto(renderedImage, to: account.id)
             selectedImage = renderedImage
+            selectedVideoURL = nil
+            selectedVideoDocumentID = nil
             scannedPages = []
             mediaKind = .photo
             mediaAccountID = account.id
@@ -2270,6 +2334,54 @@ struct NativePhotoView: View {
         } catch {
             showCaptureFailure(error.localizedDescription)
         }
+    }
+
+    private func acceptVideo(_ sourceURL: URL) {
+        guard let account = destinationAccount else {
+            try? FileManager.default.removeItem(at: sourceURL)
+            showCaptureFailure("Choose the account that should receive this video.")
+            return
+        }
+        captureRoute = nil
+        isProcessingVideo = true
+        let timestamp = Date()
+        Task { @MainActor in
+            defer { isProcessingVideo = false }
+            do {
+                let renderedURL = try await FireVaultVideoOverlayRenderer.render(
+                    sourceURL: sourceURL,
+                    preferences: settings.preferences.overlay,
+                    technicianName: technicianName,
+                    account: account,
+                    timestamp: timestamp
+                )
+                defer { try? FileManager.default.removeItem(at: renderedURL) }
+                let document = try store.attachCapturedVideo(at: renderedURL, to: account.id)
+                guard let storedURL = store.mediaURL(accountID: account.id, documentID: document.id) else {
+                    throw FireVaultMediaError.storageUnavailable
+                }
+                selectedImage = nil
+                scannedPages = []
+                selectedVideoURL = storedURL
+                selectedVideoDocumentID = document.id
+                mediaKind = .video
+                mediaAccountID = account.id
+                saveStatus = "Video saved to \(account.name)"
+                try? FileManager.default.removeItem(at: sourceURL)
+            } catch {
+                showCaptureFailure(error.localizedDescription)
+            }
+        }
+    }
+
+    private func deleteSelectedVideo() {
+        guard let accountID = mediaAccountID,
+              let documentID = selectedVideoDocumentID,
+              store.deleteDocument(accountID: accountID, documentID: documentID) else { return }
+        selectedVideoURL = nil
+        selectedVideoDocumentID = nil
+        mediaAccountID = nil
+        saveStatus = ""
     }
 
     private func acceptScan(_ pages: [UIImage]) {
