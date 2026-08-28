@@ -12,8 +12,8 @@ import MapKit
 import UIKit
 
 enum FireVaultCarPlayArrivalPolicy {
-    static let arrivalRadiusMeters: CLLocationDistance = 402.336
-    static let resetRadiusMeters: CLLocationDistance = 804.672
+    static let arrivalRadiusMeters: CLLocationDistance = 100
+    static let resetRadiusMeters: CLLocationDistance = 200
 
     static func hasArrived(distanceMeters: CLLocationDistance) -> Bool {
         distanceMeters >= 0 && distanceMeters <= arrivalRadiusMeters

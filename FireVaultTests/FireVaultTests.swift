@@ -1573,11 +1573,11 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(speed, 8)
     }
 
-    func testCarPlayArrivalUsesQuarterMileEntryAndHalfMileResetHysteresis() {
-        XCTAssertTrue(FireVaultCarPlayArrivalPolicy.hasArrived(distanceMeters: 402.336))
-        XCTAssertFalse(FireVaultCarPlayArrivalPolicy.hasArrived(distanceMeters: 402.337))
-        XCTAssertFalse(FireVaultCarPlayArrivalPolicy.shouldClearArrival(distanceMeters: 804.672))
-        XCTAssertTrue(FireVaultCarPlayArrivalPolicy.shouldClearArrival(distanceMeters: 804.673))
+    func testCarPlayArrivalUsesOneHundredMeterEntryAndTwoHundredMeterResetHysteresis() {
+        XCTAssertTrue(FireVaultCarPlayArrivalPolicy.hasArrived(distanceMeters: 100))
+        XCTAssertFalse(FireVaultCarPlayArrivalPolicy.hasArrived(distanceMeters: 100.001))
+        XCTAssertFalse(FireVaultCarPlayArrivalPolicy.shouldClearArrival(distanceMeters: 200))
+        XCTAssertTrue(FireVaultCarPlayArrivalPolicy.shouldClearArrival(distanceMeters: 200.001))
     }
 
     func testCarPlayArrivalPinsPutDrivingDestinationsFirst() {
