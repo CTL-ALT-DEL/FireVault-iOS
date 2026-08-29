@@ -25,12 +25,21 @@ struct NativePlusCodeSettingsView: View {
             Section("Availability") {
                 Toggle("Show Plus Code tools", isOn: $draft.plusCodes.enabled)
                 Toggle("Generate automatically from GPS", isOn: $draft.plusCodes.autoGenerate)
+                    .disabled(!draft.plusCodes.enabled)
                 Toggle("Allow account search", isOn: $draft.plusCodes.searchable)
+                    .disabled(!draft.plusCodes.enabled)
             }
             Section("Precision") {
-                Picker("Account precision", selection: $draft.plusCodes.accountLength) { Text("10 digits").tag(10); Text("11 digits").tag(11) }
-                Picker("Location precision", selection: $draft.plusCodes.locationLength) { Text("10 digits").tag(10); Text("11 digits").tag(11) }
+                Picker("Account precision", selection: $draft.plusCodes.accountLength) {
+                    Text("Standard (10 digits)").tag(10)
+                    Text("High (11 digits)").tag(11)
+                }
+                Picker("Location precision", selection: $draft.plusCodes.locationLength) {
+                    Text("Standard (10 digits)").tag(10)
+                    Text("High (11 digits)").tag(11)
+                }
             }
+            .disabled(!draft.plusCodes.enabled)
             Section {
                 LabeledContent("CURRENT LOCATION") {
                     Text(currentPlusCode)
@@ -65,16 +74,13 @@ struct NativeReportSettingsView: View {
     init(settings: FireVaultNativeSettingsStore) { self.settings = settings; _draft = State(initialValue: settings.preferences) }
     var body: some View {
         Form {
-            Section("Trip Log Reports") {
+            Section("Report Content") {
                 Toggle("Include GPS coordinates", isOn: $draft.gps.includeCoordinatesInReports)
                 Toggle("Include technician profile", isOn: $draft.reports.includeTechnician)
                 Picker("Trip Log report format", selection: $draft.reports.format) {
                     Text("Detailed").tag("detailed")
                     Text("Compact").tag("compact")
                 }
-                Text("Trip Log reports include the recorded route, detected stops, account visits, elapsed time, and distance for the selected workday.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
             Section {
                 TextField("Email reports to", text: $draft.email.defaultTo)
@@ -117,14 +123,18 @@ struct NativeReportSettingsView: View {
                         .foregroundStyle(.green)
                 }
             } header: {
-                Text("Automatic Email Delivery")
+                Text("Automatic Delivery")
             } footer: {
-                Text("Reports are generated and emailed securely through Supabase and Resend even when FireVault Pro is closed. Multiple addresses may be separated with commas.")
+                Text("Multiple email addresses may be separated with commas. Delivery uses the current device time zone.")
             }
-            Section("Service Report Defaults") {
+            Section("Email Template") {
+                TextField("Default subject", text: $draft.email.defaultSubject).focused($focused)
+                TextField("Signature", text: $draft.email.signature, axis: .vertical)
+                    .lineLimit(3...8)
+                    .focused($focused)
+            }
+            Section("Service Report") {
                 TextField("Report title", text: $draft.reports.title).focused($focused)
-            }
-            Section("Included Service Content") {
                 Toggle("Tasks", isOn: $draft.reports.includeTasks)
                 Toggle("Deficiencies", isOn: $draft.reports.includeDeficiencies)
             }
@@ -184,136 +194,58 @@ struct NativeReportSettingsView: View {
     }
 }
 
-struct NativeEmailSettingsView: View {
-    @ObservedObject var settings: FireVaultNativeSettingsStore
-    @State private var draft: FireVaultNativePreferences
-    @FocusState private var focused: Bool
-    init(settings: FireVaultNativeSettingsStore) { self.settings = settings; _draft = State(initialValue: settings.preferences) }
-    var body: some View {
-        Form {
-            Section("Recipients") {
-                TextField("Default recipient", text: $draft.email.defaultTo).keyboardType(.emailAddress).textInputAutocapitalization(.never).focused($focused)
-                TextField("CC", text: $draft.email.cc).keyboardType(.emailAddress).textInputAutocapitalization(.never).focused($focused)
-            }
-            Section("Template") {
-                TextField("Subject", text: $draft.email.defaultSubject).focused($focused)
-                TextField("Signature", text: $draft.email.signature, axis: .vertical).lineLimit(3...8).focused($focused)
-            }
-        }
-        .nativeSettingsForm(title: "Email Settings", focused: $focused) { settings.save(draft) }
-    }
-}
-
 struct NativeStorageSettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
-    @State private var draft: FireVaultNativePreferences
-    @FocusState private var focused: Bool
-    init(settings: FireVaultNativeSettingsStore) { self.settings = settings; _draft = State(initialValue: settings.preferences) }
+    @ObservedObject var store: FireVaultStore
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+    @State private var storageReport = FireVaultMediaStorageReport(
+        referencedFiles: 0,
+        orphanedFiles: 0,
+        totalBytes: 0
+    )
+
     var body: some View {
-        Form {
+        List {
             Section {
                 storagePlanOverview
             }
             .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 8, trailing: 16))
             .listRowBackground(Color.clear)
 
-            Section {
-                destinationRow(
+            Section("Local Storage") {
+                storageRow(
                     title: "Photos",
                     detail: "Field photos and imported images",
-                    symbol: "photo.on.rectangle.angled",
-                    selection: $draft.storage.photoProvider
+                    symbol: "photo.on.rectangle.angled"
                 )
-                folderField("Photo folder", text: $draft.storage.photoFolder)
-            } header: {
-                Text("Photo Storage")
-            } footer: {
-                providerDescription(draft.storage.photoProvider)
-            }
-
-            Section {
-                destinationRow(
+                storageRow(
                     title: "Files & Scans",
                     detail: "Documents, reports, and scanned pages",
-                    symbol: "doc.on.doc.fill",
-                    selection: $draft.storage.documentProvider
+                    symbol: "doc.on.doc.fill"
                 )
-                folderField("Document folder", text: $draft.storage.documentFolder)
-            } header: {
-                Text("Document Storage")
-            } footer: {
-                providerDescription(draft.storage.documentProvider)
-            }
-
-            Section {
-                Picker("Photo quality", selection: optionalString(\.photoQuality, default: "original")) {
-                    Text("Original quality").tag("original")
-                    Text("Storage optimized").tag("optimized")
-                    Text("Small file").tag("compact")
-                }
-                Picker("Scanned document format", selection: optionalString(\.scanFormat, default: "pdf")) {
-                    Text("Searchable PDF").tag("pdf")
-                    Text("Individual images").tag("images")
-                }
-            } header: {
-                Label("File Quality & Format", systemImage: "slider.horizontal.3")
-            } footer: {
-                Text("Original photos preserve maximum detail. Searchable PDF keeps a multi-page scan together as one document.")
-            }
-
-            Section {
-                settingsToggle(
-                    "Account folders",
-                    detail: "Keep each customer's files together",
-                    symbol: "folder.badge.person.crop",
-                    isOn: optionalBool(\.useAccountFolders, default: true)
-                )
-                settingsToggle(
-                    "Keep device originals",
-                    detail: "Retain a local copy after upload",
-                    symbol: "iphone",
-                    isOn: optionalBool(\.preserveOriginals, default: true)
-                )
-                settingsToggle(
-                    "Wi-Fi uploads only",
-                    detail: "Avoid using cellular data for files",
-                    symbol: "wifi",
-                    isOn: optionalBool(\.wifiOnlyUploads, default: false)
-                )
-            } header: {
-                Text("Organization & Uploads")
-            } footer: {
-                Text(uploadSummary)
+                LabeledContent("Storage used", value: storageReport.formattedSize)
+                LabeledContent("Referenced files", value: "\(storageReport.referencedFiles)")
             }
 
             Section {
                 NavigationLink {
-                    NativeMicrosoftStorageSettingsView(settings: settings)
-                } label: {
-                    storageConnectionRow(
-                        "Microsoft OneDrive & SharePoint",
-                        symbol: "cloud.fill",
-                        configured: !draft.storage.microsoftEmail.isEmpty || !draft.storage.sharePointSiteURL.isEmpty
+                    NativeBackupRestoreView(
+                        store: store,
+                        settings: settings,
+                        breadcrumbs: breadcrumbs
                     )
-                }
-                NavigationLink {
-                    NativeWebDAVSettingsView(settings: settings)
                 } label: {
-                    storageConnectionRow(
-                        "WebDAV Server",
-                        symbol: "server.rack",
-                        configured: draft.webDAV.enabled
-                    )
+                    Label("Manage Storage & Backups", systemImage: "externaldrive.badge.timemachine")
                 }
-                storageConnectionRow("iCloud Drive", symbol: "icloud.fill", configured: true)
-                storageConnectionRow("FireVault Cloud", symbol: "shield.lefthalf.filled", configured: false)
-            } header: {
-                Text("Connected Services")
             } footer: {
-                Text("Set up a service here before selecting it as a save destination. FireVault Cloud requires a Pro subscription.")
+                Text("Export a complete backup or safely remove files that are no longer attached to an account.")
             }
         }
-        .nativeSettingsForm(title: "File Storage", focused: $focused) { settings.save(draft) }
+        .fireVaultThemedCollection()
+        .contentMargins(.bottom, 96, for: .scrollContent)
+        .navigationTitle("File Storage")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { storageReport = store.mediaStorageReport() }
     }
 
     private var storagePlanOverview: some View {
@@ -328,7 +260,7 @@ struct NativeStorageSettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Storage Plan")
                         .font(.headline)
-                    Text("Choose where field records are saved and how files are prepared.")
+                    Text("FireVault keeps account media in private storage on this device.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -338,12 +270,10 @@ struct NativeStorageSettingsView: View {
             HStack(spacing: 10) {
                 destinationSummary(
                     title: "PHOTOS",
-                    provider: draft.storage.photoProvider,
                     symbol: "photo.fill"
                 )
                 destinationSummary(
                     title: "FILES & SCANS",
-                    provider: draft.storage.documentProvider,
                     symbol: "doc.fill"
                 )
             }
@@ -357,7 +287,7 @@ struct NativeStorageSettingsView: View {
         .shadow(color: NativeShellPalette.cardShadow, radius: 10, y: 4)
     }
 
-    private func destinationSummary(title: String, provider: String, symbol: String) -> some View {
+    private func destinationSummary(title: String, symbol: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: symbol)
                 .foregroundStyle(NativeShellPalette.blue)
@@ -365,7 +295,7 @@ struct NativeStorageSettingsView: View {
                 Text(title)
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.secondary)
-                Text(providerName(provider))
+                Text("This Device")
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -378,7 +308,7 @@ struct NativeStorageSettingsView: View {
         .background(NativeShellPalette.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    private func destinationRow(title: String, detail: String, symbol: String, selection: Binding<String>) -> some View {
+    private func storageRow(title: String, detail: String, symbol: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: symbol)
                 .font(.body.weight(.semibold))
@@ -396,160 +326,11 @@ struct NativeStorageSettingsView: View {
             }
 
             Spacer(minLength: 8)
-
-            storageDestinationPicker(selection: selection)
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(NativeShellPalette.green)
+                .accessibilityLabel("Stored on this device")
         }
         .padding(.vertical, 3)
-    }
-
-    private func storageDestinationPicker(selection: Binding<String>) -> some View {
-        Picker("Destination", selection: selection) {
-            Text("On this iPhone or iPad").tag("local")
-            Text("FireVault Cloud").tag("firevault")
-            Text("iCloud Drive").tag("icloud")
-            Text("Microsoft OneDrive").tag("onedrive")
-            Text("Microsoft SharePoint").tag("sharepoint")
-            Text("WebDAV Server").tag("webdav")
-        }
-        .labelsHidden()
-        .pickerStyle(.menu)
-        .font(.subheadline.weight(.semibold))
-    }
-
-    private func folderField(_ title: String, text: Binding<String>) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "folder.fill")
-                .foregroundStyle(NativeShellPalette.amber)
-                .frame(width: 24)
-            TextField(title, text: text)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .focused($focused)
-                .multilineTextAlignment(.trailing)
-        }
-    }
-
-    private func settingsToggle(_ title: String, detail: String, symbol: String, isOn: Binding<Bool>) -> some View {
-        Toggle(isOn: isOn) {
-            HStack(spacing: 11) {
-                Image(systemName: symbol)
-                    .foregroundStyle(NativeShellPalette.blue)
-                    .frame(width: 25)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .padding(.vertical, 2)
-    }
-
-    private func providerDescription(_ provider: String) -> Text {
-        switch provider {
-        case "firevault": Text("Pro storage keeps FireVault files available in the cloud for the configured retention period.")
-        case "icloud": Text("Files are organized in FireVault folders in iCloud Drive.")
-        case "onedrive", "sharepoint", "microsoft": Text("Complete the Microsoft connection profile before uploading files.")
-        case "webdav": Text("Complete the WebDAV server profile before uploading files.")
-        default: Text("Files remain stored locally in FireVault on this device.")
-        }
-    }
-
-    private func optionalBool(_ keyPath: WritableKeyPath<FireVaultStoragePreferences, Bool?>, default defaultValue: Bool) -> Binding<Bool> {
-        Binding(
-            get: { draft.storage[keyPath: keyPath] ?? defaultValue },
-            set: { draft.storage[keyPath: keyPath] = $0 }
-        )
-    }
-
-    private func optionalString(_ keyPath: WritableKeyPath<FireVaultStoragePreferences, String?>, default defaultValue: String) -> Binding<String> {
-        Binding(
-            get: { draft.storage[keyPath: keyPath] ?? defaultValue },
-            set: { draft.storage[keyPath: keyPath] = $0 }
-        )
-    }
-
-    private func storageConnectionRow(_ title: String, symbol: String, configured: Bool) -> some View {
-        HStack(spacing: 11) {
-            Image(systemName: symbol)
-                .foregroundStyle(configured ? NativeShellPalette.green : NativeShellPalette.blue)
-                .frame(width: 32, height: 32)
-                .background(
-                    (configured ? NativeShellPalette.green : NativeShellPalette.blue).opacity(0.10),
-                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-                )
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-                Text(configured ? "Available as a destination" : "Connection required")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Text(configured ? "Ready" : "Setup")
-                .font(.caption.bold())
-                .foregroundStyle(configured ? NativeShellPalette.green : .secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    (configured ? NativeShellPalette.green : Color.secondary).opacity(0.10),
-                    in: Capsule()
-                )
-        }
-    }
-
-    private var uploadSummary: String {
-        let connection = (draft.storage.wifiOnlyUploads ?? false) ? "Uploads wait for Wi-Fi." : "Uploads may use Wi-Fi or cellular data."
-        let originals = (draft.storage.preserveOriginals ?? true) ? "Device originals are retained." : "Device originals may be removed after upload."
-        return "\(connection) \(originals)"
-    }
-
-    private func providerName(_ provider: String) -> String {
-        switch provider {
-        case "firevault": "FireVault Cloud"
-        case "icloud": "iCloud Drive"
-        case "onedrive", "microsoft": "OneDrive"
-        case "sharepoint": "SharePoint"
-        case "webdav": "WebDAV"
-        default: "This Device"
-        }
-    }
-}
-
-struct NativeMicrosoftStorageSettingsView: View {
-    @ObservedObject var settings: FireVaultNativeSettingsStore
-    @State private var draft: FireVaultNativePreferences
-    @FocusState private var focused: Bool
-    init(settings: FireVaultNativeSettingsStore) { self.settings = settings; _draft = State(initialValue: settings.preferences) }
-    var body: some View {
-        Form {
-            Section("Connection Profile") {
-                TextField("Profile label", text: $draft.storage.microsoftProfileLabel).focused($focused)
-                TextField("Microsoft email", text: $draft.storage.microsoftEmail).keyboardType(.emailAddress).textInputAutocapitalization(.never).focused($focused)
-                TextField("SharePoint site URL", text: $draft.storage.sharePointSiteURL).keyboardType(.URL).textInputAutocapitalization(.never).focused($focused)
-                TextField("Library", text: $draft.storage.libraryName).focused($focused)
-            }
-        }
-        .nativeSettingsForm(title: "Microsoft Storage", focused: $focused) { settings.save(draft) }
-    }
-}
-
-struct NativeSyncSettingsView: View {
-    @ObservedObject var settings: FireVaultNativeSettingsStore
-    @State private var draft: FireVaultNativePreferences
-    @FocusState private var focused: Bool
-    init(settings: FireVaultNativeSettingsStore) { self.settings = settings; _draft = State(initialValue: settings.preferences) }
-    var body: some View {
-        Form {
-            Section("Shared Vault") {
-                TextField("Organization or team", text: $draft.sync.organization).focused($focused)
-                TextField("Workspace name", text: $draft.sync.workspace).focused($focused)
-                Picker("Conflict handling", selection: $draft.sync.conflictPolicy) { Text("Require review").tag("review"); Text("Newest wins").tag("newest"); Text("Imported copy wins").tag("server") }
-            }
-        }
-        .nativeSettingsForm(title: "Shared Vault", focused: $focused) { settings.save(draft) }
     }
 }
 
@@ -566,6 +347,7 @@ struct NativeCategoriesSettingsView: View {
     @State private var ruleCreatingCategoryIndex: Int?
     @State private var ruleNewCategory = ""
     @State private var runResult: String?
+    @State private var pendingCategoryDeletion: IndexSet?
     @FocusState private var focused: Bool
     init(settings: FireVaultNativeSettingsStore, store: FireVaultStore) {
         self.settings = settings
@@ -594,7 +376,7 @@ struct NativeCategoriesSettingsView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .onDelete(perform: deleteCategories)
+                .onDelete { pendingCategoryDeletion = $0 }
             }
             Section("Add Category") {
                 TextField("Category tag", text: $newCategory).focused($focused)
@@ -628,6 +410,12 @@ struct NativeCategoriesSettingsView: View {
                     runResult = additions == 1 ? "1 category tag was added." : "\(additions) category tags were added."
                 }
                 .disabled((draft.categoryRules ?? []).isEmpty)
+
+                if let runResult {
+                    Label(runResult, systemImage: "checkmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(NativeShellPalette.green)
+                }
             } header: {
                 Text("Automatic IF / THEN Rules")
             } footer: {
@@ -645,10 +433,23 @@ struct NativeCategoriesSettingsView: View {
         } message: {
             Text("The new category will be created and selected for this rule.")
         }
-        .alert("Rules Complete", isPresented: Binding(get: { runResult != nil }, set: { if !$0 { runResult = nil } })) {
-            Button("OK", role: .cancel) {}
+        .confirmationDialog(
+            "Delete selected category?",
+            isPresented: Binding(
+                get: { pendingCategoryDeletion != nil },
+                set: { if !$0 { pendingCategoryDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Category", role: .destructive) {
+                if let pendingCategoryDeletion {
+                    deleteCategories(at: pendingCategoryDeletion)
+                }
+                pendingCategoryDeletion = nil
+            }
+            Button("Cancel", role: .cancel) { pendingCategoryDeletion = nil }
         } message: {
-            Text(runResult ?? "")
+            Text("The category will also be removed from matching accounts and automatic rules when you save.")
         }
     }
 
@@ -669,44 +470,55 @@ struct NativeCategoriesSettingsView: View {
     @ViewBuilder
     private func categoryRule(at index: Int) -> some View {
         let rule = ruleBinding(at: index)
-        VStack(alignment: .leading, spacing: 8) {
-            Toggle("Rule \(index + 1)", isOn: rule.isEnabled)
-                .font(.subheadline.weight(.semibold))
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Enabled", isOn: rule.isEnabled)
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text("IF FIELD")
-                    .font(.caption.bold()).foregroundStyle(.secondary)
-                Picker("Field", selection: rule.field) {
-                    ForEach(FireVaultCategoryRuleField.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("IF FIELD")
+                        .font(.caption.bold()).foregroundStyle(.secondary)
+                    Picker("Field", selection: rule.field) {
+                        ForEach(FireVaultCategoryRuleField.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text("CONDITION")
-                    .font(.caption.bold()).foregroundStyle(.secondary)
-                Picker("Condition", selection: rule.condition) {
-                    ForEach(FireVaultCategoryRuleCondition.allCases) { Text($0.title).tag($0) }
+                    Text("CONDITION")
+                        .font(.caption.bold()).foregroundStyle(.secondary)
+                    Picker("Condition", selection: rule.condition) {
+                        ForEach(FireVaultCategoryRuleCondition.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
+
+                TextField("Match text", text: rule.value)
+                    .textInputAutocapitalization(.words)
+                    .focused($focused)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("THEN ADD CATEGORY")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Picker("Category tag", selection: ruleCategoryBinding(at: index)) {
+                        ForEach(draft.categories, id: \.self) { Text($0).tag($0) }
+                        Divider()
+                        Text("Create New Category…").tag("__CREATE_NEW_CATEGORY__")
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-
-            TextField("Match text", text: rule.value)
-                .textInputAutocapitalization(.words)
-                .focused($focused)
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text("THEN ADD CATEGORY")
-                    .font(.caption.bold())
+        } label: {
+            HStack {
+                Text("Rule \(index + 1)")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(rule.wrappedValue.categoryTag)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Picker("Category tag", selection: ruleCategoryBinding(at: index)) {
-                    ForEach(draft.categories, id: \.self) { Text($0).tag($0) }
-                    Divider()
-                    Text("Create New Category…").tag("__CREATE_NEW_CATEGORY__")
-                }
-                .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.vertical, 4)
@@ -903,62 +715,6 @@ struct NativeCategoriesSettingsView: View {
     }
 }
 
-struct NativeWebDAVSettingsView: View {
-    @ObservedObject var settings: FireVaultNativeSettingsStore
-    @State private var draft: FireVaultNativePreferences
-    @FocusState private var focused: Bool
-    init(settings: FireVaultNativeSettingsStore) { self.settings = settings; _draft = State(initialValue: settings.preferences) }
-    var body: some View {
-        Form {
-            Section("WebDAV Server") {
-                Toggle("Enable WebDAV profile", isOn: $draft.webDAV.enabled)
-                TextField("Server URL", text: $draft.webDAV.serverURL).keyboardType(.URL).textInputAutocapitalization(.never).focused($focused)
-                TextField("Username", text: $draft.webDAV.username).textInputAutocapitalization(.never).focused($focused)
-                TextField("Remote folder", text: $draft.webDAV.folder).focused($focused)
-            }
-        }
-        .nativeSettingsForm(title: "WebDAV Backup", focused: $focused) { settings.save(draft) }
-    }
-}
-
-struct NativePrivacySettingsView: View {
-    @ObservedObject var settings: FireVaultNativeSettingsStore
-    @State private var draft: FireVaultNativePreferences
-    init(settings: FireVaultNativeSettingsStore) { self.settings = settings; _draft = State(initialValue: settings.preferences) }
-    var body: some View {
-        Form {
-            Section("Interaction") {
-                Toggle("Scrolling haptics", isOn: Binding(
-                    get: { draft.gps.hapticsEnabled ?? true },
-                    set: { draft.gps.hapticsEnabled = $0 }
-                ))
-                Text("Provides a light click as Nearby accounts snap into position.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            Section("Privacy") {
-                Toggle(
-                    "Require Face ID",
-                    isOn: Binding(
-                        get: { draft.privacy.enabled },
-                        set: { enabled in
-                            draft.privacy.enabled = enabled
-                            settings.save(draft)
-                        }
-                    )
-                )
-                Picker("Auto-lock", selection: $draft.privacy.autoLockMinutes) { Text("Immediately").tag(0); Text("1 minute").tag(1); Text("5 minutes").tag(5); Text("15 minutes").tag(15) }
-                Toggle("Lock when app enters background", isOn: $draft.privacy.lockOnBackground)
-                Toggle("Hide content in app switcher", isOn: $draft.privacy.hideInAppSwitcher)
-                Text("Face ID protects the signed-in FireVault Pro workspace. Your device passcode remains available as Apple’s secure fallback.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .nativeSettingsForm(title: "Privacy & Interaction") { settings.save(draft) }
-    }
-}
-
 struct NativeSecuritySettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var store: FireVaultStore
@@ -989,10 +745,9 @@ struct NativeSecuritySettingsView: View {
             Section("Device Protection") {
                 Label(biometricStatus, systemImage: "faceid")
                 LabeledContent("Application data", value: "iOS protected")
-                LabeledContent("OpenAI key", value: "Stored on server")
             }
 
-            Section("Workspace Lock") {
+            Section {
                 Toggle("Require device authentication", isOn: $draft.privacy.enabled)
                 Picker("Auto-lock", selection: $draft.privacy.autoLockMinutes) {
                     Text("Immediately").tag(0)
@@ -1000,14 +755,14 @@ struct NativeSecuritySettingsView: View {
                     Text("5 minutes").tag(5)
                     Text("15 minutes").tag(15)
                 }
+                .disabled(!draft.privacy.enabled)
                 Toggle("Lock in background", isOn: $draft.privacy.lockOnBackground)
+                    .disabled(!draft.privacy.enabled)
                 Toggle("Hide app-switcher content", isOn: $draft.privacy.hideInAppSwitcher)
-            }
-
-            Section {
-                Text("FireVault Pro stores its local vault inside the iOS application sandbox. Device authentication uses Apple’s secure system interface; FireVault Pro never receives or stores biometric data.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Workspace Lock")
+            } footer: {
+                Text("Authentication uses Apple’s secure system interface. FireVault never receives or stores biometric data.")
             }
 
             Section("Account Management") {
@@ -1046,6 +801,7 @@ struct NativeBackupRestoreView: View {
     @State private var exportDocument = FireVaultVaultBackupDocument()
     @State private var isExporting = false
     @State private var isImporting = false
+    @State private var confirmsRestore = false
     @State private var statusMessage = ""
     @State private var errorMessage = ""
     @State private var storageReport = FireVaultMediaStorageReport(
@@ -1080,7 +836,7 @@ struct NativeBackupRestoreView: View {
                 }
                 Button("Restore From Backup", systemImage: "square.and.arrow.down") {
                     errorMessage = ""
-                    isImporting = true
+                    confirmsRestore = true
                 }
             } header: {
                 Text("Complete Vault")
@@ -1129,6 +885,16 @@ struct NativeBackupRestoreView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Only files that are not referenced by any account record will be removed.")
+        }
+        .confirmationDialog(
+            "Restore a FireVault backup?",
+            isPresented: $confirmsRestore,
+            titleVisibility: .visible
+        ) {
+            Button("Choose Backup File") { isImporting = true }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Restore merges missing records and preserves existing accounts and workdays. Legacy JSON files restore account records only.")
         }
         .fileExporter(
             isPresented: $isExporting,
@@ -1586,6 +1352,8 @@ private struct NativeCSVImportReviewView: View {
 
 struct NativeDemoSettingsView: View {
     @ObservedObject var store: FireVaultStore
+    @State private var confirmsEntry = false
+    @State private var confirmsReset = false
     var body: some View {
         List {
             Section("What Demo Mode Does") {
@@ -1600,9 +1368,9 @@ struct NativeDemoSettingsView: View {
                 Label(store.demoMode ? "Demo Mode is active" : "Demo Mode is off", systemImage: store.demoMode ? "theatermasks.fill" : "checkmark.shield.fill")
                 if store.demoMode {
                     Button("Exit Demo Mode") { store.exitDemoMode() }
-                    Button("Reset Demo Data", role: .destructive) { store.resetDemo() }
+                    Button("Reset Demo Data", role: .destructive) { confirmsReset = true }
                 } else {
-                    Button("Enter Demo Mode") { store.enterDemoMode() }
+                    Button("Enter Demo Mode") { confirmsEntry = true }
                 }
             } header: {
                 Text("Controls")
@@ -1616,6 +1384,18 @@ struct NativeDemoSettingsView: View {
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Demo Mode")
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog("Enter Demo Mode?", isPresented: $confirmsEntry, titleVisibility: .visible) {
+            Button("Enter Demo Mode") { store.enterDemoMode() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("FireVault will switch to a separate fictional workspace. Your live records remain unchanged.")
+        }
+        .confirmationDialog("Reset all demo data?", isPresented: $confirmsReset, titleVisibility: .visible) {
+            Button("Reset Demo Data", role: .destructive) { store.resetDemo() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("All changes made inside the fictional demo workspace will be discarded.")
+        }
     }
 }
 

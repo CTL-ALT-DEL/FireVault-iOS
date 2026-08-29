@@ -207,6 +207,7 @@ struct NativeNotificationSettingsView: View {
                 Text("FireVault asks for permission only when you choose Enable Notifications.")
             }
 
+            if draft.isEnabled {
             Section("Trip Log") {
                 Toggle("Still recording reminder", isOn: optionalBinding(\.tripLogStillRecording, default: true))
                 Toggle("Paused reminder", isOn: optionalBinding(\.tripLogPaused, default: true))
@@ -262,6 +263,7 @@ struct NativeNotificationSettingsView: View {
                 Text("Privacy & Schedule")
             } footer: {
                 Text("Security and failure alerts may still appear during quiet hours when action is needed.")
+            }
             }
 
 #if DEBUG

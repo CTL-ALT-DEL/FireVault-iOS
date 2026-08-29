@@ -258,7 +258,7 @@ enum FireVaultHelpCatalog {
             tint: "purple",
             visual: .privacy,
             steps: [
-                .init("privacy-lock", "Lock private screens", "Open Settings → Privacy Lock to require device authentication and optionally hide content in the app switcher."),
+                .init("privacy-lock", "Lock private screens", "Open Settings → Security to require device authentication and optionally hide content in the app switcher."),
                 .init("privacy-backup", "Create a protected backup", "Open Settings → Backup & Restore, create the backup, and save the exported file somewhere you control."),
                 .init("privacy-customer", "Delete one customer", "Open that customer and choose Delete Customer Account. This removes only the selected customer and its field records."),
                 .init("privacy-login", "Delete the FireVault sign-in", "Open Settings → Security → Account Data & Deletion, choose Delete FireVault Account, then confirm Delete Account and Data. This permanently removes the cloud sign-in and its data, then clears matching local account records.")

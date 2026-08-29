@@ -1728,6 +1728,7 @@ private struct NativeAccountsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var search = ""
     @State private var sort: NativeAccountSort = .alphabetic
+    @State private var showsAccountImport = false
 
     private var accounts: [FireVaultNativeAccount] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1760,7 +1761,7 @@ private struct NativeAccountsView: View {
                             ContentUnavailableView(
                                 "No Accounts",
                                 systemImage: "building.2",
-                                description: Text("Add an account here or import a CSV from Settings.")
+                                description: Text("Add an account or import an existing CSV file.")
                             )
                         } else {
                             ContentUnavailableView.search(text: search)
@@ -1814,8 +1815,21 @@ private struct NativeAccountsView: View {
                         }
                     } label: { Label(sort.rawValue, systemImage: "arrow.up.arrow.down") }
                     .buttonStyle(.glass)
+                    Button { showsAccountImport = true } label: { Image(systemName: "square.and.arrow.down") }
+                        .buttonStyle(.glass)
+                        .accessibilityLabel("Import Accounts")
                     Button { store.addAccount() } label: { Image(systemName: "plus") }
                         .buttonStyle(.glassProminent).accessibilityLabel("Add Account")
+                }
+            }
+            .sheet(isPresented: $showsAccountImport) {
+                NavigationStack {
+                    NativeCSVImportView(store: store)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Done") { showsAccountImport = false }
+                            }
+                        }
                 }
             }
         }
@@ -2550,26 +2564,7 @@ struct NativeSettingsView: View {
     @ObservedObject var locationService: FireVaultLocationService
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @State private var search = ""
-    @State private var expandedSettingGroupID: String?
-    @State private var isTechnicianGroupExpanded = false
     private let versionInfo = FireVaultVersionInfo()
-
-    private var viewPreferences: FireVaultSettingsViewPreferences { settings.settingsView }
-    private var usesCollapsibleSections: Bool { search.isEmpty }
-    private var showsDescriptions: Bool {
-        viewPreferences.mode == .advanced && viewPreferences.advancedShowDescriptions
-    }
-    private var showsStatus: Bool {
-        viewPreferences.mode != .simple
-            && (viewPreferences.mode != .advanced || viewPreferences.advancedShowStatus)
-    }
-    private var showsIcons: Bool {
-        viewPreferences.mode != .simple
-            && (viewPreferences.mode != .advanced || viewPreferences.advancedShowIcons)
-    }
-    private var showsSectionDescriptions: Bool {
-        viewPreferences.mode == .advanced && viewPreferences.advancedShowSectionDescriptions
-    }
 
     private var groups: [FireVaultNativeSettingsGroup] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -2601,7 +2596,8 @@ struct NativeSettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                profileSection
+                profileCard
+                searchField
 
                 if groups.isEmpty {
                     ContentUnavailableView.search(text: search)
@@ -2609,11 +2605,7 @@ struct NativeSettingsView: View {
                         .listRowSeparator(.hidden)
                 } else {
                     ForEach(groups) { group in
-                        if usesCollapsibleSections {
-                            collapsibleSettingsSection(group)
-                        } else {
-                            settingsSection(group)
-                        }
+                        settingsSection(group)
                     }
                 }
             }
@@ -2622,80 +2614,24 @@ struct NativeSettingsView: View {
             .scrollContentBackground(.hidden)
             .background(NativeShellPalette.background)
             .contentMargins(.bottom, 96, for: .scrollContent)
-            .searchable(text: $search, prompt: "Search settings")
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(NativeShellPalette.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .accessibilityIdentifier("native-settings-list")
-            .animation(.snappy(duration: 0.24), value: expandedSettingGroupID)
-            .animation(.snappy(duration: 0.24), value: isTechnicianGroupExpanded)
         }
         .listRowBackground(NativeShellPalette.surface)
         .listRowSeparatorTint(NativeShellPalette.hairline)
     }
 
-    private var profileSection: some View {
+    private var profileCard: some View {
         Section {
-            DisclosureGroup(isExpanded: Binding(
-                get: { isTechnicianGroupExpanded },
-                set: { isExpanded in
-                    withAnimation(.snappy(duration: 0.22)) {
-                        isTechnicianGroupExpanded = isExpanded
-                        if isExpanded { expandedSettingGroupID = nil }
-                    }
-                }
-            )) {
-                NavigationLink {
-                    NativeTechnicianSettingsView(settings: settings, store: store)
-                } label: {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Technician Profile")
-                            Text("Profile, sign-in, and account sync")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: "person.text.rectangle")
-                    }
-                }
-
-                NavigationLink {
-                    NativeSettingsViewPreferencesView(settings: settings)
-                } label: {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Preferred Settings View")
-                            Text(settings.settingsView.mode.title)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: "rectangle.3.group")
-                            .foregroundStyle(NativeShellPalette.blue)
-                    }
-                }
-
-                NavigationLink {
-                    NativeAppearanceSettingsView(settings: settings)
-                } label: {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Appearance")
-                            Text(settings.appearance.title)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: settings.appearance == .light ? "sun.max.fill" : "circle.lefthalf.filled")
-                            .foregroundStyle(NativeShellPalette.amber)
-                    }
-                }
+            NavigationLink {
+                NativeTechnicianSettingsView(settings: settings, store: store)
             } label: {
                 HStack(spacing: 14) {
                     Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 36))
+                        .font(.system(size: 40))
                         .foregroundStyle(NativeShellPalette.blue)
                         .accessibilityHidden(true)
 
@@ -2705,57 +2641,73 @@ struct NativeSettingsView: View {
                             .foregroundStyle(.primary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.78)
-                        Text("FireVault Pro FREE TRIAL")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(NativeShellPalette.blue)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                        Text(payload.demoMode ? "Demo Mode" : "Field technician profile")
+                        Text(profileCompanyDetail)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                        Text(profileContactDetail)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(NativeShellPalette.blue)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
 
                     Spacer(minLength: 4)
                 }
-                .padding(.vertical, 5)
+                .padding(.vertical, 8)
                 .contentShape(Rectangle())
             }
-            .accessibilityLabel(settings.preferences.technician.name.isEmpty ? "Technician Profile" : settings.preferences.technician.name)
-            .accessibilityValue(payload.demoMode ? "Demo Mode" : "Field technician profile")
-            .accessibilityHint(isTechnicianGroupExpanded ? "Collapses technician settings" : "Expands technician settings")
+            .accessibilityLabel("Technician Profile")
+            .accessibilityValue(profileAccessibilityValue)
+            .accessibilityHint("Opens Technician Profile")
         }
     }
 
-    private func collapsibleSettingsSection(_ group: FireVaultNativeSettingsGroup) -> some View {
+    private var profileDetail: String {
+        [profileCompanyDetail, profileContactDetail].joined(separator: ", ")
+    }
+
+    private var profileCompanyDetail: String {
+        if payload.demoMode { return "Demo Mode" }
+        let company = settings.preferences.technician.company.trimmingCharacters(in: .whitespacesAndNewlines)
+        return company.isEmpty ? "Add company or organization" : company
+    }
+
+    private var profileContactDetail: String {
+        let technician = settings.preferences.technician
+        let email = technician.email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let phone = technician.phone.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !email.isEmpty { return email }
+        if !phone.isEmpty { return phone }
+        return "Add phone or email"
+    }
+
+    private var profileAccessibilityValue: String {
+        let name = settings.preferences.technician.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? profileDetail : "\(name), \(profileDetail)"
+    }
+
+    private var searchField: some View {
         Section {
-            DisclosureGroup(
-                isExpanded: Binding(
-                    get: { expandedSettingGroupID == group.id },
-                    set: { isExpanded in
-                        withAnimation(.snappy(duration: 0.22)) {
-                            expandedSettingGroupID = isExpanded ? group.id : nil
-                            if isExpanded { isTechnicianGroupExpanded = false }
-                        }
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                TextField("Search settings", text: $search)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if !search.isEmpty {
+                    Button {
+                        search = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.tertiary)
                     }
-                )
-            ) {
-                ForEach(group.items) { item in
-                    let status = item.displayStatus(nativeVersion: versionInfo.version)
-                    settingsRow(item, group: group, status: status)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
                 }
-            } label: {
-                Label(group.title, systemImage: group.symbol)
-                    .font(.headline)
-                    .foregroundStyle(NativeShellPalette.tint(group.tint))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-                    .accessibilityIdentifier("settings-group-\(group.id)")
             }
         }
-        .listSectionSpacing(.compact)
-        .listRowBackground(NativeShellPalette.surface)
-        .listRowSeparatorTint(NativeShellPalette.hairline)
     }
 
     private func settingsSection(_ group: FireVaultNativeSettingsGroup) -> some View {
@@ -2766,11 +2718,9 @@ struct NativeSettingsView: View {
             }
         } header: {
             Label(group.title, systemImage: group.symbol)
-                .foregroundStyle(NativeShellPalette.tint(group.tint))
-        } footer: {
-            if showsSectionDescriptions && !group.subtitle.isEmpty {
-                Text(group.subtitle)
-            }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("settings-group-\(group.id)")
         }
     }
 
@@ -2782,10 +2732,10 @@ struct NativeSettingsView: View {
     ) -> some View {
         let row = FVSettingsRow(
             item: item,
-            status: showsStatus ? nativeStatus(for: item, fallback: status) : "",
+            status: nativeStatus(for: item, fallback: status),
             tint: NativeShellPalette.tint(group.tint),
-            showsSubtitle: showsDescriptions,
-            showsIcon: showsIcons
+            showsSubtitle: true,
+            showsIcon: true
         )
 
         NavigationLink {
@@ -2796,13 +2746,12 @@ struct NativeSettingsView: View {
             .accessibilityHint("Opens \(item.title)")
     }
 
-    private func nativeStatus(for item: FireVaultNativeSettingItem, fallback: String) -> String {
+    private func nativeStatus(for item: FireVaultNativeSettingItem, fallback _: String) -> String {
         switch item.id {
         case "gps": settings.gps.radiusStatus
-        case "tech": settings.preferences.technician.name.isEmpty ? "Not configured" : settings.preferences.technician.name
         case "email": settings.preferences.email.defaultTo.isEmpty ? "Not configured" : "Configured"
         case "reports": settings.preferences.reports.format.capitalized
-        case "overlay": "Configured"
+        case "appearance": settings.appearance.title
         case "plusCodes": settings.preferences.plusCodes.enabled ? "On" : "Off"
         case "notifications": (settings.preferences.notifications?.isEnabled ?? true) ? "On" : "Off"
         case "webdav": settings.preferences.webDAV.enabled ? "Configured" : "Off"
@@ -2810,7 +2759,7 @@ struct NativeSettingsView: View {
         case "customerImport": "CSV"
         case "demo": store.demoMode ? "Active" : "Off"
         case "about": "Version \(versionInfo.version)"
-        default: fallback
+        default: ""
         }
     }
 
@@ -2819,19 +2768,15 @@ struct NativeSettingsView: View {
         switch id {
         case "tech": NativeTechnicianSettingsView(settings: settings, store: store)
         case "overlay": NativeOverlaySettingsView(settings: settings)
+        case "appearance": NativeAppearanceSettingsView(settings: settings)
         case "gps": NativeGPSSettingsView(settings: settings, locationService: locationService)
         case "plusCodes": NativePlusCodeSettingsView(settings: settings, locationService: locationService)
         case "notifications": NativeNotificationSettingsView(settings: settings)
         case "reports": NativeReportSettingsView(settings: settings)
-        case "email": NativeEmailSettingsView(settings: settings)
-        case "cloudFiles": NativeStorageSettingsView(settings: settings)
-        case "microsoftStorage": NativeMicrosoftStorageSettingsView(settings: settings)
-        case "sync": NativeSyncSettingsView(settings: settings)
+        case "cloudFiles": NativeStorageSettingsView(settings: settings, store: store, breadcrumbs: breadcrumbs)
         case "customerImport": NativeCSVImportView(store: store)
         case "categories": NativeCategoriesSettingsView(settings: settings, store: store)
         case "backup": NativeBackupRestoreView(store: store, settings: settings, breadcrumbs: breadcrumbs)
-        case "webdav": NativeWebDAVSettingsView(settings: settings)
-        case "privacy": NativePrivacySettingsView(settings: settings)
         case "security": NativeSecuritySettingsView(settings: settings, store: store)
         case "manual": NativeManualView()
         case "demo": NativeDemoSettingsView(store: store)
@@ -2959,7 +2904,6 @@ struct FireVaultIPadSettingsWorkspace: View {
                             tint: NativeShellPalette.blue,
                             items: [
                                 ("tech", "Technician Profile", "person.text.rectangle"),
-                                ("settingsView", "Preferred Settings View", "rectangle.3.group"),
                                 ("appearance", "Appearance", "circle.lefthalf.filled")
                             ]
                         )
@@ -3042,22 +2986,16 @@ struct FireVaultIPadSettingsWorkspace: View {
     private func destination(_ id: String) -> some View {
         switch id {
         case "tech": NativeTechnicianSettingsView(settings: settings, store: store)
-        case "settingsView": NativeSettingsViewPreferencesView(settings: settings)
         case "appearance": NativeAppearanceSettingsView(settings: settings)
         case "overlay": NativeOverlaySettingsView(settings: settings)
         case "gps": NativeGPSSettingsView(settings: settings, locationService: locationService)
         case "plusCodes": NativePlusCodeSettingsView(settings: settings, locationService: locationService)
         case "notifications": NativeNotificationSettingsView(settings: settings)
         case "reports": NativeReportSettingsView(settings: settings)
-        case "email": NativeEmailSettingsView(settings: settings)
-        case "cloudFiles": NativeStorageSettingsView(settings: settings)
-        case "microsoftStorage": NativeMicrosoftStorageSettingsView(settings: settings)
-        case "sync": NativeSyncSettingsView(settings: settings)
+        case "cloudFiles": NativeStorageSettingsView(settings: settings, store: store, breadcrumbs: breadcrumbs)
         case "customerImport": NativeCSVImportView(store: store)
         case "categories": NativeCategoriesSettingsView(settings: settings, store: store)
         case "backup": NativeBackupRestoreView(store: store, settings: settings, breadcrumbs: breadcrumbs)
-        case "webdav": NativeWebDAVSettingsView(settings: settings)
-        case "privacy": NativePrivacySettingsView(settings: settings)
         case "security": NativeSecuritySettingsView(settings: settings, store: store)
         case "manual": NativeManualView()
         case "demo": NativeDemoSettingsView(store: store)
@@ -3095,13 +3033,11 @@ private struct NativeGPSSettingsView: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Map provider", value: "Apple Maps")
-
                 Picker("Default map layer", selection: defaultMapAppearance) {
                     Label("Standard", systemImage: "map").tag("standard-2d")
-                    Label("Standard 3D", systemImage: "view.3d").tag("standard-3d")
+                    Label("Standard 3D", systemImage: "map.fill").tag("standard-3d")
                     Label("Satellite", systemImage: "globe.americas.fill").tag("satellite-2d")
-                    Label("Satellite 3D", systemImage: "view.3d").tag("satellite-3d")
+                    Label("Satellite 3D", systemImage: "globe.americas.fill").tag("satellite-3d")
                     Label("Hybrid", systemImage: "square.3.layers.3d").tag("hybrid-2d")
                     Label("Hybrid 3D", systemImage: "building.2.crop.circle").tag("hybrid-3d")
                 }
@@ -3109,65 +3045,81 @@ private struct NativeGPSSettingsView: View {
 
                 Toggle("High-accuracy GPS", isOn: $draft.highAccuracy)
 
-                VStack(spacing: 8) {
-                    HStack {
-                        Text("Nearby radius")
-                            .font(.headline)
-                        Spacer()
-                        Text(FireVaultGPSPreferences.radiusLabel(draft.nearbyRadiusMiles))
-                            .font(.headline.monospacedDigit())
-                            .foregroundStyle(NativeShellPalette.blue)
-                            .contentTransition(.numericText())
+                Picker("Nearby radius", selection: $draft.nearbyRadiusMiles) {
+                    ForEach(commonRadiusOptions, id: \.self) { radius in
+                        Text(FireVaultGPSPreferences.radiusLabel(radius)).tag(radius)
                     }
-
-                    FVRadiusWheelPicker(
-                        selection: $draft.nearbyRadiusMiles
-                    )
                 }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("settings-radius-wheel")
             } header: {
                 Text("Map Preferences")
             } footer: {
                 Text("Choose Standard, Satellite, or Hybrid in either 2D or 3D. This becomes the opening appearance for Nearby maps. The distance controls the accounts displayed on the map and list.")
             }
 
-            Section("GPS Tools") {
+            Section("Location Tools") {
                 Toggle("Show GPS capture controls", isOn: $draft.gpsToolsEnabled)
                 Toggle("Include coordinates in reports", isOn: $draft.includeCoordinatesInReports)
                 Toggle("Address assistance", isOn: $draft.addressAssistanceEnabled)
+                Toggle(
+                    "Nearby scrolling haptics",
+                    isOn: Binding(
+                        get: { draft.hapticsEnabled ?? true },
+                        set: { draft.hapticsEnabled = $0 }
+                    )
+                )
+                NavigationLink {
+                    NativePlusCodeSettingsView(settings: settings, locationService: locationService)
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Plus Codes")
+                            Text("Offline location codes and precision")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "plus.square.dashed")
+                            .foregroundStyle(NativeShellPalette.blue)
+                    }
+                }
             }
 
             Section {
-                Picker(
-                    "Minimum unrecognized stop",
-                    selection: Binding(
-                        get: { draft.resolvedTripLogMinimumUnknownStopMinutes },
-                        set: { draft.tripLogMinimumUnknownStopMinutes = $0 }
+                DisclosureGroup("Advanced Stop Detection") {
+                    Picker(
+                        "Minimum unrecognized stop",
+                        selection: Binding(
+                            get: { draft.resolvedTripLogMinimumUnknownStopMinutes },
+                            set: { draft.tripLogMinimumUnknownStopMinutes = $0 }
+                        )
+                    ) {
+                        Text("5 minutes").tag(5)
+                        Text("7 minutes").tag(7)
+                        Text("10 minutes").tag(10)
+                    }
+
+                    Toggle(
+                        "Reject poor GPS readings",
+                        isOn: Binding(
+                            get: { draft.rejectsPoorAccuracyStops },
+                            set: { draft.tripLogRejectPoorAccuracyStops = $0 }
+                        )
                     )
-                ) {
-                    Text("5 minutes").tag(5)
-                    Text("7 minutes").tag(7)
-                    Text("10 minutes").tag(10)
+
+                    Toggle(
+                        "Merge nearby duplicate stops",
+                        isOn: Binding(
+                            get: { draft.mergesNearbyStops },
+                            set: { draft.tripLogMergeNearbyStops = $0 }
+                        )
+                    )
                 }
-
-                Toggle(
-                    "Reject poor GPS readings",
-                    isOn: Binding(
-                        get: { draft.rejectsPoorAccuracyStops },
-                        set: { draft.tripLogRejectPoorAccuracyStops = $0 }
-                    )
-                )
-
-                Toggle(
-                    "Merge nearby duplicate stops",
-                    isOn: Binding(
-                        get: { draft.mergesNearbyStops },
-                        set: { draft.tripLogMergeNearbyStops = $0 }
-                    )
-                )
             } header: {
                 Text("Trip Log Stop Detection")
             } footer: {
-                Text("Five minutes is recommended. FireVault ignores isolated GPS jumps, waits for consistent departure evidence, preserves a stop through temporary signal loss, and merges repeated detections at the same place within 15 minutes.")
+                Text("The recommended defaults filter GPS jumps and duplicate stop detections.")
             }
 
             Section("Diagnostics") {
@@ -3221,6 +3173,12 @@ private struct NativeGPSSettingsView: View {
     private func save() {
         settings.saveGPS(draft)
         saved = true
+    }
+
+    private var commonRadiusOptions: [Double] {
+        let common: [Double] = [0.25, 0.5, 1, 2, 4, 10, 25]
+        guard !common.contains(draft.nearbyRadiusMiles) else { return common }
+        return (common + [draft.nearbyRadiusMiles]).sorted()
     }
 
     private var defaultMapAppearance: Binding<String> {
@@ -3719,7 +3677,9 @@ private struct NativeAboutFireVaultView: View {
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+#if DEBUG
     @State private var showsDeveloperCenter = false
+#endif
 
     var body: some View {
         List {
@@ -3743,58 +3703,6 @@ private struct NativeAboutFireVaultView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .accessibilityElement(children: .combine)
-            }
-
-            Section("Field Workspace") {
-                FireVaultAboutFeatureRow(
-                    title: "Account Records",
-                    detail: "Keep site details, service notes, equipment, files, and scans together.",
-                    systemImage: "building.2.fill",
-                    tint: NativeShellPalette.blue
-                )
-                FireVaultAboutFeatureRow(
-                    title: "Arrival Maps",
-                    detail: "Save accurate parking, entrance, panel, and riser locations for each account.",
-                    systemImage: "mappin.and.ellipse",
-                    tint: NativeShellPalette.green
-                )
-                FireVaultAboutFeatureRow(
-                    title: "Trip Log",
-                    detail: "Record routes, account visits, stop times, and daily or weekly reports.",
-                    systemImage: "truck.box.fill",
-                    tint: NativeShellPalette.red
-                )
-                FireVaultAboutFeatureRow(
-                    title: "Field Capture",
-                    detail: "Capture photographs and documents with configurable account overlays.",
-                    systemImage: "camera.fill",
-                    tint: NativeShellPalette.amber
-                )
-            }
-
-            Section("Privacy & Data") {
-                FireVaultAboutFeatureRow(
-                    title: "Separate Workspaces",
-                    detail: "Demo records remain isolated from live customer data.",
-                    systemImage: "square.stack.3d.up.fill",
-                    tint: NativeShellPalette.purple
-                )
-                FireVaultAboutFeatureRow(
-                    title: "Location Control",
-                    detail: "GPS is used only for enabled Nearby, Arrival Map, and Trip Log features.",
-                    systemImage: "location.fill",
-                    tint: NativeShellPalette.blue
-                )
-                FireVaultAboutFeatureRow(
-                    title: "Connected Services",
-                    detail: "Storage and report delivery remain inactive until you configure them.",
-                    systemImage: "externaldrive.fill",
-                    tint: NativeShellPalette.amber
-                )
-                Text("Permissions and service connections can be reviewed at any time in Settings.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Created by") {
@@ -3834,11 +3742,13 @@ private struct NativeAboutFireVaultView: View {
 
             Section("App Information") {
                 LabeledContent("Version", value: versionInfo.version)
+#if DEBUG
                     .contentShape(Rectangle())
                     .onTapGesture(count: 4) {
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         showsDeveloperCenter = true
                     }
+#endif
                     .accessibilityHint("Version information")
                 LabeledContent("Build", value: versionInfo.build)
                 LabeledContent("Updated", value: updatedAtText)
@@ -3856,6 +3766,7 @@ private struct NativeAboutFireVaultView: View {
                     .minimumScaleFactor(0.72)
             }
         }
+#if DEBUG
         .navigationDestination(isPresented: $showsDeveloperCenter) {
             FireVaultDeveloperCenterView(
                 versionInfo: versionInfo,
@@ -3865,6 +3776,7 @@ private struct NativeAboutFireVaultView: View {
                 breadcrumbs: breadcrumbs
             )
         }
+#endif
     }
 
     private func aboutBadge(_ title: String, systemImages: [String]) -> some View {
@@ -3897,36 +3809,7 @@ private struct NativeAboutFireVaultView: View {
     }
 }
 
-private struct FireVaultAboutFeatureRow: View {
-    let title: String
-    let detail: String
-    let systemImage: String
-    let tint: Color
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(tint)
-                .frame(width: 34, height: 34)
-                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text(detail)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, 4)
-    }
-}
-
+#if DEBUG
 private struct FireVaultDeveloperCenterView: View {
     let versionInfo: FireVaultVersionInfo
     let payload: FireVaultAppPayload
@@ -3936,6 +3819,8 @@ private struct FireVaultDeveloperCenterView: View {
     @StateObject private var runner = FireVaultDiagnosticRunner()
     @State private var copiedDiagnostics = false
     @State private var confirmsAITest = false
+    @State private var isRefreshingFeatures = false
+    @State private var featureRefreshMessage = ""
 
     private var enabledFeatureCount: Int {
         FireVaultDeveloperFeatureCatalog.features.filter {
@@ -3944,15 +3829,21 @@ private struct FireVaultDeveloperCenterView: View {
     }
 
     private var diagnosticHeader: String {
-        return """
-        FireVault \(versionInfo.displayText)
-        Mode: \(payload.demoMode ? "Demo" : "Production")
-        Settings view: \(settings.settingsView.mode.title)
-        Accounts: \(store.accounts.count)
-        Selected tab: \(store.selectedTab.title)
-        Location: \(payload.locationStatus)
-        Simple features: \(enabledFeatureCount)/\(FireVaultDeveloperFeatureCatalog.features.count) enabled
         """
+        FireVault \(versionInfo.displayText)
+        Environment: \(payload.demoMode ? "Demo" : "Production")
+        Accounts: \(store.accounts.count)
+        Mapped accounts: \(store.mappedAccountCount)
+        Location: \(payload.locationStatus)
+        Features: \(enabledFeatureCount)/\(FireVaultDeveloperFeatureCatalog.features.count) locally enabled
+        """
+    }
+
+    private var checkSummary: String {
+        guard !runner.results.isEmpty else { return "Not run" }
+        if runner.isRunning { return "Running" }
+        let issues = runner.results.filter { $0.status == .warning || $0.status == .failed }.count
+        return issues == 0 ? "All passed" : "\(issues) issue\(issues == 1 ? "" : "s")"
     }
 
     var body: some View {
@@ -3973,41 +3864,46 @@ private struct FireVaultDeveloperCenterView: View {
                 }
                 .disabled(runner.isRunning)
 
-                Button("Test AI Edge Function", systemImage: "sparkles") {
+                LabeledContent("Last result", value: checkSummary)
+
+                Button("Test AI Service", systemImage: "sparkles") {
                     confirmsAITest = true
                 }
                 .disabled(runner.isRunning)
             } header: {
-                Text("Test Console")
+                Text("System Check")
             } footer: {
-                Text("Safe diagnostics test the local vault, account integrity, storage, authentication, and read access to both Supabase Trip Log tables.")
+                Text("The safe check verifies local data, file access, sign-in, and database read access. The AI test is separate because it uses API credit.")
             }
 
             if runner.results.isEmpty {
                 Section {
-                    ContentUnavailableView(
-                        "No Test Results",
-                        systemImage: "waveform.path.ecg",
-                        description: Text("Run diagnostics to test FireVault Pro's local vault and connected services.")
-                    )
+                    Label("Run the system check to see detailed results.", systemImage: "info.circle")
+                        .foregroundStyle(.secondary)
                 }
             } else {
-                Section("Results") {
+                Section {
                     ForEach(runner.results) { result in
                         FireVaultDiagnosticResultRow(result: result)
                     }
+
+                    Button("Clear Results", systemImage: "clear") {
+                        runner.clear()
+                    }
+                    .disabled(runner.isRunning)
+                } header: {
+                    Text("Results")
                 }
             }
 
-            Section("Runtime") {
+            Section("App Snapshot") {
                 LabeledContent("Version", value: versionInfo.displayText)
                 LabeledContent("Environment", value: payload.demoMode ? "Demo" : "Production")
-                LabeledContent("Accounts loaded", value: "\(store.accounts.count)")
-                LabeledContent("Settings view", value: settings.settingsView.mode.title)
-                LabeledContent("Mapped accounts", value: "\(store.mappedAccountCount)")
-                LabeledContent("Unmapped accounts", value: "\(store.unmappedAccountCount)")
+                LabeledContent("Accounts", value: "\(store.mappedAccountCount) mapped of \(store.accounts.count)")
+                LabeledContent("Location", value: payload.locationStatus)
+                LabeledContent("Locally enabled", value: "\(enabledFeatureCount) of \(FireVaultDeveloperFeatureCatalog.features.count)")
 
-                Button(copiedDiagnostics ? "Diagnostics Copied" : "Copy Diagnostics", systemImage: copiedDiagnostics ? "checkmark" : "doc.on.doc") {
+                Button(copiedDiagnostics ? "Report Copied" : "Copy Support Report", systemImage: copiedDiagnostics ? "checkmark" : "doc.on.doc") {
                     UIPasteboard.general.string = diagnosticHeader + "\n\n" + runner.report
                     copiedDiagnostics = true
                 }
@@ -4023,30 +3919,49 @@ private struct FireVaultDeveloperCenterView: View {
                         breadcrumbs: breadcrumbs
                     )
                 } label: {
-                    Label("Field Test Dashboard", systemImage: "gauge.with.dots.needle.50percent")
+                    developerToolLabel(
+                        "Field Test Dashboard",
+                        detail: "Live GPS, storage, permissions, and service status",
+                        symbol: "gauge.with.dots.needle.50percent"
+                    )
                 }
 
                 NavigationLink {
-                    FireVaultSimpleTemplateDeveloperView(settings: settings)
+                    FireVaultFeatureVisibilityDeveloperView(settings: settings)
                 } label: {
-                    Label("Simple Mode Template", systemImage: "switch.2")
+                    developerToolLabel(
+                        "Feature Visibility",
+                        detail: "Show or hide app features on this device",
+                        symbol: "switch.2"
+                    )
                 }
 
-                Button("Clear Test Results", systemImage: "clear") {
-                    runner.clear()
+                Button {
+                    Task { await refreshFeatureFlags() }
+                } label: {
+                    Label(
+                        isRefreshingFeatures ? "Refreshing Feature Flags…" : "Refresh Server Feature Flags",
+                        systemImage: "arrow.triangle.2.circlepath"
+                    )
                 }
-                .disabled(runner.results.isEmpty || runner.isRunning)
+                .disabled(isRefreshingFeatures)
+
+                if !featureRefreshMessage.isEmpty {
+                    Label(featureRefreshMessage, systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             } header: {
                 Text("Developer Tools")
             } footer: {
-                Text("A production database write test will require a dedicated diagnostic table migration. FireVault Pro does not write test records into customer or Trip Log tables.")
+                Text("Feature visibility changes are local to this installation. Server flags can also disable a feature and take priority.")
             }
         }
         .fireVaultThemedCollection()
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Developer Center")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Run AI Endpoint Test?", isPresented: $confirmsAITest) {
+        .alert("Run AI Service Test?", isPresented: $confirmsAITest) {
             Button("Cancel", role: .cancel) {}
             Button("Run Test") {
                 Task { await runner.runAIEndpointCheck() }
@@ -4055,14 +3970,55 @@ private struct FireVaultDeveloperCenterView: View {
             Text("This sends a diagnostic request containing no customer data. It uses a small amount of OpenAI API credit.")
         }
     }
+
+    private func developerToolLabel(_ title: String, detail: String, symbol: String) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } icon: {
+            Image(systemName: symbol)
+                .foregroundStyle(NativeShellPalette.blue)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func refreshFeatureFlags() async {
+        isRefreshingFeatures = true
+        let refreshed = await settings.refreshRemoteFeatureControls()
+        featureRefreshMessage = refreshed
+            ? "Server feature flags refreshed successfully."
+            : "Could not refresh; the last saved flags remain active."
+        isRefreshingFeatures = false
+    }
 }
 
-private struct FireVaultSimpleTemplateDeveloperView: View {
+private struct FireVaultFeatureVisibilityDeveloperView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var showsResetConfirmation = false
 
+    private var enabledCount: Int {
+        FireVaultDeveloperFeatureCatalog.features.filter {
+            settings.developer.isEnabled($0.id)
+        }.count
+    }
+
     var body: some View {
         List {
+            Section {
+                LabeledContent("Enabled on this device", value: "\(enabledCount) of \(FireVaultDeveloperFeatureCatalog.features.count)")
+                Button("Enable All Features", systemImage: "checkmark.circle") {
+                    settings.resetSimpleFeatures()
+                }
+                .disabled(enabledCount == FireVaultDeveloperFeatureCatalog.features.count)
+            } footer: {
+                Text("These switches hide features locally. Server feature flags can still override them. At least one main tab always remains enabled.")
+            }
+
             ForEach(FireVaultDeveloperFeatureCatalog.pages, id: \.self) { page in
                 Section(page) {
                     ForEach(FireVaultDeveloperFeatureCatalog.features.filter { $0.page == page }) { feature in
@@ -4072,22 +4028,22 @@ private struct FireVaultSimpleTemplateDeveloperView: View {
             }
 
             Section {
-                Button("Reset Simple Template", systemImage: "arrow.counterclockwise", role: .destructive) {
+                Button("Restore Default Visibility", systemImage: "arrow.counterclockwise", role: .destructive) {
                     showsResetConfirmation = true
                 }
             } footer: {
-                Text("Resetting enables every Simple-mode feature without deleting FireVault Pro data.")
+                Text("Restoring defaults enables every feature without deleting FireVault data.")
             }
         }
         .fireVaultThemedCollection()
         .contentMargins(.bottom, 96, for: .scrollContent)
-        .navigationTitle("Simple Template")
+        .navigationTitle("Feature Visibility")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Reset Simple Template?", isPresented: $showsResetConfirmation) {
+        .alert("Restore Default Visibility?", isPresented: $showsResetConfirmation) {
             Button("Cancel", role: .cancel) {}
-            Button("Reset", role: .destructive) { settings.resetSimpleFeatures() }
+            Button("Restore", role: .destructive) { settings.resetSimpleFeatures() }
         } message: {
-            Text("Every feature will be enabled in Simple mode.")
+            Text("Every locally controlled feature will be enabled.")
         }
     }
 
@@ -4098,7 +4054,19 @@ private struct FireVaultSimpleTemplateDeveloperView: View {
                 settings.setSimpleFeature(feature.id, enabled: newValue)
             }
         )
-        return Toggle(feature.title, isOn: enabled)
+        let managedByServer = settings.developer.isEnabled(feature.id)
+            && !settings.isFeatureVisible(feature.id)
+
+        return Toggle(isOn: enabled) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(feature.title)
+                if managedByServer {
+                    Text("Disabled by server configuration")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 }
 
@@ -4141,6 +4109,7 @@ private struct FireVaultDiagnosticResultRow: View {
         .padding(.vertical, 3)
     }
 }
+#endif
 
 private struct FVSettingsRow: View {
     let item: FireVaultNativeSettingItem
@@ -4164,6 +4133,9 @@ private struct FVSettingsRow: View {
                 Text(item.title)
                     .font(.body)
                     .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                    .layoutPriority(1)
                 if showsSubtitle && !item.subtitle.isEmpty {
                     Text(item.subtitle)
                         .font(.caption)
@@ -4179,13 +4151,9 @@ private struct FVSettingsRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing)
-                    .lineLimit(2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             }
-
-            Image(systemName: "chevron.right")
-                .font(.caption2.bold())
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())

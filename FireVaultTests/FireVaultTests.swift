@@ -2537,7 +2537,7 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(reloaded.appearance, .light)
     }
 
-    func testDeveloperSimpleTemplateFlagsPersistAndOnlyApplyToSimpleMode() throws {
+    func testDeveloperFeatureFlagsPersistRegardlessOfLegacySettingsViewMode() throws {
         let suite = "FireVaultTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -2549,11 +2549,11 @@ final class FireVaultTests: XCTestCase {
         var view = store.settingsView
         view.mode = .advanced
         store.saveSettingsView(view)
-        XCTAssertTrue(store.isFeatureVisible("account.brief"))
+        XCTAssertFalse(store.isFeatureVisible("account.brief"))
 
         let reloaded = FireVaultNativeSettingsStore(defaults: defaults)
         XCTAssertFalse(reloaded.developer.isEnabled("account.brief"))
-        XCTAssertTrue(reloaded.isFeatureVisible("account.brief"))
+        XCTAssertFalse(reloaded.isFeatureVisible("account.brief"))
     }
 
     func testDeveloperFeatureCatalogHasUniquePersistentIdentifiers() {
@@ -2561,6 +2561,25 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(features.isEmpty)
         XCTAssertEqual(Set(features.map(\.id)).count, features.count)
         XCTAssertTrue(features.allSatisfy { !$0.page.isEmpty && !$0.title.isEmpty })
+    }
+
+    func testDeveloperFeatureFlagsKeepOneMainTabEnabled() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = FireVaultNativeSettingsStore(defaults: defaults)
+        let tabs = FireVaultDeveloperFeatureCatalog.features.filter { $0.page == "Main Navigation" }
+        XCTAssertGreaterThan(tabs.count, 1)
+
+        for tab in tabs.dropLast() {
+            store.setSimpleFeature(tab.id, enabled: false)
+        }
+        let lastTab = try XCTUnwrap(tabs.last)
+        store.setSimpleFeature(lastTab.id, enabled: false)
+
+        XCTAssertTrue(store.developer.isEnabled(lastTab.id))
+        XCTAssertEqual(tabs.filter { store.developer.isEnabled($0.id) }.count, 1)
     }
 
     func testNativeCSVParserSupportsQuotedCommasAndEscapedQuotes() {

@@ -1,3 +1,4 @@
+#if DEBUG
 import AVFoundation
 import CoreLocation
 import Foundation
@@ -270,3 +271,4 @@ private extension UIDevice.BatteryState {
         }
     }
 }
+#endif

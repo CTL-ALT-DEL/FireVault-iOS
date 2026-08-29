@@ -434,8 +434,8 @@ enum FireVaultDeveloperFeatureCatalog {
         .init(id: "account.action.route", page: "Account Detail", title: "Route Action"),
         .init(id: "settings.field", page: "Settings", title: "Field Tools"),
         .init(id: "settings.reports", page: "Settings", title: "Reports"),
-        .init(id: "settings.data", page: "Settings", title: "Data & Security"),
-        .init(id: "settings.help", page: "Settings", title: "Help & About")
+        .init(id: "settings.data", page: "Settings", title: "Storage & Data"),
+        .init(id: "settings.help", page: "Settings", title: "Privacy & Support")
     ]
 
     static var pages: [String] {
@@ -612,10 +612,11 @@ final class FireVaultNativeSettingsStore: ObservableObject {
 
     func isFeatureVisible(_ id: String) -> Bool {
         guard FireVaultRemoteFeatureDependencies.isEnabled(id, in: remoteFeatureVisibility) else { return false }
-        return settingsView.mode != .simple || developer.isEnabled(id)
+        return developer.isEnabled(id)
     }
 
-    func refreshRemoteFeatureControls() async {
+    @discardableResult
+    func refreshRemoteFeatureControls() async -> Bool {
         do {
             let response: [FireVaultRemoteFeatureFlag] = try await SupabaseManager.client
                 .from("feature_flags")
@@ -629,13 +630,23 @@ final class FireVaultNativeSettingsStore: ObservableObject {
             }
             remoteFeaturesUpdatedAt = Date()
             persistRemoteFeatures()
+            return true
         } catch {
             // Keep the last successful configuration. With no cache, every feature
             // remains enabled so an outage cannot strand a technician in the field.
+            return false
         }
     }
 
     func setSimpleFeature(_ id: String, enabled: Bool) {
+        if !enabled,
+           id.hasPrefix("tab."),
+           isFeatureVisible(id) {
+            let visibleMainTabs = FireVaultDeveloperFeatureCatalog.features.filter {
+                $0.page == "Main Navigation" && isFeatureVisible($0.id)
+            }
+            guard visibleMainTabs.count > 1 else { return }
+        }
         developer.simpleFeatureVisibility[id] = enabled
         persistDeveloper()
     }

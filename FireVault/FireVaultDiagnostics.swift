@@ -1,3 +1,4 @@
+#if DEBUG
 import Foundation
 import Combine
 import Supabase
@@ -194,3 +195,4 @@ final class FireVaultDiagnosticRunner: ObservableObject {
             + Int(duration.components.attoseconds / 1_000_000_000_000_000)
     }
 }
+#endif
