@@ -200,10 +200,16 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                         accountID: account.id,
                         noteID: editingNote.id,
                         title: draft.title,
-                        text: draft.text
+                        text: draft.text,
+                        showOnArrival: draft.showOnArrival
                     )
                 }
-                return store.addNote(to: account.id, title: draft.title, text: draft.text) != nil
+                return store.addNote(
+                    to: account.id,
+                    title: draft.title,
+                    text: draft.text,
+                    showOnArrival: draft.showOnArrival
+                ) != nil
             }
         }
         .sheet(isPresented: $isShowingEquipmentEditor) {
@@ -349,7 +355,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
 
                     Label(account.address, systemImage: "mappin.and.ellipse")
                         .font(isLandscape ? .subheadline.weight(.medium) : .body.weight(.medium))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(NativeShellPalette.navigationInactive)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -454,7 +460,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
         HStack(spacing: 5) {
             Text(label)
                 .font(.caption2.bold())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(NativeShellPalette.navigationInactive)
             Text(value)
                 .font(.caption.bold())
                 .foregroundStyle(.primary)
@@ -645,7 +651,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 }
                 Text("\(count(for: selectedSection)) total")
                     .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(NativeShellPalette.navigationInactive)
             }
 
             switch selectedSection {
@@ -658,7 +664,12 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                             editingNote = note
                             isShowingNoteEditor = true
                         } label: {
-                            dataRow(title: note.title, subtitle: note.text, trailing: note.date, symbol: "note.text")
+                            dataRow(
+                                title: note.title,
+                                subtitle: note.text,
+                                trailing: FireVaultAccountTimestamp.display(legacy: note.date, timestamp: note.updatedAt),
+                                symbol: "note.text"
+                            )
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
@@ -673,7 +684,12 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     emptyRow("No files or scans saved", symbol: "doc.viewfinder")
                 } else {
                     ForEach(account.documents) { document in
-                        dataRow(title: document.title, subtitle: document.subtitle, trailing: document.date, symbol: document.kind == "scan" ? "doc.viewfinder" : "doc")
+                        dataRow(
+                            title: document.title,
+                            subtitle: document.subtitle,
+                            trailing: FireVaultAccountTimestamp.display(legacy: document.date, timestamp: document.updatedAt),
+                            symbol: document.kind == "scan" ? "doc.viewfinder" : "doc"
+                        )
                             .contextMenu {
                                 Button("Delete File", systemImage: "trash", role: .destructive) {
                                     store.deleteDocument(accountID: account.id, documentID: document.id)
@@ -739,12 +755,12 @@ struct FireVaultAdaptiveAccountDetailsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.subheadline.bold()).foregroundStyle(.primary).lineLimit(1)
                 if !subtitle.isEmpty {
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    Text(subtitle).font(.caption.weight(.medium)).foregroundStyle(NativeShellPalette.navigationInactive).lineLimit(2)
                 }
             }
             Spacer(minLength: 8)
             if !trailing.isEmpty {
-                Text(trailing).font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.trailing).lineLimit(2)
+                Text(trailing).font(.caption.weight(.semibold).monospacedDigit()).foregroundStyle(NativeShellPalette.navigationInactive).multilineTextAlignment(.trailing).lineLimit(2)
             }
         }
         .padding(.vertical, 7)
@@ -756,7 +772,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
     private func emptyRow(_ message: String, symbol: String) -> some View {
         Label(message, systemImage: symbol)
             .font(.subheadline)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(NativeShellPalette.navigationInactive)
             .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
             .padding(.horizontal, 10)
             .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))

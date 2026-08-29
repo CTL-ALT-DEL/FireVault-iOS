@@ -1552,10 +1552,18 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     }
 
     private func notifyConfirmedStop(_ stop: FireVaultBreadcrumbStop) {
-        if stop.accountID != nil {
+        if let accountID = stop.accountID {
+            let account = accounts.first(where: { $0.id == accountID })
+            let arrivalNotes = account?.notes.filter(\.showsOnArrival) ?? []
+            let parkingLocation = account?.locations.first { location in
+                let value = "\(location.label) \(location.type)".lowercased()
+                return value.contains("parking") || value.contains("park here")
+            }
             FireVaultNotificationService.shared.accountArrivalDetected(
                 stop: stop,
-                preferences: notificationPreferences
+                preferences: notificationPreferences,
+                arrivalNotes: arrivalNotes,
+                parkingLocation: parkingLocation
             )
         } else if stop.needsReview {
             FireVaultNotificationService.shared.unknownStopDetected(

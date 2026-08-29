@@ -103,4 +103,10 @@ enum FireVaultPlusCode {
         components?.percentEncodedQuery = "api=1&query=\(encodedCode)"
         return components?.url
     }
+
+    static func googleMapsAppURL(for code: String) -> URL? {
+        guard let code = normalizedFullCode(code) else { return nil }
+        let encodedCode = code.replacingOccurrences(of: "+", with: "%2B")
+        return URL(string: "comgooglemaps://?q=\(encodedCode)&zoom=18")
+    }
 }

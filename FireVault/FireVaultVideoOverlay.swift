@@ -35,25 +35,27 @@ enum FireVaultVideoOverlayRenderer {
         let naturalSize = try await track.load(.naturalSize)
         let preferredTransform = try await track.load(.preferredTransform)
         let transformedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
-        let renderSize = CGSize(width: abs(transformedRect.width), height: abs(transformedRect.height))
+        let renderSize = FireVaultVideoDisplayGeometry.displaySize(
+            naturalSize: naturalSize,
+            preferredTransform: preferredTransform
+        )
         let duration = try await asset.load(.duration)
 
-        let instruction = AVMutableVideoCompositionInstruction()
-        instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
-        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
+        var layerConfiguration = AVVideoCompositionLayerInstruction.Configuration(assetTrack: track)
         let normalizedTransform = preferredTransform.concatenating(
             CGAffineTransform(
                 translationX: -transformedRect.minX,
                 y: -transformedRect.minY
             )
         )
-        layerInstruction.setTransform(normalizedTransform, at: .zero)
-        instruction.layerInstructions = [layerInstruction]
-
-        let videoComposition = AVMutableVideoComposition()
-        videoComposition.renderSize = renderSize
-        videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
-        videoComposition.instructions = [instruction]
+        layerConfiguration.setTransform(normalizedTransform, at: .zero)
+        let layerInstruction = AVVideoCompositionLayerInstruction(configuration: layerConfiguration)
+        let instruction = AVVideoCompositionInstruction(
+            configuration: .init(
+                layerInstructions: [layerInstruction],
+                timeRange: CMTimeRange(start: .zero, duration: duration)
+            )
+        )
 
         let videoLayer = CALayer()
         videoLayer.frame = CGRect(origin: .zero, size: renderSize)
@@ -72,9 +74,19 @@ enum FireVaultVideoOverlayRenderer {
         parentLayer.frame = videoLayer.frame
         parentLayer.addSublayer(videoLayer)
         parentLayer.addSublayer(overlayLayer)
-        videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
-            postProcessingAsVideoLayer: videoLayer,
-            in: parentLayer
+        let animationTool = AVVideoCompositionCoreAnimationTool(
+            configuration: .init(
+                postProcessingAsVideoLayer: videoLayer,
+                containingLayer: parentLayer
+            )
+        )
+        let videoComposition = AVVideoComposition(
+            configuration: .init(
+                animationTool: animationTool,
+                frameDuration: CMTime(value: 1, timescale: 30),
+                instructions: [instruction],
+                renderSize: renderSize
+            )
         )
 
         let outputURL = FileManager.default.temporaryDirectory
@@ -82,15 +94,16 @@ enum FireVaultVideoOverlayRenderer {
         guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
             throw FireVaultVideoOverlayError.cannotCreateExportSession
         }
-        exporter.outputURL = outputURL
-        exporter.outputFileType = .mp4
         exporter.shouldOptimizeForNetworkUse = true
         exporter.videoComposition = videoComposition
 
-        await exporter.export()
-        guard exporter.status == .completed else {
+        do {
+            try await exporter.export(to: outputURL, as: .mp4)
+        } catch {
             throw FireVaultVideoOverlayError.exportFailed(
-                exporter.error?.localizedDescription ?? "The export did not complete."
+                error.localizedDescription.isEmpty
+                    ? "The export did not complete."
+                    : error.localizedDescription
             )
         }
         return outputURL

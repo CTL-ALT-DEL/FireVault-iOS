@@ -258,6 +258,7 @@ struct NativeOverlaySettingsView: View {
                     Text("Amber").tag("amber")
                     Text("White").tag("white")
                 }
+                .accessibilityIdentifier("overlay-accent-picker")
             } header: {
                 Text("Branding")
             } footer: {

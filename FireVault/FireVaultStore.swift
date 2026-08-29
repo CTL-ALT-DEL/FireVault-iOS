@@ -40,6 +40,7 @@ enum FireVaultMediaError: LocalizedError {
     case accountUnavailable
     case emptyScan
     case encodingFailed
+    case invalidReportData
     case storageUnavailable
     case writeFailed(String)
 
@@ -51,6 +52,8 @@ enum FireVaultMediaError: LocalizedError {
             "The scanner did not return any pages."
         case .encodingFailed:
             "The captured photo could not be encoded."
+        case .invalidReportData:
+            "The generated report is not a valid PDF."
         case .storageUnavailable:
             "FireVault Pro media storage is unavailable on this iPhone."
         case .writeFailed(let detail):
@@ -708,7 +711,8 @@ final class FireVaultStore: ObservableObject {
                     title: "Account created",
                     subtitle: "Added from Trip Log stop",
                     kind: "location",
-                    date: "Now"
+                    date: "Now",
+                    updatedAt: Date()
                 )
             ]
         )
@@ -721,7 +725,8 @@ final class FireVaultStore: ObservableObject {
     func addNote(
         to accountID: String,
         title: String = "Field note",
-        text: String = "New note"
+        text: String = "New note",
+        showOnArrival: Bool = false
     ) -> FireVaultWorkspaceNote? {
         guard let index = accounts.firstIndex(where: { $0.id == accountID }) else { return nil }
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -731,11 +736,20 @@ final class FireVaultStore: ObservableObject {
             id: UUID().uuidString,
             title: trimmedTitle.isEmpty ? "Field note" : trimmedTitle,
             text: trimmedText,
-            date: Date().formatted(date: .abbreviated, time: .shortened)
+            date: Date().formatted(date: .abbreviated, time: .shortened),
+            showOnArrival: showOnArrival,
+            updatedAt: Date()
         )
         accounts[index].notes.insert(note, at: 0)
         accounts[index].recent.insert(
-            .init(id: UUID().uuidString, title: note.title, subtitle: note.text, kind: "note", date: "Now"),
+            .init(
+                id: UUID().uuidString,
+                title: note.title,
+                subtitle: note.text,
+                kind: "note",
+                date: "Now",
+                updatedAt: Date()
+            ),
             at: 0
         )
         persist()
@@ -743,7 +757,13 @@ final class FireVaultStore: ObservableObject {
     }
 
     @discardableResult
-    func updateNote(accountID: String, noteID: String, title: String, text: String) -> Bool {
+    func updateNote(
+        accountID: String,
+        noteID: String,
+        title: String,
+        text: String,
+        showOnArrival: Bool? = nil
+    ) -> Bool {
         guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
               let noteIndex = accounts[accountIndex].notes.firstIndex(where: { $0.id == noteID }) else {
             return false
@@ -754,6 +774,10 @@ final class FireVaultStore: ObservableObject {
         accounts[accountIndex].notes[noteIndex].title = trimmedTitle.isEmpty ? "Field note" : trimmedTitle
         accounts[accountIndex].notes[noteIndex].text = trimmedText
         accounts[accountIndex].notes[noteIndex].date = Date().formatted(date: .abbreviated, time: .shortened)
+        accounts[accountIndex].notes[noteIndex].updatedAt = Date()
+        if let showOnArrival {
+            accounts[accountIndex].notes[noteIndex].showOnArrival = showOnArrival
+        }
         persist()
         return true
     }
@@ -776,7 +800,8 @@ final class FireVaultStore: ObservableObject {
             title: scan ? "Document scan" : "File",
             subtitle: "Added \(Date().formatted(date: .abbreviated, time: .omitted))",
             kind: scan ? "scan" : "file",
-            date: "Today"
+            date: "Today",
+            updatedAt: Date()
         )
         accounts[index].documents.insert(document, at: 0)
         persist()
@@ -800,7 +825,8 @@ final class FireVaultStore: ObservableObject {
             subtitle: "Photo with FireVault Pro overlay",
             kind: "photo",
             date: Date().formatted(date: .abbreviated, time: .shortened),
-            mediaFileName: fileName
+            mediaFileName: fileName,
+            updatedAt: Date()
         )
         accounts[index].documents.insert(document, at: 0)
         accounts[index].recent.insert(
@@ -809,7 +835,8 @@ final class FireVaultStore: ObservableObject {
                 title: document.title,
                 subtitle: document.subtitle,
                 kind: "photo",
-                date: "Now"
+                date: "Now",
+                updatedAt: Date()
             ),
             at: 0
         )
@@ -837,7 +864,8 @@ final class FireVaultStore: ObservableObject {
             subtitle: "Video with FireVault Pro overlay",
             kind: "video",
             date: Date().formatted(date: .abbreviated, time: .shortened),
-            mediaFileName: fileName
+            mediaFileName: fileName,
+            updatedAt: Date()
         )
         accounts[index].documents.insert(document, at: 0)
         accounts[index].recent.insert(
@@ -846,7 +874,8 @@ final class FireVaultStore: ObservableObject {
                 title: document.title,
                 subtitle: document.subtitle,
                 kind: "video",
-                date: "Now"
+                date: "Now",
+                updatedAt: Date()
             ),
             at: 0
         )
@@ -891,7 +920,8 @@ final class FireVaultStore: ObservableObject {
             subtitle: pageLabel,
             kind: "scan",
             date: Date().formatted(date: .abbreviated, time: .shortened),
-            mediaFileName: fileName
+            mediaFileName: fileName,
+            updatedAt: Date()
         )
         accounts[index].documents.insert(document, at: 0)
         accounts[index].recent.insert(
@@ -900,7 +930,52 @@ final class FireVaultStore: ObservableObject {
                 title: document.title,
                 subtitle: pageLabel,
                 kind: "scan",
-                date: "Now"
+                date: "Now",
+                updatedAt: Date()
+            ),
+            at: 0
+        )
+        persist()
+        return document
+    }
+
+    @discardableResult
+    func attachGeneratedReport(
+        _ data: Data,
+        title: String,
+        templateName: String,
+        to accountID: String
+    ) throws -> FireVaultWorkspaceDocument {
+        guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
+            throw FireVaultMediaError.accountUnavailable
+        }
+        guard data.count > 4,
+              String(data: data.prefix(4), encoding: .ascii) == "%PDF" else {
+            throw FireVaultMediaError.invalidReportData
+        }
+
+        let fileName = "\(UUID().uuidString).pdf"
+        try data.write(to: try mediaURL(accountID: accountID, fileName: fileName), options: .atomic)
+
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let document = FireVaultWorkspaceDocument(
+            id: UUID().uuidString,
+            title: normalizedTitle.isEmpty ? "Service Report" : normalizedTitle,
+            subtitle: "\(templateName) • Generated PDF",
+            kind: "report",
+            date: Date().formatted(date: .abbreviated, time: .shortened),
+            mediaFileName: fileName,
+            updatedAt: Date()
+        )
+        accounts[index].documents.insert(document, at: 0)
+        accounts[index].recent.insert(
+            .init(
+                id: UUID().uuidString,
+                title: document.title,
+                subtitle: document.subtitle,
+                kind: "report",
+                date: "Now",
+                updatedAt: Date()
             ),
             at: 0
         )
@@ -1047,20 +1122,24 @@ final class FireVaultStore: ObservableObject {
               ) else { return nil }
         let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedLabel.isEmpty else { return nil }
+        let trimmedType = type.trimmingCharacters(in: .whitespacesAndNewlines)
+        let storedType = trimmedType.isEmpty ? "Other" : trimmedType
+        let routingSearchText = "\(trimmedLabel) \(storedType)".lowercased()
+        let automaticDirectionsMode: FireVaultDirectionsMode =
+            routingSearchText.contains("parking") || routingSearchText.contains("park here")
+            ? .driving
+            : .walking
         let location = FireVaultWorkspaceLocation(
             id: UUID().uuidString,
             label: trimmedLabel,
             subtitle: subtitle.trimmingCharacters(in: .whitespacesAndNewlines),
-            type: type.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "Other"
-                : type.trimmingCharacters(in: .whitespacesAndNewlines),
+            type: storedType,
             plusCode: storedPlusCode,
             latitude: latitude,
             longitude: longitude,
             pinColor: FireVaultMapPinColor(rawValue: pinColor)?.rawValue
                 ?? FireVaultMapPinColor.purple.rawValue,
-            directionsMode: FireVaultDirectionsMode(rawValue: directionsMode)?.rawValue
-                ?? FireVaultDirectionsMode.walking.rawValue
+            directionsMode: automaticDirectionsMode.rawValue
         )
         accounts[index].locations.append(location)
         persist()
@@ -1103,11 +1182,10 @@ final class FireVaultStore: ObservableObject {
         accounts[accountIndex].locations[locationIndex].pinColor =
             FireVaultMapPinColor(rawValue: pinColor)?.rawValue
             ?? FireVaultMapPinColor.purple.rawValue
-        if let directionsMode {
-            accounts[accountIndex].locations[locationIndex].directionsMode =
-                FireVaultDirectionsMode(rawValue: directionsMode)?.rawValue
-                ?? FireVaultDirectionsMode.walking.rawValue
-        }
+        let savedLocation = accounts[accountIndex].locations[locationIndex]
+        accounts[accountIndex].locations[locationIndex].directionsMode = savedLocation.isParkingLocation
+            ? FireVaultDirectionsMode.driving.rawValue
+            : FireVaultDirectionsMode.walking.rawValue
         persist()
         return true
     }

@@ -146,6 +146,7 @@ enum FireVaultDemoShowroom {
 
     private static func makeAccount(index: Int, site: SiteSeed) -> FireVaultWorkspaceAccount {
         let sequence = index + 1
+        let now = Date()
         let equipment = (0..<(6 + index % 5)).map {
             makeEquipment(siteIndex: index, itemIndex: $0)
         }
@@ -164,20 +165,22 @@ enum FireVaultDemoShowroom {
                 title: "Fire alarm riser diagram",
                 subtitle: "Sample 3-page scan • DEMO",
                 kind: "scan",
-                date: "Jul 21"
+                date: "Jul 21",
+                updatedAt: Calendar.current.date(byAdding: .day, value: -7, to: now)
             ),
             FireVaultWorkspaceDocument(
                 id: "demo-\(sequence)-doc-report",
                 title: "Annual inspection report",
                 subtitle: "Sample PDF • DEMO",
                 kind: "file",
-                date: "Jul 18"
+                date: "Jul 18",
+                updatedAt: Calendar.current.date(byAdding: .day, value: -10, to: now)
             )
         ]
         let recent = [
-            FireVaultWorkspaceRecent(id: "demo-\(sequence)-recent-1", title: "Field note updated", subtitle: notes.first?.text ?? "Demo activity", kind: "note", date: "Today"),
-            FireVaultWorkspaceRecent(id: "demo-\(sequence)-recent-2", title: "Equipment reviewed", subtitle: equipment.first?.title ?? "System equipment", kind: "equipment", date: "Yesterday"),
-            FireVaultWorkspaceRecent(id: "demo-\(sequence)-recent-3", title: "Riser diagram opened", subtitle: "Sample document activity", kind: "document", date: "Jul 21")
+            FireVaultWorkspaceRecent(id: "demo-\(sequence)-recent-1", title: "Field note updated", subtitle: notes.first?.text ?? "Demo activity", kind: "note", date: "Today", updatedAt: now),
+            FireVaultWorkspaceRecent(id: "demo-\(sequence)-recent-2", title: "Equipment reviewed", subtitle: equipment.first?.title ?? "System equipment", kind: "equipment", date: "Yesterday", updatedAt: Calendar.current.date(byAdding: .day, value: -1, to: now)),
+            FireVaultWorkspaceRecent(id: "demo-\(sequence)-recent-3", title: "Riser diagram opened", subtitle: "Sample document activity", kind: "document", date: "Jul 21", updatedAt: Calendar.current.date(byAdding: .day, value: -7, to: now))
         ]
 
         return .init(
@@ -268,7 +271,8 @@ enum FireVaultDemoShowroom {
             id: "demo-note-\(siteIndex + 1)-\(itemIndex + 1)",
             title: note.title,
             text: note.text,
-            date: itemIndex == 0 ? "Today" : "Jul \(20 - itemIndex)"
+            date: itemIndex == 0 ? "Today" : "Jul \(20 - itemIndex)",
+            updatedAt: Calendar.current.date(byAdding: .day, value: -itemIndex, to: Date())
         )
     }
 

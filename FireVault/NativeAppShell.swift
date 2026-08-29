@@ -9,6 +9,7 @@ import SwiftUI
 import Combine
 import Charts
 import MapKit
+import Photos
 import PhotosUI
 import AVKit
 import UIKit
@@ -76,6 +77,102 @@ struct FireVaultNativeSettingItem: Codable, Identifiable, Equatable {
     let subtitle: String
     let symbol: String
     let status: String
+
+    var searchPhrases: [String] {
+        switch id {
+        case "tech":
+            ["Technician name", "Company", "Phone", "Email", "Contact information", "License"]
+        case "overlay":
+            ["Photo and video labels", "Overlay fields", "Logo", "Timestamp", "Date and time", "Account ID", "Category", "Technician", "Coordinates", "QR code"]
+        case "gps":
+            ["Default map layer", "Arrival map layer", "Arrival Points", "Site Locations", "2D", "3D", "Standard", "Standard 3D", "Satellite", "Satellite 3D", "Hybrid", "Hybrid 3D", "High-accuracy GPS", "Nearby radius", "Haptics", "Nearby account scroll bumps", "Location Tools", "Show GPS capture controls", "Include coordinates in reports", "Address assistance", "Plus Codes", "Advanced Stop Detection", "GPS Diagnostics"]
+        case "notifications":
+            ["Trip Log alerts", "Service alerts", "System alerts", "Sounds", "Badges"]
+        case "reports":
+            ["PDF reports", "Report templates", "Report content", "Email delivery", "Technician", "Tasks", "Deficiencies"]
+        case "cloudFiles":
+            ["Photo destination", "Scan destination", "Document destination", "Local storage", "Cloud storage", "SharePoint", "Microsoft", "WebDAV", "Upload folders"]
+        case "customerImport":
+            ["CSV import", "Import accounts", "Spreadsheet columns"]
+        case "categories":
+            ["Account categories", "Classification tags", "Category rules"]
+        case "backup":
+            ["Backup vault", "Restore vault", "Export backup", "Merge backup"]
+        case "security":
+            ["Face ID", "Auto-Lock", "App privacy", "Account data and deletion", "Delete account"]
+        case "appearance":
+            ["Dark", "Light", "System Default", "Warm Ivory", "Theme", "Display mode"]
+        case "manual":
+            ["Help Center", "Task guides", "Troubleshooting", "Support"]
+        case "demo":
+            ["Demo Mode", "Sample accounts", "Reset demo"]
+        case "about":
+            ["Version", "Build", "Application information", "Developer", "Publisher", "Support"]
+        default:
+            []
+        }
+    }
+
+    var searchKeywords: String {
+        searchPhrases.joined(separator: " ")
+    }
+
+    func matchingSearchPhrase(_ query: String) -> String? {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        return ([title, subtitle] + searchPhrases).first {
+            $0.localizedCaseInsensitiveContains(normalized)
+        }
+    }
+
+    func presentedForSearch(_ query: String) -> FireVaultNativeSettingItem {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return self }
+
+        if id == "gps" {
+            if normalized.contains("haptic") {
+                return .init(
+                    id: id,
+                    title: "Haptics",
+                    subtitle: "GPS & Maps • Nearby account scroll bumps",
+                    symbol: "hand.tap.fill",
+                    status: status
+                )
+            }
+            if normalized.contains("arrival") && normalized.contains("map") {
+                return .init(
+                    id: id,
+                    title: "Arrival Map Layer",
+                    subtitle: "GPS & Maps • Standard, Satellite, or Hybrid",
+                    symbol: "map.fill",
+                    status: status
+                )
+            }
+        }
+
+        if id == "appearance" {
+            if normalized.contains("dark") {
+                return .init(
+                    id: id,
+                    title: "Dark Appearance",
+                    subtitle: "Appearance • High-contrast FireVault Pro theme",
+                    symbol: "moon.stars.fill",
+                    status: status
+                )
+            }
+            if normalized.contains("light") {
+                return .init(
+                    id: id,
+                    title: "Light Appearance",
+                    subtitle: "Appearance • Warm Ivory theme",
+                    symbol: "sun.max.fill",
+                    status: status
+                )
+            }
+        }
+
+        return self
+    }
 
     var accessibilityLabel: String {
         [title, subtitle]
@@ -370,6 +467,7 @@ private struct NativeNearbyView: View {
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var scrollAccountID: String?
     @State private var accountScrollWasActive = false
+    @State private var lastHapticAccountID: String?
     @State private var mapLayer: FireVaultMapLayer = .standard
     @State private var mapIs3D = true
     @State private var hasCenteredOnInitialLiveLocation = false
@@ -469,6 +567,7 @@ private struct NativeNearbyView: View {
             mapLayer = FireVaultMapLayer(rawValue: settings.gps.resolvedDefaultMapLayer) ?? .standard
             mapIs3D = settings.gps.resolvedDefaultMapIs3D
             scrollAccountID = nearbyRows.first?.id
+            lastHapticAccountID = nearbyRows.first?.id
             if payload.demoMode {
                 cameraPosition = overviewCameraPosition
             } else {
@@ -1151,7 +1250,6 @@ private struct NativeNearbyView: View {
                         .padding(10)
                     }
                 }
-                .accessibilityIdentifier("nearby-fixed-map")
             }
         }
     }
@@ -1368,12 +1466,14 @@ private struct NativeNearbyView: View {
                             focusScrolledAccount()
                         }
                     }
-                    .onChange(of: scrollAccountID) { _, newID in
-                        guard accountScrollWasActive, newID != nil,
-                              settings.gps.hapticsAreEnabled else { return }
-                        let feedback = UISelectionFeedbackGenerator()
+                    .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.55) { visibleIDs in
+                        guard settings.gps.hapticsAreEnabled,
+                              let leadingID = visibleIDs.first,
+                              leadingID != lastHapticAccountID else { return }
+                        lastHapticAccountID = leadingID
+                        let feedback = UIImpactFeedbackGenerator(style: .rigid)
                         feedback.prepare()
-                        feedback.selectionChanged()
+                        feedback.impactOccurred(intensity: 0.82)
                     }
                     .accessibilityIdentifier("nearby-account-scroll")
                 }
@@ -1576,9 +1676,9 @@ private struct NativeNearbyView: View {
         return .camera(
             MapCamera(
                 centerCoordinate: coordinate,
-                distance: 900,
+                distance: FireVaultNearbyMapCamera.selectedAccount3DDistance,
                 heading: 0,
-                pitch: 58
+                pitch: 56
             )
         )
     }
@@ -1696,20 +1796,12 @@ private struct NativeNearbyView: View {
     private func closeAccountCameraPosition(
         _ coordinate: CLLocationCoordinate2D
     ) -> MapCameraPosition {
-        guard mapIs3D else {
-            return .region(
-                .init(
-                    center: coordinate,
-                    span: .init(latitudeDelta: 0.0035, longitudeDelta: 0.0035)
-                )
-            )
-        }
         return .camera(
             MapCamera(
                 centerCoordinate: coordinate,
-                distance: 650,
-                heading: 0,
-                pitch: 60
+                distance: FireVaultNearbyMapCamera.settledAccount3DDistance,
+                heading: FireVaultAccountPinMapCamera.heading,
+                pitch: mapIs3D ? FireVaultAccountPinMapCamera.pitch : 0
             )
         )
     }
@@ -1728,7 +1820,12 @@ private struct NativeAccountsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var search = ""
     @State private var sort: NativeAccountSort = .alphabetic
-    @State private var showsAccountImport = false
+
+    private struct AccountSection: Identifiable {
+        let id: String
+        let title: String
+        let accounts: [FireVaultNativeAccount]
+    }
 
     private var accounts: [FireVaultNativeAccount] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1752,6 +1849,31 @@ private struct NativeAccountsView: View {
         }
     }
 
+    private var accountSections: [AccountSection] {
+        switch sort {
+        case .alphabetic:
+            let grouped = Dictionary(grouping: accounts) { account in
+                let name = account.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let first = name.first else { return "#" }
+                let value = String(first).uppercased()
+                return value.rangeOfCharacter(from: .letters) == nil ? "#" : value
+            }
+            return grouped.keys.sorted().map {
+                AccountSection(id: $0, title: $0, accounts: grouped[$0] ?? [])
+            }
+        case .favorites:
+            let favorites = accounts.filter(\.favorite)
+            let others = accounts.filter { !$0.favorite }
+            return [
+                favorites.isEmpty ? nil : AccountSection(id: "favorites", title: "Favorites", accounts: favorites),
+                others.isEmpty ? nil : AccountSection(id: "other", title: "Other Accounts", accounts: others)
+            ]
+            .compactMap { $0 }
+        case .recent:
+            return [AccountSection(id: "recent", title: "Recent", accounts: accounts)]
+        }
+    }
+
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
@@ -1770,29 +1892,43 @@ private struct NativeAccountsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 9) {
-                            Text("\(accounts.count) ACCOUNT\(accounts.count == 1 ? "" : "S")")
-                                .font(.caption.bold())
-                                .tracking(1.1)
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 4)
+                        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                            accountsHeader
 
-                            ForEach(accounts) { account in
-                                Button {
-                                    store.openAccount(account.id)
-                                } label: {
-                                    NativeAccountRow(account: account)
-                                        .padding(.horizontal, 12)
-                                        .nativeSurfaceCard(cornerRadius: NativeShellMetrics.cardRadius)
+                            ForEach(accountSections) { section in
+                                Section {
+                                    ForEach(Array(section.accounts.enumerated()), id: \.element.id) { index, account in
+                                        if index > 0 {
+                                            Divider()
+                                                .padding(.leading, 16)
+                                        }
+
+                                        NativeAccountRow(
+                                            account: account,
+                                            onOpen: { store.openAccount(account.id) },
+                                            onToggleFavorite: { store.toggleFavorite(account.id) }
+                                        )
+                                        .contextMenu {
+                                            Button {
+                                                store.toggleFavorite(account.id)
+                                            } label: {
+                                                Label(
+                                                    account.favorite ? "Remove from Favorites" : "Add to Favorites",
+                                                    systemImage: account.favorite ? "star.slash" : "star"
+                                                )
+                                            }
+                                        }
+                                        .accessibilityIdentifier("account-row-\(account.id)")
+                                    }
+                                } header: {
+                                    accountSectionHeader(section.title)
                                 }
-                                .buttonStyle(.plain)
                             }
 
                             Color.clear
                                 .frame(height: max(0, geometry.size.height - 92))
                                 .allowsHitTesting(false)
                         }
-                        .padding(.horizontal, 16)
                         .padding(.bottom, 18)
                     }
                     .scrollIndicators(.hidden)
@@ -1808,31 +1944,65 @@ private struct NativeAccountsView: View {
             .navigationTitle("Accounts")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Menu {
-                        Picker("Sort Accounts", selection: $sort) {
-                            ForEach(NativeAccountSort.allCases) { option in Text(option.rawValue).tag(option) }
-                        }
-                    } label: { Label(sort.rawValue, systemImage: "arrow.up.arrow.down") }
-                    .buttonStyle(.glass)
-                    Button { showsAccountImport = true } label: { Image(systemName: "square.and.arrow.down") }
-                        .buttonStyle(.glass)
-                        .accessibilityLabel("Import Accounts")
+                ToolbarItem(placement: .topBarTrailing) {
                     Button { store.addAccount() } label: { Image(systemName: "plus") }
-                        .buttonStyle(.glassProminent).accessibilityLabel("Add Account")
-                }
-            }
-            .sheet(isPresented: $showsAccountImport) {
-                NavigationStack {
-                    NativeCSVImportView(store: store)
-                        .toolbar {
-                            ToolbarItem(placement: .cancellationAction) {
-                                Button("Done") { showsAccountImport = false }
-                            }
-                        }
+                        .buttonStyle(.glassProminent)
+                        .accessibilityLabel("Add Account")
                 }
             }
         }
+    }
+
+    private var accountsHeader: some View {
+        HStack(spacing: 12) {
+            Text(search.isEmpty
+                ? "\(accounts.count) Account\(accounts.count == 1 ? "" : "s")"
+                : "\(accounts.count) Search Result\(accounts.count == 1 ? "" : "s")"
+            )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+
+            Spacer(minLength: 8)
+
+            Menu {
+                Picker("Sort Accounts", selection: $sort) {
+                    ForEach(NativeAccountSort.allCases) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(sort.rawValue)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.bold))
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(NativeShellPalette.red)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Sort accounts")
+            .accessibilityValue(sort.rawValue)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .frame(maxWidth: .infinity)
+        .background(NativeShellPalette.surface)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
+    private func accountSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.headline.weight(.bold))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(NativeShellPalette.background.opacity(0.98))
+            .overlay(alignment: .bottom) {
+                Divider()
+            }
     }
 }
 
@@ -1842,6 +2012,7 @@ struct NativePhotoView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedItem: PhotosPickerItem?
     @State private var selectedImage: UIImage?
+    @State private var selectedImageDocumentID: String?
     @State private var selectedVideoURL: URL?
     @State private var selectedVideoDocumentID: String?
     @State private var isProcessingVideo = false
@@ -1856,10 +2027,11 @@ struct NativePhotoView: View {
     @State private var pendingCaptureIntent: CaptureIntent?
     @State private var mediaAccountID: String?
     @State private var saveStatus = ""
-    @State private var cameraStartsInVideoMode = false
+    @State private var savedPhotoToLibrary = false
 
     private enum CaptureRoute: String, Identifiable {
-        case camera
+        case photoCamera
+        case videoCamera
         case scanner
         var id: String { rawValue }
     }
@@ -1888,6 +2060,13 @@ struct NativePhotoView: View {
 
     private var hasMediaPreview: Bool {
         selectedImage != nil || selectedVideoURL != nil
+    }
+
+    private var selectedImageURL: URL? {
+        guard mediaKind == .photo,
+              let mediaAccountID,
+              let selectedImageDocumentID else { return nil }
+        return store.mediaURL(accountID: mediaAccountID, documentID: selectedImageDocumentID)
     }
 
     private var technicianName: String {
@@ -1966,12 +2145,12 @@ struct NativePhotoView: View {
             }
             .fullScreenCover(item: $captureRoute) { route in
                 switch route {
-                case .camera:
+                case .photoCamera, .videoCamera:
                     NativeCameraCaptureView(
                         preferences: settings.preferences.overlay,
                         technicianName: technicianName,
                         account: destinationAccount,
-                        startsInVideoMode: cameraStartsInVideoMode,
+                        startsInVideoMode: route == .videoCamera,
                         onCapture: acceptPhoto,
                         onVideoCapture: acceptVideo,
                         onCancel: { captureRoute = nil }
@@ -1998,9 +2177,7 @@ struct NativePhotoView: View {
     private var previewColumn: some View {
         VStack(spacing: 10) {
             if let selectedVideoURL {
-                VideoPlayer(player: AVPlayer(url: selectedVideoURL))
-                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                    .frame(maxHeight: 420)
+                FireVaultAspectCorrectVideoPlayer(url: selectedVideoURL, maximumHeight: 420)
                     .nativeSurfaceCard(cornerRadius: NativeShellMetrics.mapRadius)
                     .accessibilityLabel("Field video with baked FireVault Pro overlay")
 
@@ -2024,6 +2201,40 @@ struct NativePhotoView: View {
 
             if let selectedImage {
                 imagePreview(selectedImage)
+
+                if mediaKind == .photo {
+                    HStack(spacing: 10) {
+                        if let selectedImageURL {
+                            ShareLink(item: selectedImageURL) {
+                                Label("Share", systemImage: "square.and.arrow.up")
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+
+                        Button("Delete", systemImage: "trash", role: .destructive) {
+                            deleteSelectedPhoto()
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Save", systemImage: "square.and.arrow.down") {
+                            saveSelectedPhotoToLibrary()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(savedPhotoToLibrary)
+                        .accessibilityLabel("Save photo to Photo Library")
+
+                        Spacer(minLength: 0)
+
+                        if savedPhotoToLibrary {
+                            Label("Saved to Photos", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(NativeShellPalette.green)
+                                .lineLimit(1)
+                        }
+                    }
+                    .font(.caption.bold())
+                    .controlSize(.small)
+                    .accessibilityIdentifier("native-photo-preview-actions")
+                }
 
                 if scannedPages.count > 1 {
                     scannedPageStrip
@@ -2113,7 +2324,6 @@ struct NativePhotoView: View {
                 .accessibilityIdentifier("native-choose-photo")
             }
         }
-        .accessibilityIdentifier("native-capture-workspace")
     }
 
     private func imagePreview(_ image: UIImage) -> some View {
@@ -2288,11 +2498,9 @@ struct NativePhotoView: View {
     private func launchCapture(_ intent: CaptureIntent) {
         switch intent {
         case .camera:
-            cameraStartsInVideoMode = false
-            openCamera()
+            openCamera(video: false)
         case .video:
-            cameraStartsInVideoMode = true
-            openCamera()
+            openCamera(video: true)
         case .scanner:
             openScanner()
         case .photoLibrary:
@@ -2300,14 +2508,14 @@ struct NativePhotoView: View {
         }
     }
 
-    private func openCamera() {
+    private func openCamera(video: Bool) {
         guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
             showCaptureFailure(
                 "A camera is not available on this device. Use Photo Library instead."
             )
             return
         }
-        captureRoute = .camera
+        captureRoute = video ? .videoCamera : .photoCamera
     }
 
     private func openScanner() {
@@ -2336,14 +2544,16 @@ struct NativePhotoView: View {
         )
 
         do {
-            try store.attachCapturedPhoto(renderedImage, to: account.id)
+            let document = try store.attachCapturedPhoto(renderedImage, to: account.id)
             selectedImage = renderedImage
+            selectedImageDocumentID = document.id
             selectedVideoURL = nil
             selectedVideoDocumentID = nil
             scannedPages = []
             mediaKind = .photo
             mediaAccountID = account.id
             saveStatus = "Photo saved to \(account.name)"
+            savedPhotoToLibrary = false
             captureRoute = nil
         } catch {
             showCaptureFailure(error.localizedDescription)
@@ -2375,12 +2585,14 @@ struct NativePhotoView: View {
                     throw FireVaultMediaError.storageUnavailable
                 }
                 selectedImage = nil
+                selectedImageDocumentID = nil
                 scannedPages = []
                 selectedVideoURL = storedURL
                 selectedVideoDocumentID = document.id
                 mediaKind = .video
                 mediaAccountID = account.id
                 saveStatus = "Video saved to \(account.name)"
+                savedPhotoToLibrary = false
                 try? FileManager.default.removeItem(at: sourceURL)
             } catch {
                 showCaptureFailure(error.localizedDescription)
@@ -2398,6 +2610,64 @@ struct NativePhotoView: View {
         saveStatus = ""
     }
 
+    private func deleteSelectedPhoto() {
+        guard let accountID = mediaAccountID,
+              let documentID = selectedImageDocumentID,
+              store.deleteDocument(accountID: accountID, documentID: documentID) else { return }
+        selectedImage = nil
+        selectedImageDocumentID = nil
+        mediaAccountID = nil
+        saveStatus = ""
+        savedPhotoToLibrary = false
+    }
+
+    private func saveSelectedPhotoToLibrary() {
+        guard let selectedImage else { return }
+        let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+
+        switch status {
+        case .authorized, .limited:
+            writePhotoToLibrary(selectedImage)
+        case .notDetermined:
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { newStatus in
+                Task { @MainActor in
+                    if newStatus == .authorized || newStatus == .limited {
+                        writePhotoToLibrary(selectedImage)
+                    } else {
+                        showPhotoLibraryPermissionAlert()
+                    }
+                }
+            }
+        case .denied, .restricted:
+            showPhotoLibraryPermissionAlert()
+        @unknown default:
+            showPhotoLibraryPermissionAlert()
+        }
+    }
+
+    private func writePhotoToLibrary(_ image: UIImage) {
+        PHPhotoLibrary.shared().performChanges {
+            PHAssetChangeRequest.creationRequestForAsset(from: image)
+        } completionHandler: { success, error in
+            Task { @MainActor in
+                if success {
+                    savedPhotoToLibrary = true
+                } else {
+                    alertTitle = "Photo Not Saved"
+                    alertMessage = error?.localizedDescription
+                        ?? "FireVault Pro could not save this photo to the Photos library."
+                    showsAlert = true
+                }
+            }
+        }
+    }
+
+    private func showPhotoLibraryPermissionAlert() {
+        alertTitle = "Photos Access Needed"
+        alertMessage = "Allow FireVault Pro to add photos in Settings, then try Save again."
+        showsAlert = true
+    }
+
     private func acceptScan(_ pages: [UIImage]) {
         guard let firstPage = pages.first else {
             showCaptureFailure("The scanner did not return any pages.")
@@ -2411,10 +2681,12 @@ struct NativePhotoView: View {
         do {
             try store.attachScannedDocument(pages, to: account.id)
             selectedImage = firstPage
+            selectedImageDocumentID = nil
             scannedPages = pages
             mediaKind = .scan
             mediaAccountID = account.id
             saveStatus = "Scan saved to \(account.name)"
+            savedPhotoToLibrary = false
             captureRoute = nil
         } catch {
             showCaptureFailure(error.localizedDescription)
@@ -2535,26 +2807,80 @@ private struct NativeCaptureAccountPicker: View {
 
 private struct NativeAccountRow: View {
     let account: FireVaultNativeAccount
+    let onOpen: () -> Void
+    let onToggleFavorite: () -> Void
+
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: account.favorite ? "building.2.crop.circle.fill" : "building.2.crop.circle")
-                .font(.title2)
-                .foregroundStyle(account.favorite ? NativeShellPalette.amber : NativeShellPalette.blue)
-                .frame(width: 42, height: 42)
-                .background((account.favorite ? NativeShellPalette.amber : NativeShellPalette.blue).opacity(0.12), in: Circle())
-            VStack(alignment: .leading, spacing: 4) {
-                Text(account.name).font(.headline).foregroundStyle(.primary).lineLimit(2)
-                Text(account.address).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                HStack(spacing: 7) {
-                    if !account.category.isEmpty { Text(account.category.uppercased()).nativeMetadataPill(tint: NativeShellPalette.blue) }
-                    if !account.accountId.isEmpty { Text(account.accountId).nativeMetadataPill(tint: .secondary) }
+        HStack(spacing: 8) {
+            Button(action: onOpen) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(displayName)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+
+                    Text(displayAddress)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(displayCategory)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+                    .frame(maxWidth: 68, alignment: .trailing)
+
+                HStack(spacing: 4) {
+                    Button(action: onToggleFavorite) {
+                        Image(systemName: account.favorite ? "star.fill" : "star")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(account.favorite ? NativeShellPalette.amber : .secondary)
+                            .frame(width: 25, height: 25)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(account.favorite ? "Remove from Favorites" : "Add to Favorites")
+
+                    Button(action: onOpen) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 14, height: 25)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open \(displayName)")
                 }
             }
-            Spacer(minLength: 4)
-            Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 7).contentShape(Rectangle())
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(NativeShellPalette.surface)
     }
+
+    private var displayName: String {
+        let value = account.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "Unnamed Account" : value
+    }
+
+    private var displayAddress: String {
+        let value = account.address.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "No address saved" : value
+    }
+
+    private var displayCategory: String {
+        let value = account.category.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "Uncategorized" : value
+    }
+
 }
 
 struct NativeSettingsView: View {
@@ -2564,6 +2890,7 @@ struct NativeSettingsView: View {
     @ObservedObject var locationService: FireVaultLocationService
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @State private var search = ""
+    @FocusState private var searchIsFocused: Bool
     private let versionInfo = FireVaultVersionInfo()
 
     private var groups: [FireVaultNativeSettingsGroup] {
@@ -2575,11 +2902,11 @@ struct NativeSettingsView: View {
 
         return nativeGroups.compactMap { group in
             let matchingItems = group.items.filter {
-                [$0.title, $0.subtitle, $0.status, group.title, group.subtitle]
+                [$0.title, $0.subtitle, $0.status, group.title, group.subtitle, $0.searchKeywords]
                     .joined(separator: " ")
                     .lowercased()
                     .contains(query)
-            }
+            }.map { $0.presentedForSearch(query) }
             guard !matchingItems.isEmpty else { return nil }
             return .init(
                 id: group.id,
@@ -2614,6 +2941,7 @@ struct NativeSettingsView: View {
             .scrollContentBackground(.hidden)
             .background(NativeShellPalette.background)
             .contentMargins(.bottom, 96, for: .scrollContent)
+            .scrollDismissesKeyboard(.immediately)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(NativeShellPalette.background, for: .navigationBar)
@@ -2656,7 +2984,9 @@ struct NativeSettingsView: View {
                 }
                 .padding(.vertical, 8)
                 .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
             }
+            .accessibilityIdentifier("settings-technician-profile")
             .accessibilityLabel("Technician Profile")
             .accessibilityValue(profileAccessibilityValue)
             .accessibilityHint("Opens Technician Profile")
@@ -2696,6 +3026,9 @@ struct NativeSettingsView: View {
                 TextField("Search settings", text: $search)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .focused($searchIsFocused)
+                    .submitLabel(.search)
+                    .onSubmit { searchIsFocused = false }
                 if !search.isEmpty {
                     Button {
                         search = ""
@@ -2735,11 +3068,17 @@ struct NativeSettingsView: View {
             status: nativeStatus(for: item, fallback: status),
             tint: NativeShellPalette.tint(group.tint),
             showsSubtitle: true,
-            showsIcon: true
+            showsIcon: true,
+            searchQuery: search,
+            searchMatch: item.matchingSearchPhrase(search)
+                ?? [group.title, group.subtitle].first {
+                    $0.localizedCaseInsensitiveContains(search)
+                }
         )
 
         NavigationLink {
             nativeDestination(item.id)
+                .onAppear { searchIsFocused = false }
         } label: { row }
             .accessibilityLabel(item.accessibilityLabel)
             .accessibilityValue(nativeStatus(for: item, fallback: status))
@@ -2769,7 +3108,11 @@ struct NativeSettingsView: View {
         case "tech": NativeTechnicianSettingsView(settings: settings, store: store)
         case "overlay": NativeOverlaySettingsView(settings: settings)
         case "appearance": NativeAppearanceSettingsView(settings: settings)
-        case "gps": NativeGPSSettingsView(settings: settings, locationService: locationService)
+        case "gps": NativeGPSSettingsView(
+            settings: settings,
+            locationService: locationService,
+            initialSection: gpsSearchSection
+        )
         case "plusCodes": NativePlusCodeSettingsView(settings: settings, locationService: locationService)
         case "notifications": NativeNotificationSettingsView(settings: settings)
         case "reports": NativeReportSettingsView(settings: settings)
@@ -2796,6 +3139,11 @@ struct NativeSettingsView: View {
         }
     }
 
+    private var gpsSearchSection: String? {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return query.contains("haptic") ? "haptics" : nil
+    }
+
 }
 
 struct FireVaultIPadSettingsWorkspace: View {
@@ -2807,6 +3155,7 @@ struct FireVaultIPadSettingsWorkspace: View {
 
     @State private var selection = "tech"
     @State private var search = ""
+    @FocusState private var searchIsFocused: Bool
     private let versionInfo = FireVaultVersionInfo()
 
     private var groups: [FireVaultNativeSettingsGroup] {
@@ -2817,10 +3166,10 @@ struct FireVaultIPadSettingsWorkspace: View {
         guard !query.isEmpty else { return visible }
         return visible.compactMap { group in
             let items = group.items.filter {
-                [$0.title, $0.subtitle, group.title]
+                [$0.title, $0.subtitle, group.title, $0.searchKeywords]
                     .joined(separator: " ")
                     .localizedCaseInsensitiveContains(query)
-            }
+            }.map { $0.presentedForSearch(query) }
             guard !items.isEmpty else { return nil }
             return .init(
                 id: group.id,
@@ -2879,6 +3228,9 @@ struct FireVaultIPadSettingsWorkspace: View {
                     TextField("Search settings", text: $search)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .focused($searchIsFocused)
+                        .submitLabel(.search)
+                        .onSubmit { searchIsFocused = false }
                     if !search.isEmpty {
                         Button {
                             search = ""
@@ -2922,6 +3274,7 @@ struct FireVaultIPadSettingsWorkspace: View {
                 .padding(.bottom, 24)
             }
             .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.immediately)
         }
         .background(NativeShellPalette.navigationBackground.opacity(0.40))
     }
@@ -2942,6 +3295,7 @@ struct FireVaultIPadSettingsWorkspace: View {
             ForEach(items, id: \.id) { item in
                 let selected = selection == item.id
                 Button {
+                    searchIsFocused = false
                     withAnimation(.snappy(duration: 0.2)) {
                         selection = item.id
                     }
@@ -2988,7 +3342,11 @@ struct FireVaultIPadSettingsWorkspace: View {
         case "tech": NativeTechnicianSettingsView(settings: settings, store: store)
         case "appearance": NativeAppearanceSettingsView(settings: settings)
         case "overlay": NativeOverlaySettingsView(settings: settings)
-        case "gps": NativeGPSSettingsView(settings: settings, locationService: locationService)
+        case "gps": NativeGPSSettingsView(
+            settings: settings,
+            locationService: locationService,
+            initialSection: search.lowercased().contains("haptic") ? "haptics" : nil
+        )
         case "plusCodes": NativePlusCodeSettingsView(settings: settings, locationService: locationService)
         case "notifications": NativeNotificationSettingsView(settings: settings)
         case "reports": NativeReportSettingsView(settings: settings)
@@ -3020,20 +3378,40 @@ struct FireVaultIPadSettingsWorkspace: View {
 private struct NativeGPSSettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
+    let initialSection: String?
     @State private var draft: FireVaultGPSPreferences
     @State private var saved = false
 
-    init(settings: FireVaultNativeSettingsStore, locationService: FireVaultLocationService) {
+    init(
+        settings: FireVaultNativeSettingsStore,
+        locationService: FireVaultLocationService,
+        initialSection: String? = nil
+    ) {
         self.settings = settings
         self.locationService = locationService
+        self.initialSection = initialSection
         let current = settings.gps
         _draft = State(initialValue: current)
     }
 
     var body: some View {
         Form {
+            if initialSection == "haptics" {
+                hapticsSection
+            }
+
             Section {
                 Picker("Default map layer", selection: defaultMapAppearance) {
+                    Label("Standard", systemImage: "map").tag("standard-2d")
+                    Label("Standard 3D", systemImage: "map.fill").tag("standard-3d")
+                    Label("Satellite", systemImage: "globe.americas.fill").tag("satellite-2d")
+                    Label("Satellite 3D", systemImage: "globe.americas.fill").tag("satellite-3d")
+                    Label("Hybrid", systemImage: "square.3.layers.3d").tag("hybrid-2d")
+                    Label("Hybrid 3D", systemImage: "building.2.crop.circle").tag("hybrid-3d")
+                }
+                .pickerStyle(.menu)
+
+                Picker("Arrival map layer", selection: arrivalMapAppearance) {
                     Label("Standard", systemImage: "map").tag("standard-2d")
                     Label("Standard 3D", systemImage: "map.fill").tag("standard-3d")
                     Label("Satellite", systemImage: "globe.americas.fill").tag("satellite-2d")
@@ -3055,20 +3433,17 @@ private struct NativeGPSSettingsView: View {
             } header: {
                 Text("Map Preferences")
             } footer: {
-                Text("Choose Standard, Satellite, or Hybrid in either 2D or 3D. This becomes the opening appearance for Nearby maps. The distance controls the accounts displayed on the map and list.")
+                Text("Choose the opening appearance for Nearby maps and a separate layer for Arrival Points and Site Locations. The distance controls the accounts displayed on the Nearby map and list.")
+            }
+
+            if initialSection != "haptics" {
+                hapticsSection
             }
 
             Section("Location Tools") {
                 Toggle("Show GPS capture controls", isOn: $draft.gpsToolsEnabled)
                 Toggle("Include coordinates in reports", isOn: $draft.includeCoordinatesInReports)
                 Toggle("Address assistance", isOn: $draft.addressAssistanceEnabled)
-                Toggle(
-                    "Nearby scrolling haptics",
-                    isOn: Binding(
-                        get: { draft.hapticsEnabled ?? true },
-                        set: { draft.hapticsEnabled = $0 }
-                    )
-                )
                 NavigationLink {
                     NativePlusCodeSettingsView(settings: settings, locationService: locationService)
                 } label: {
@@ -3175,6 +3550,30 @@ private struct NativeGPSSettingsView: View {
         saved = true
     }
 
+    private var hapticsSection: some View {
+        Section("Haptics") {
+            Toggle(
+                isOn: Binding(
+                    get: { draft.hapticsEnabled ?? true },
+                    set: { draft.hapticsEnabled = $0 }
+                )
+            ) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Nearby account scroll bumps")
+                        Text("Feel a selection bump as each account reaches the top of the Nearby list")
+                            .font(.caption)
+                            .foregroundStyle(NativeShellPalette.navigationInactive)
+                    }
+                } icon: {
+                    Image(systemName: "hand.tap.fill")
+                        .foregroundStyle(NativeShellPalette.red)
+                }
+            }
+            .accessibilityIdentifier("settings-nearby-scroll-haptics")
+        }
+    }
+
     private var commonRadiusOptions: [Double] {
         let common: [Double] = [0.25, 0.5, 1, 2, 4, 10, 25]
         guard !common.contains(draft.nearbyRadiusMiles) else { return common }
@@ -3191,6 +3590,20 @@ private struct NativeGPSSettingsView: View {
                 guard components.count == 2 else { return }
                 draft.defaultMapLayer = String(components[0])
                 draft.defaultMapIs3D = components[1] == "3d"
+            }
+        )
+    }
+
+    private var arrivalMapAppearance: Binding<String> {
+        Binding(
+            get: {
+                "\(draft.resolvedArrivalPointMapLayer)-\(draft.resolvedArrivalPointMapIs3D ? "3d" : "2d")"
+            },
+            set: { selection in
+                let components = selection.split(separator: "-")
+                guard components.count == 2 else { return }
+                draft.arrivalPointMapLayer = String(components[0])
+                draft.arrivalPointMapIs3D = components[1] == "3d"
             }
         )
     }
@@ -4117,6 +4530,8 @@ private struct FVSettingsRow: View {
     let tint: Color
     let showsSubtitle: Bool
     let showsIcon: Bool
+    let searchQuery: String
+    let searchMatch: String?
 
     var body: some View {
         HStack(spacing: 13) {
@@ -4130,17 +4545,28 @@ private struct FVSettingsRow: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
+                Text(highlighted(item.title))
                     .font(.body)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
                     .layoutPriority(1)
                 if showsSubtitle && !item.subtitle.isEmpty {
-                    Text(item.subtitle)
+                    Text(highlighted(item.subtitle))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                }
+                if shouldShowMatchContext, let searchMatch {
+                    HStack(spacing: 4) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.caption2.bold())
+                            .foregroundStyle(tint)
+                        Text(highlighted(searchMatch))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                    }
                 }
             }
 
@@ -4158,6 +4584,34 @@ private struct FVSettingsRow: View {
         .padding(.vertical, 4)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
+    }
+
+    private var shouldShowMatchContext: Bool {
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, searchMatch != nil else { return false }
+        return !item.title.localizedCaseInsensitiveContains(query)
+            && !item.subtitle.localizedCaseInsensitiveContains(query)
+    }
+
+    private func highlighted(_ value: String) -> AttributedString {
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return AttributedString(value) }
+
+        var result = AttributedString()
+        var remainder = value[value.startIndex...]
+        while let match = remainder.range(
+            of: query,
+            options: [.caseInsensitive, .diacriticInsensitive]
+        ) {
+            result.append(AttributedString(String(remainder[..<match.lowerBound])))
+            var emphasized = AttributedString(String(remainder[match]))
+            emphasized.backgroundColor = .yellow
+            emphasized.foregroundColor = .black
+            result.append(emphasized)
+            remainder = remainder[match.upperBound...]
+        }
+        result.append(AttributedString(String(remainder)))
+        return result
     }
 }
 

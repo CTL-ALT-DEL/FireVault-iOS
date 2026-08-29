@@ -8,6 +8,7 @@
 import Combine
 import UIKit
 import CarPlay
+import UserNotifications
 
 enum FireVaultQuickAction: String, CaseIterable, Equatable {
     case startLog = "start-log"
@@ -141,7 +142,7 @@ final class FireVaultWidgetDeepLinkCenter: ObservableObject {
     }
 }
 
-final class FireVaultAppDelegate: NSObject, UIApplicationDelegate {
+final class FireVaultAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?
@@ -153,10 +154,19 @@ final class FireVaultAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
         Task { @MainActor in
             FireVaultQuickActionCenter.shared.installShortcutItems(on: application)
         }
         return true
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .list, .sound])
     }
 
     func application(

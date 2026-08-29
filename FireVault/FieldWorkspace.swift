@@ -11,6 +11,7 @@ import MapKit
 import UniformTypeIdentifiers
 import UIKit
 import AVKit
+import VisionKit
 
 struct FireVaultWorkspaceAccount: Codable, Identifiable, Equatable {
     var id: String
@@ -46,6 +47,10 @@ struct FireVaultWorkspaceNote: Codable, Identifiable, Equatable {
     var title: String
     var text: String
     var date: String
+    var showOnArrival: Bool? = nil
+    var updatedAt: Date? = nil
+
+    var showsOnArrival: Bool { showOnArrival ?? false }
 }
 
 struct FireVaultWorkspaceDocument: Codable, Identifiable, Equatable {
@@ -55,6 +60,7 @@ struct FireVaultWorkspaceDocument: Codable, Identifiable, Equatable {
     var kind: String
     var date: String
     var mediaFileName: String? = nil
+    var updatedAt: Date? = nil
 }
 
 struct FireVaultWorkspaceEquipment: Codable, Identifiable, Equatable {
@@ -152,7 +158,7 @@ struct FireVaultWorkspaceLocation: Codable, Identifiable, Equatable {
     }
 
     var resolvedDirectionsMode: FireVaultDirectionsMode {
-        FireVaultDirectionsMode(rawValue: directionsMode ?? "") ?? .walking
+        isParkingLocation ? .driving : .walking
     }
 }
 
@@ -205,9 +211,97 @@ struct FireVaultWorkspaceRecent: Codable, Identifiable, Equatable {
     var subtitle: String
     var kind: String
     var date: String
+    var updatedAt: Date? = nil
 }
 
-private extension FireVaultWorkspaceLocation {
+enum FireVaultAccountTimestamp {
+    static func display(legacy value: String, timestamp: Date? = nil) -> String {
+        guard let resolved = timestamp ?? parseLegacy(value) else {
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = Calendar.current.isDateInToday(resolved)
+            ? "'TODAY' HH:mm"
+            : "MM/dd/yyyy HH:mm"
+        return formatter.string(from: resolved)
+    }
+
+    static func dateOnly(legacy value: String, timestamp: Date? = nil) -> String {
+        guard let resolved = timestamp ?? parseLegacy(value) else {
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = Calendar.current.isDateInToday(resolved)
+            ? "'TODAY'"
+            : "MM/dd/yyyy"
+        return formatter.string(from: resolved)
+    }
+
+    private static func parseLegacy(_ value: String) -> Date? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch trimmed.lowercased() {
+        case "today", "now":
+            return Date()
+        case "yesterday":
+            return Calendar.current.date(byAdding: .day, value: -1, to: Date())
+        default:
+            break
+        }
+
+        let localized = DateFormatter()
+        localized.locale = .current
+        localized.dateStyle = .medium
+        localized.timeStyle = .short
+        if let date = localized.date(from: trimmed) { return date }
+
+        let short = DateFormatter()
+        short.locale = .current
+        short.dateStyle = .short
+        short.timeStyle = .short
+        if let date = short.date(from: trimmed) { return date }
+
+        let monthDay = DateFormatter()
+        monthDay.locale = Locale(identifier: "en_US_POSIX")
+        monthDay.dateFormat = "MMM d yyyy"
+        let year = Calendar.current.component(.year, from: Date())
+        return monthDay.date(from: "\(trimmed) \(year)")
+    }
+}
+
+enum FireVaultAccountSearch {
+    static func matches(_ query: String, values: [String]) -> Bool {
+        values.contains { $0.localizedCaseInsensitiveContains(query) }
+    }
+
+    static func highlighted(_ value: String, query: String) -> AttributedString {
+        guard !query.isEmpty else { return AttributedString(value) }
+
+        var result = AttributedString()
+        var remainder = value[value.startIndex...]
+        while let match = remainder.range(
+            of: query,
+            options: [.caseInsensitive, .diacriticInsensitive]
+        ) {
+            result.append(AttributedString(String(remainder[..<match.lowerBound])))
+            var highlightedMatch = AttributedString(String(remainder[match]))
+            highlightedMatch.backgroundColor = .yellow
+            highlightedMatch.foregroundColor = .black
+            result.append(highlightedMatch)
+            remainder = remainder[match.upperBound...]
+        }
+        result.append(AttributedString(String(remainder)))
+        return result
+    }
+}
+
+extension FireVaultWorkspaceLocation {
+    var isParkingLocation: Bool {
+        let value = "\(label) \(type)".lowercased()
+        return value.contains("parking") || value.contains("park here")
+    }
+
     var arrivalMapSymbol: String {
         let value = "\(label) \(type)".lowercased()
         if value.contains("parking") || value.contains("park here") { return "parkingsign.circle.fill" }
@@ -231,8 +325,27 @@ struct FieldWorkspaceView: View {
     @State private var accountDeletionError: String?
 
     private let columns = [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)]
-    private var previewCoordinate: CLLocationCoordinate2D? {
-        account.coordinate ?? account.locations.compactMap(\.coordinate).first
+    private let recentActivityDisplayLimit = 20
+
+    private var photoVideoCount: Int {
+        account.documents.filter { $0.kind == "photo" || $0.kind == "video" }.count
+    }
+
+    private var fileScanCount: Int {
+        account.documents.filter { $0.kind != "photo" && $0.kind != "video" }.count
+    }
+
+    private var recentActivityItems: [FireVaultWorkspaceRecent] {
+        let currentAccount = store.accounts.first(where: { $0.id == account.id }) ?? account
+        return Array(currentAccount.recent.prefix(recentActivityDisplayLimit))
+    }
+
+    private var classificationTags: [String] {
+        let category = account.category.trimmingCharacters(in: .whitespacesAndNewlines)
+        return account.tags.filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && $0.localizedCaseInsensitiveCompare(category) != .orderedSame
+        }
     }
 
     var body: some View {
@@ -240,14 +353,14 @@ struct FieldWorkspaceView: View {
             ZStack {
                 FieldWorkspacePalette.background.ignoresSafeArea()
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
+                    LazyVStack(alignment: .leading, spacing: 16) {
                         identity
-                        if settings.isFeatureVisible("account.map") {
-                            mapPreview
-                        }
+                        accountQuickActions
+                        accountClassifications
+                        reportBuilderLink
+                        mapPreview
                         destinations
                         recentActivity
-                        customerAccountDeletion
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
@@ -255,7 +368,7 @@ struct FieldWorkspaceView: View {
                 }
                 .scrollIndicators(.hidden)
             }
-            .navigationTitle("Account")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
@@ -316,7 +429,12 @@ struct FieldWorkspaceView: View {
         }
         .sheet(isPresented: $isShowingNoteEditor) {
             FireVaultNoteEditorSheet(accountName: account.name, note: nil) { draft in
-                store.addNote(to: account.id, title: draft.title, text: draft.text) != nil
+                store.addNote(
+                    to: account.id,
+                    title: draft.title,
+                    text: draft.text,
+                    showOnArrival: draft.showOnArrival
+                ) != nil
             }
         }
         .alert("Delete Customer Account?", isPresented: $isConfirmingAccountDeletion) {
@@ -338,120 +456,165 @@ struct FieldWorkspaceView: View {
     }
 
     private var identity: some View {
-        WorkspaceCard {
-            VStack(alignment: .leading, spacing: 13) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "building.2.crop.circle.fill")
-                        .font(.system(size: 38, weight: .semibold))
-                        .foregroundStyle(FieldWorkspacePalette.blue)
-                        .frame(width: 48, height: 48)
-                        .background(FieldWorkspacePalette.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        HStack(spacing: 0) {
+            VStack {
+                Image(systemName: "building.2.fill")
+                    .font(.system(size: 25, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(.white.opacity(0.13), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .accessibilityHidden(true)
+            }
+            .padding(.vertical, 15)
+            .frame(width: 58)
+            .frame(maxHeight: .infinity)
+            .background(FieldWorkspacePalette.red)
+            .accessibilityHidden(true)
 
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(account.name)
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .foregroundStyle(.primary)
+            VStack(alignment: .leading, spacing: 10) {
+                if !account.accountId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("ACCOUNT ID  ·  \(account.accountId)")
+                        .font(.caption2.weight(.semibold).monospaced())
+                        .tracking(0.7)
+                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+
+                Text(account.name)
+                    .font(.system(size: 27, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.76)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider()
+
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: "mappin.and.ellipse")
+                        .frame(width: 20)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(addressLines.street)
+                            .font(.subheadline)
                             .lineLimit(2)
-                            .minimumScaleFactor(0.82)
-
-                        Label(account.address, systemImage: "mappin.and.ellipse")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                HStack(spacing: 8) {
-                    if !account.category.isEmpty {
-                        Text(account.category.uppercased())
-                            .workspacePill(color: FieldWorkspacePalette.blue)
-                    }
-                    if !account.accountId.isEmpty {
-                        Label(account.accountId, systemImage: "number")
-                            .workspacePill(color: .secondary)
-                    }
-                    Spacer()
-                }
-
-                accountQuickActions
-
-                if !account.tags.isEmpty {
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 8) {
-                            ForEach(account.tags, id: \.self) { tag in
-                                Text(tag).workspacePill(color: FieldWorkspacePalette.green)
-                            }
+                        if let locality = addressLines.locality {
+                            Text(locality)
+                                .font(.subheadline)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
                         }
                     }
-                    .scrollIndicators(.hidden)
                 }
+                .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                .accessibilityElement(children: .combine)
+
+                if !formattedPhone.isEmpty {
+                    HStack(spacing: 9) {
+                        Image(systemName: "phone")
+                            .frame(width: 20)
+                            .accessibilityHidden(true)
+                        Text(formattedPhone)
+                            .font(.subheadline)
+                    }
+                    .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                    .accessibilityElement(children: .combine)
+                }
+
             }
-            .padding(15)
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(FieldWorkspacePalette.surface)
         }
-        .padding(.top, 4)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(FieldWorkspacePalette.navigationDivider, lineWidth: 1)
+        }
+        .shadow(color: NativeShellPalette.cardShadow, radius: 9, y: 4)
+        .padding(.top, 8)
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private var accountClassifications: some View {
+        let category = account.category.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !category.isEmpty || !classificationTags.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("ACCOUNT CLASSIFICATION")
+                    .font(.caption2.weight(.semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(FieldWorkspacePalette.secondaryText)
+
+                ScrollView(.horizontal) {
+                    HStack(spacing: 7) {
+                        if !category.isEmpty {
+                            Text(category).workspacePill(color: FieldWorkspacePalette.red)
+                        }
+                        ForEach(classificationTags, id: \.self) { tag in
+                            Text(tag).workspacePill(color: FieldWorkspacePalette.blue)
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+            .padding(.horizontal, 2)
+        }
     }
 
     private var accountQuickActions: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
             WorkspaceQuickAction(
                 title: "Call",
                 symbol: "phone.fill",
-                tint: FieldWorkspacePalette.green,
+                tint: FieldWorkspacePalette.red,
                 disabled: account.phone.isEmpty
             ) {
                 store.call(account.phone)
             }
+            actionDivider
             WorkspaceQuickAction(
                 title: "Route",
                 symbol: "arrow.triangle.turn.up.right.diamond.fill",
-                tint: FieldWorkspacePalette.blue,
+                tint: FieldWorkspacePalette.red,
                 disabled: account.coordinate == nil
             ) {
                 store.openRoute(for: account)
             }
+            actionDivider
             WorkspaceQuickAction(
                 title: "Note",
                 symbol: "square.and.pencil",
-                tint: FieldWorkspacePalette.amber
+                tint: FieldWorkspacePalette.red
             ) {
                 isShowingNoteEditor = true
             }
+            actionDivider
             WorkspaceQuickAction(
                 title: "Edit",
                 symbol: "pencil",
-                tint: FieldWorkspacePalette.purple
+                tint: FieldWorkspacePalette.red
             ) {
                 isShowingAccountEditor = true
             }
         }
+        .padding(.vertical, 7)
+        .background(
+            FieldWorkspacePalette.surface,
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(FieldWorkspacePalette.navigationDivider, lineWidth: 1)
+        }
+        .shadow(color: NativeShellPalette.cardShadow, radius: 7, y: 3)
     }
 
-    private var customerAccountDeletion: some View {
-        Button(role: .destructive) {
-            isConfirmingAccountDeletion = true
-        } label: {
-            HStack(spacing: 10) {
-                if isDeletingAccount {
-                    ProgressView()
-                        .tint(.red)
-                } else {
-                    Image(systemName: "trash")
-                }
-                Text(isDeletingAccount ? "Deleting Customer Account…" : "Delete Customer Account")
-                    .font(.headline)
-                Spacer()
-            }
-            .foregroundStyle(.red)
-            .padding(15)
-            .background(.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(.red.opacity(0.25), lineWidth: 1)
-            }
-        }
-        .buttonStyle(.plain)
-        .disabled(isDeletingAccount)
-        .accessibilityIdentifier("delete-customer-account")
+    private var actionDivider: some View {
+        Rectangle()
+            .fill(FieldWorkspacePalette.navigationDivider)
+            .frame(width: 1, height: 42)
+            .accessibilityHidden(true)
     }
 
     private func deleteCustomerAccount() {
@@ -474,104 +637,115 @@ struct FieldWorkspaceView: View {
             MapArrivalView(account: account, store: store, settings: settings, locationService: locationService)
         } label: {
             WorkspaceCard {
-                ZStack(alignment: .bottomLeading) {
-                    if previewCoordinate != nil || account.locations.contains(where: { $0.coordinate != nil }) {
-                        WorkspaceMap(account: account)
-                            .allowsHitTesting(false)
-                    } else {
-                        Rectangle()
-                            .fill(FieldWorkspacePalette.surfaceRaised)
-                            .overlay {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "map")
-                                        .font(.title)
-                                    Text("Add GPS to show this account on Apple Maps")
-                                        .font(.subheadline)
-                                }
-                                .foregroundStyle(.secondary)
-                            }
+                HStack(spacing: 13) {
+                    Image(systemName: "map.fill")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(FieldWorkspacePalette.blue)
+                        .frame(width: 42, height: 42)
+                        .background(FieldWorkspacePalette.blue.opacity(0.11), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Arrival Map")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(.primary)
+                        Text("Open map and manage site locations")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(FieldWorkspacePalette.secondaryText)
                     }
-
-                    LinearGradient(
-                        colors: [.clear, FieldWorkspacePalette.surface.opacity(0.96)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("ARRIVAL MAP")
-                                .font(.caption2.bold())
-                                .tracking(1.2)
-                                .foregroundStyle(FieldWorkspacePalette.blue)
-                            Text(account.locations.isEmpty ? "Account location" : "\(account.locations.count) precise locations")
-                                .font(.headline)
-                                .foregroundStyle(.white)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(16)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
                 }
-                .frame(height: 190)
+                .padding(13)
             }
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Open Arrival Map")
     }
 
+    private var reportBuilderLink: some View {
+        NavigationLink {
+            FireVaultAccountReportBuilderView(
+                account: account,
+                store: store,
+                settings: settings
+            )
+        } label: {
+            WorkspaceCard {
+                HStack(spacing: 13) {
+                    Image(systemName: "doc.badge.plus")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(FieldWorkspacePalette.red)
+                        .frame(width: 42, height: 42)
+                        .background(
+                            FieldWorkspacePalette.red.opacity(0.11),
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        )
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Generate Report")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(.primary)
+                        Text("Choose a template, facts, photos, and documents")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                }
+                .padding(13)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Generate an account report")
+    }
+
     private var destinations: some View {
         VStack(alignment: .leading, spacing: 9) {
-            WorkspaceSectionTitle(title: "FIELD WORKSPACE", subtitle: "Everything for this location")
+            WorkspaceSectionTitle(title: "Field Workspace", subtitle: "Everything for this location")
             LazyVGrid(columns: columns, spacing: 9) {
-                if settings.isFeatureVisible("account.notes") {
-                    NavigationLink {
-                        NotesWorkspaceView(account: account, store: store)
-                    } label: {
-                        WorkspaceDestinationTile(
-                            title: "Notes", count: account.notes.count,
-                            symbol: "note.text", color: FieldWorkspacePalette.amber
-                        )
-                    }
+                NavigationLink {
+                    NotesWorkspaceView(account: account, store: store)
+                } label: {
+                    WorkspaceDestinationTile(
+                        title: "Notes", count: account.notes.count,
+                        symbol: "note.text", color: FieldWorkspacePalette.amber
+                    )
                 }
 
-                if settings.isFeatureVisible("account.files") {
-                    NavigationLink {
-                        FilesScansView(account: account, store: store)
-                    } label: {
-                        WorkspaceDestinationTile(
-                            title: "Files & Scans", count: account.documents.count,
-                            symbol: "doc.viewfinder", color: FieldWorkspacePalette.blue
-                        )
-                    }
+                NavigationLink {
+                    FilesScansView(account: account, store: store)
+                } label: {
+                    WorkspaceDestinationTile(
+                        title: "Files & Scans", count: fileScanCount,
+                        symbol: "doc.viewfinder", color: FieldWorkspacePalette.blue
+                    )
                 }
 
-                if settings.isFeatureVisible("account.equipment") {
-                    NavigationLink {
-                        EquipmentWorkspaceView(
-                            account: account,
-                            store: store,
-                            locationService: locationService
-                        )
-                    } label: {
-                        WorkspaceDestinationTile(
-                            title: "Equipment", count: account.equipment.count,
-                            symbol: "wrench.and.screwdriver", color: FieldWorkspacePalette.green
-                        )
-                    }
+                NavigationLink {
+                    PhotoVideoLibraryView(account: account, store: store, settings: settings)
+                } label: {
+                    WorkspaceDestinationTile(
+                        title: "Photo / Video", count: photoVideoCount,
+                        symbol: "camera.fill", color: FieldWorkspacePalette.purple
+                    )
                 }
 
-                if settings.isFeatureVisible("account.locations") {
-                    NavigationLink {
-                        MapArrivalView(account: account, store: store, settings: settings, locationService: locationService)
-                    } label: {
-                        WorkspaceDestinationTile(
-                            title: "Locations", count: account.locations.count,
-                            symbol: "map.fill", color: FieldWorkspacePalette.purple
-                        )
-                    }
+                NavigationLink {
+                    EquipmentWorkspaceView(
+                        account: account,
+                        store: store,
+                        locationService: locationService
+                    )
+                } label: {
+                    WorkspaceDestinationTile(
+                        title: "Equipment", count: account.equipment.count,
+                        symbol: "wrench.and.screwdriver", color: FieldWorkspacePalette.green
+                    )
                 }
+
             }
             .buttonStyle(.plain)
         }
@@ -579,22 +753,55 @@ struct FieldWorkspaceView: View {
 
     @ViewBuilder
     private var recentActivity: some View {
-        if !account.recent.isEmpty {
+        if !recentActivityItems.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                WorkspaceSectionTitle(title: "RECENT FIELD ACTIVITY", subtitle: "Latest saved work")
+                WorkspaceSectionTitle(
+                    title: "Recent Activity",
+                    subtitle: "Latest \(recentActivityItems.count) items"
+                )
                 WorkspaceCard {
-                    VStack(spacing: 0) {
-                        ForEach(Array(account.recent.prefix(6).enumerated()), id: \.element.id) { index, item in
-                            WorkspaceRecentRow(item: item)
-                            if index < min(account.recent.count, 6) - 1 {
-                                Divider().padding(.leading, 50)
+                    ScrollView(.vertical) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(recentActivityItems.enumerated()), id: \.element.id) { index, item in
+                                WorkspaceRecentRow(item: item)
+                                if index < recentActivityItems.count - 1 {
+                                    Divider().padding(.leading, 43)
+                                }
                             }
                         }
+                        .padding(.vertical, 3)
                     }
-                    .padding(.vertical, 4)
+                    .scrollIndicators(.visible)
+                    .frame(height: 216)
                 }
             }
         }
+    }
+
+    private var formattedPhone: String {
+        let digits = account.phone.filter(\.isNumber)
+        guard digits.count == 10 else { return account.phone.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let areaEnd = digits.index(digits.startIndex, offsetBy: 3)
+        let exchangeEnd = digits.index(areaEnd, offsetBy: 3)
+        return "(\(digits[..<areaEnd])) \(digits[areaEnd..<exchangeEnd])-\(digits[exchangeEnd...])"
+    }
+
+    private var addressLines: (street: String, locality: String?) {
+        let normalized = account.address
+            .replacingOccurrences(of: "\n", with: ",")
+            .replacingOccurrences(of: "\r", with: ",")
+        let components = normalized
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !components.isEmpty else { return ("No address saved", nil) }
+        guard components.count >= 2 else { return (components[0], nil) }
+
+        let localityStart = max(1, components.count - 2)
+        let street = components[..<localityStart].joined(separator: ", ")
+        let locality = components[localityStart...].joined(separator: ", ")
+        return (street, locality)
     }
 
     private var appNavigation: some View {
@@ -730,7 +937,7 @@ struct FireVaultEditAccountSheet: View {
                                 .lineLimit(2)
                             Text("Update the site identity and contact information below.")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(FieldWorkspacePalette.secondaryText)
                         }
                     }
                     .padding(.vertical, 7)
@@ -754,7 +961,7 @@ struct FireVaultEditAccountSheet: View {
                         .accessibilityHint("Clears this account category and prevents category rules from immediately restoring it")
                     } else {
                         Label("No category assigned", systemImage: "tag.slash")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(FieldWorkspacePalette.secondaryText)
                     }
                     accountEditField("Account ID", symbol: "number", text: $accountId)
                 }
@@ -769,7 +976,7 @@ struct FireVaultEditAccountSheet: View {
                             Text("PHONE NUMBER")
                                 .font(.caption2.bold())
                                 .tracking(0.65)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(FieldWorkspacePalette.secondaryText)
                             TextField("(xxx) xxx-xxxx", text: $phone)
                                 .textContentType(.telephoneNumber)
                                 .keyboardType(.phonePad)
@@ -825,7 +1032,7 @@ struct FireVaultEditAccountSheet: View {
 
                     Text("This site coordinate controls Nearby distance, account routing, and automatic Trip Log account matching. Saved Arrival Points remain separate and are also considered by Trip Log.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
                 } header: {
                     Text("Account GPS Position")
                 } footer: {
@@ -838,7 +1045,7 @@ struct FireVaultEditAccountSheet: View {
                         systemImage: "checkmark.shield.fill"
                     )
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
                 }
             }
             .scrollContentBackground(.hidden)
@@ -848,10 +1055,10 @@ struct FireVaultEditAccountSheet: View {
             .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    WorkspaceEditorToolbarButton(kind: .cancel) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    WorkspaceEditorToolbarButton(kind: .save) {
                         let draft = FireVaultAccountEditDraft(
                             name: name,
                             address: address,
@@ -863,7 +1070,6 @@ struct FireVaultEditAccountSheet: View {
                         )
                         if save(draft) { dismiss() }
                     }
-                    .fontWeight(.semibold)
                     .disabled(!canSave)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
@@ -910,7 +1116,7 @@ struct FireVaultEditAccountSheet: View {
                 Text(title.uppercased())
                     .font(.caption2.bold())
                     .tracking(0.65)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(FieldWorkspacePalette.secondaryText)
                 TextField(title, text: text, axis: lineLimit > 1 ? .vertical : .horizontal)
                     .lineLimit(1...lineLimit)
                     .font(.body.weight(.semibold))
@@ -979,6 +1185,8 @@ private struct MapArrivalView: View {
     @State private var isLoadingAccountBrief = false
     @State private var accountBrief: String?
     @State private var accountBriefError: String?
+    @State private var searchText = ""
+    @State private var expandedLocationIDs: Set<String> = []
 
     private var sortedLocations: [FireVaultWorkspaceLocation] {
         account.locations.sorted { lhs, rhs in
@@ -986,6 +1194,20 @@ private struct MapArrivalView: View {
             let rightRank = locationSortRank(rhs)
             if leftRank != rightRank { return leftRank < rightRank }
             return lhs.label.localizedCaseInsensitiveCompare(rhs.label) == .orderedAscending
+        }
+    }
+
+    private var searchQuery: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var filteredLocations: [FireVaultWorkspaceLocation] {
+        guard !searchQuery.isEmpty else { return sortedLocations }
+        return sortedLocations.filter { location in
+            FireVaultAccountSearch.matches(
+                searchQuery,
+                values: [location.label, location.subtitle, location.type, location.plusCode]
+            )
         }
     }
 
@@ -1002,10 +1224,24 @@ private struct MapArrivalView: View {
                         .tracking(0.8)
                         .foregroundStyle(FieldWorkspacePalette.blue)
                     Spacer()
+                    Button {
+                        editingLocation = nil
+                        isShowingEditor = true
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                            .font(.caption.bold())
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .accessibilityLabel("Add Site Location")
                     editLocationsMenu
                 }
 
-                WorkspaceMap(account: account)
+                WorkspaceMap(
+                    account: account,
+                    mapLayer: settings.gps.resolvedArrivalPointMapLayer,
+                    is3D: settings.gps.resolvedArrivalPointMapIs3D
+                )
                     .frame(height: 300)
                     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .allowsHitTesting(false)
@@ -1020,7 +1256,10 @@ private struct MapArrivalView: View {
                 Text("SAVED ARRIVAL POINTS")
                     .font(.caption.bold())
                     .tracking(0.8)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                    .padding(.horizontal, 16)
+
+                WorkspaceSearchField(text: $searchText, prompt: "Search site locations")
                     .padding(.horizontal, 16)
 
                 ScrollView {
@@ -1032,46 +1271,90 @@ private struct MapArrivalView: View {
                         description: Text("Add an entrance, parking area, panel, riser, FDC, or other exact field location.")
                     )
                     .padding(.top, 30)
+                } else if filteredLocations.isEmpty {
+                    ContentUnavailableView.search(text: searchQuery)
+                        .padding(.top, 30)
                 } else {
-                    ForEach(sortedLocations) { location in
-                        NavigationLink {
-                            ArrivalPointDetailView(
-                                account: account,
-                                location: location,
-                                store: store,
-                                locationService: locationService
-                            )
-                        } label: {
-                            HStack(spacing: 12) {
+                    ForEach(filteredLocations) { location in
+                        VStack(alignment: .leading, spacing: 0) {
+                            Button {
+                                toggleLocation(location)
+                            } label: {
+                                HStack(spacing: 12) {
                                 Image(systemName: location.arrivalMapSymbol)
                                     .font(.headline)
                                     .foregroundStyle(location.resolvedPinColor.color)
                                     .frame(width: 34, height: 34)
                                     .background(location.resolvedPinColor.color.opacity(0.14), in: Circle())
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(location.label).font(.headline).foregroundStyle(.primary)
-                                    Text([location.subtitle, location.plusCode].filter { !$0.isEmpty }.joined(separator: " • "))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                    Text(FireVaultAccountSearch.highlighted(location.label, query: searchQuery))
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
                                         .lineLimit(2)
-                                }
                                 Spacer()
-                                if location.coordinate != nil {
-                                    Image(systemName: "chevron.right")
-                                        .foregroundStyle(FieldWorkspacePalette.blue)
+                                    Text(location.resolvedDirectionsMode.rawValue)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                                    Image(systemName: expandedLocationIDs.contains(location.id) ? "chevron.up" : "chevron.down")
+                                        .font(.caption2.bold())
+                                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
                                 }
+                                .padding(12)
+                                .contentShape(Rectangle())
                             }
-                            .padding(12)
-                            .background(
-                                FieldWorkspacePalette.surfaceRaised,
-                                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            )
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .stroke(.white.opacity(0.07), lineWidth: 1)
+                            .buttonStyle(.plain)
+
+                            if expandedLocationIDs.contains(location.id) {
+                                Divider().padding(.leading, 58)
+                                let details = [location.subtitle, location.type, location.plusCode]
+                                    .filter { !$0.isEmpty }
+                                    .joined(separator: " • ")
+                                if !details.isEmpty {
+                                    Text(FireVaultAccountSearch.highlighted(details, query: searchQuery))
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                        .padding(.horizontal, 12)
+                                        .padding(.top, 10)
+                                }
+                                HStack {
+                                    if !searchQuery.isEmpty {
+                                        Label("Search match", systemImage: "highlighter")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                                    }
+                                    Spacer()
+                                    Button("Edit", systemImage: "pencil") {
+                                        editingLocation = location
+                                        isShowingEditor = true
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    NavigationLink {
+                                        ArrivalPointDetailView(
+                                            account: account,
+                                            location: location,
+                                            store: store,
+                                            settings: settings,
+                                            locationService: locationService
+                                        )
+                                    } label: {
+                                        Label("Open", systemImage: "arrow.up.right.square")
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.top, 10)
+                                .padding(.bottom, 10)
                             }
                         }
-                        .buttonStyle(.plain)
+                        .background(
+                            FieldWorkspacePalette.surfaceRaised,
+                            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(.white.opacity(0.07), lineWidth: 1)
+                        }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button("Delete", systemImage: "trash", role: .destructive) {
                                 store.deleteLocation(accountID: account.id, locationID: location.id)
@@ -1090,6 +1373,11 @@ private struct MapArrivalView: View {
         .background(FieldWorkspacePalette.background)
         .navigationTitle("Arrival Map")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: searchText) { _, _ in
+            expandedLocationIDs = searchQuery.isEmpty
+                ? []
+                : Set(filteredLocations.map(\.id))
+        }
         .sheet(isPresented: $isShowingAccountBrief) {
             FireVaultAccountBriefSheet(
                 accountName: account.name,
@@ -1149,12 +1437,16 @@ private struct MapArrivalView: View {
         }
     }
 
+    private func toggleLocation(_ location: FireVaultWorkspaceLocation) {
+        if expandedLocationIDs.contains(location.id) {
+            expandedLocationIDs.remove(location.id)
+        } else {
+            expandedLocationIDs.insert(location.id)
+        }
+    }
+
     private var editLocationsMenu: some View {
         Menu {
-            Button("Add Location", systemImage: "plus") {
-                editingLocation = nil
-                isShowingEditor = true
-            }
             Button("Import CSV", systemImage: "square.and.arrow.down") {
                 isImportingCSV = true
             }
@@ -1171,12 +1463,12 @@ private struct MapArrivalView: View {
                 }
             }
         } label: {
-            Label("Edit Locations", systemImage: "pencil.and.list.clipboard")
+            Label("Manage", systemImage: "pencil.and.list.clipboard")
                 .font(.caption.bold())
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-        .accessibilityHint("Adds, imports, or edits saved arrival points")
+        .accessibilityHint("Imports or edits saved site locations")
     }
 
     private func locationSortRank(_ location: FireVaultWorkspaceLocation) -> Int {
@@ -1265,6 +1557,7 @@ private struct MapArrivalView: View {
 private struct ArrivalPointDetailView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
+    @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
 
     @State private var location: FireVaultWorkspaceLocation
@@ -1272,23 +1565,26 @@ private struct ArrivalPointDetailView: View {
     @State private var mapPosition: MapCameraPosition
     @State private var isShowingEditor = false
     @State private var positionStatus = "Drag on the map to move this pin"
-    @Environment(\.openURL) private var openURL
 
     init(
         account: FireVaultWorkspaceAccount,
         location: FireVaultWorkspaceLocation,
         store: FireVaultStore,
+        settings: FireVaultNativeSettingsStore,
         locationService: FireVaultLocationService
     ) {
         self.account = account
         self.store = store
+        self.settings = settings
         self.locationService = locationService
         _location = State(initialValue: location)
         _coordinate = State(initialValue: location.coordinate)
         let center = location.coordinate ?? account.coordinate ?? .init(latitude: 39.5, longitude: -98.35)
-        _mapPosition = State(initialValue: .region(.init(
-            center: center,
-            span: .init(latitudeDelta: 0.00032, longitudeDelta: 0.00032)
+        _mapPosition = State(initialValue: .camera(MapCamera(
+            centerCoordinate: center,
+            distance: 120,
+            heading: 0,
+            pitch: settings.gps.resolvedArrivalPointMapIs3D ? 55 : 0
         )))
     }
 
@@ -1308,7 +1604,10 @@ private struct ArrivalPointDetailView: View {
                         }
                     }
                 }
-                .mapStyle(.imagery(elevation: .realistic))
+                .modifier(FireVaultArrivalMapStyleModifier(
+                    layer: settings.gps.resolvedArrivalPointMapLayer,
+                    is3D: settings.gps.resolvedArrivalPointMapIs3D
+                ))
                 .contentShape(Rectangle())
                 .highPriorityGesture(
                     DragGesture(minimumDistance: 1, coordinateSpace: .local)
@@ -1344,7 +1643,7 @@ private struct ArrivalPointDetailView: View {
                         if let coordinate {
                             Text(String(format: "%.6f, %.6f", coordinate.latitude, coordinate.longitude))
                                 .font(.caption2.monospacedDigit())
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(FieldWorkspacePalette.secondaryText)
                         }
                     }
                     Spacer(minLength: 0)
@@ -1375,8 +1674,7 @@ private struct ArrivalPointDetailView: View {
                         .frame(maxWidth: .infinity)
 
                         Button("Google Maps", systemImage: "map.fill") {
-                            guard let url = FireVaultPlusCode.googleMapsURL(for: location.plusCode) else { return }
-                            openURL(url)
+                            openGoogleMaps()
                         }
                         .buttonStyle(.bordered)
                         .frame(maxWidth: .infinity)
@@ -1478,6 +1776,15 @@ private struct ArrivalPointDetailView: View {
 
     private var routeButtonTitle: String {
         location.resolvedDirectionsMode == .walking ? "Walk Here" : "Drive Here"
+    }
+
+    private func openGoogleMaps() {
+        guard let appURL = FireVaultPlusCode.googleMapsAppURL(for: location.plusCode) else { return }
+        UIApplication.shared.open(appURL, options: [:]) { opened in
+            guard !opened,
+                  let webURL = FireVaultPlusCode.googleMapsURL(for: location.plusCode) else { return }
+            UIApplication.shared.open(webURL, options: [:])
+        }
     }
 
     private func openRoute() {
@@ -1599,17 +1906,50 @@ struct FireVaultLocationDraft: Equatable {
 }
 
 private enum FireVaultArrivalMapLayer: String, CaseIterable, Identifiable {
-    case standard = "Standard"
-    case satellite = "Satellite"
-    case hybrid = "Hybrid"
+    case standard = "Standard 3D"
+    case satellite = "Satellite 3D"
+    case hybrid = "Hybrid 3D"
 
     var id: String { rawValue }
+
+    init(storageValue: String) {
+        switch storageValue {
+        case "satellite": self = .satellite
+        case "hybrid": self = .hybrid
+        default: self = .standard
+        }
+    }
+
+    var storageValue: String {
+        switch self {
+        case .standard: "standard"
+        case .satellite: "satellite"
+        case .hybrid: "hybrid"
+        }
+    }
 
     var symbol: String {
         switch self {
         case .standard: "map"
         case .satellite: "globe.americas.fill"
         case .hybrid: "square.3.layers.3d"
+        }
+    }
+}
+
+private struct FireVaultArrivalMapStyleModifier: ViewModifier {
+    let layer: String
+    let is3D: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        switch (layer, is3D) {
+        case ("satellite", true): content.mapStyle(.imagery(elevation: .realistic))
+        case ("satellite", false): content.mapStyle(.imagery(elevation: .flat))
+        case ("hybrid", true): content.mapStyle(.hybrid(elevation: .realistic))
+        case ("hybrid", false): content.mapStyle(.hybrid(elevation: .flat))
+        case (_, true): content.mapStyle(.standard(elevation: .realistic))
+        default: content.mapStyle(.standard(elevation: .flat))
         }
     }
 }
@@ -1629,10 +1969,10 @@ struct FireVaultLocationEditorSheet: View {
     @State private var latitudeText: String
     @State private var longitudeText: String
     @State private var pinColor: FireVaultMapPinColor
-    @State private var directionsMode: FireVaultDirectionsMode
     @State private var isShowingFullScreenPinEditor = false
     @State private var mapPosition: MapCameraPosition
     @State private var mapLayer: FireVaultArrivalMapLayer = .standard
+    @State private var mapIs3D = true
     @FocusState private var isTextInputFocused: Bool
     private let plusCodePreferences = FireVaultNativeSettingsStore().preferences.plusCodes
 
@@ -1655,13 +1995,19 @@ struct FireVaultLocationEditorSheet: View {
         _latitudeText = State(initialValue: location?.latitude.map { String($0) } ?? "")
         _longitudeText = State(initialValue: location?.longitude.map { String($0) } ?? "")
         _pinColor = State(initialValue: location?.resolvedPinColor ?? .purple)
-        _directionsMode = State(initialValue: location?.resolvedDirectionsMode ?? .walking)
+        let mapPreferences = FireVaultNativeSettingsStore().gps
+        _mapLayer = State(initialValue: FireVaultArrivalMapLayer(
+            storageValue: mapPreferences.resolvedArrivalPointMapLayer
+        ))
+        _mapIs3D = State(initialValue: mapPreferences.resolvedArrivalPointMapIs3D)
         let initialCoordinate = location?.coordinate
             ?? accountCoordinate
             ?? CLLocationCoordinate2D(latitude: 43.615, longitude: -116.202)
-        _mapPosition = State(initialValue: .region(.init(
-            center: initialCoordinate,
-            span: .init(latitudeDelta: 0.0005, longitudeDelta: 0.0005)
+        _mapPosition = State(initialValue: .camera(MapCamera(
+            centerCoordinate: initialCoordinate,
+            distance: 120,
+            heading: 0,
+            pitch: mapPreferences.resolvedArrivalPointMapIs3D ? 55 : 0
         )))
     }
 
@@ -1678,6 +2024,11 @@ struct FireVaultLocationEditorSheet: View {
         !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && parsedCoordinates != nil
             && plusCodeEntryIsValid
+    }
+
+    private var automaticDirectionsMode: FireVaultDirectionsMode {
+        let value = "\(label) \(type)".lowercased()
+        return value.contains("parking") || value.contains("park here") ? .driving : .walking
     }
 
     private var plusCodeEntryIsValid: Bool {
@@ -1723,12 +2074,13 @@ struct FireVaultLocationEditorSheet: View {
                     }
                     .pickerStyle(.menu)
 
-                    Picker("Directions", selection: $directionsMode) {
-                        ForEach(FireVaultDirectionsMode.allCases) { mode in
-                            Label(mode.rawValue, systemImage: mode.symbol).tag(mode)
-                        }
+                    LabeledContent("Routing") {
+                        Label(automaticDirectionsMode.rawValue, systemImage: automaticDirectionsMode.symbol)
+                            .foregroundStyle(FieldWorkspacePalette.blue)
                     }
-                    .pickerStyle(.segmented)
+                    Text("Parking locations route by car. Every other site location routes on foot.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Section("Exact Location") {
                         locationPinMap
@@ -1786,9 +2138,9 @@ struct FireVaultLocationEditorSheet: View {
                             }
                         }
 
-                        Text("Open the full-screen map for landscape editing, map layers, and 3D view.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        Text("Pinch to zoom, drag to pan, or use two fingers to rotate and adjust the 3D view. Use the map-layer button on the map to switch layers.")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(FieldWorkspacePalette.secondaryText)
                 }
             }
             .fireVaultThemedCollection()
@@ -1797,10 +2149,10 @@ struct FireVaultLocationEditorSheet: View {
             .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    WorkspaceEditorToolbarButton(kind: .cancel) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    WorkspaceEditorToolbarButton(kind: .save) {
                         guard let coordinates = parsedCoordinates else { return }
                         if save(.init(
                             label: label,
@@ -1810,7 +2162,7 @@ struct FireVaultLocationEditorSheet: View {
                             latitude: coordinates.0,
                             longitude: coordinates.1,
                             pinColor: pinColor,
-                            directionsMode: directionsMode
+                            directionsMode: automaticDirectionsMode
                         )) {
                             dismiss()
                         }
@@ -1830,7 +2182,9 @@ struct FireVaultLocationEditorSheet: View {
                 pinSystemImage: "circle.fill",
                 pinTint: pinColor.color,
                 initialCoordinate: locationCoordinate,
-                fallbackCoordinate: accountCoordinate ?? locationService.coordinate
+                fallbackCoordinate: accountCoordinate ?? locationService.coordinate,
+                initialMapLayer: mapLayer.storageValue,
+                initialMapIs3D: mapIs3D
             ) { coordinate in
                 apply(coordinate)
             }
@@ -1848,9 +2202,11 @@ struct FireVaultLocationEditorSheet: View {
         if plusCodePreferences.autoGenerate {
             plusCode = FireVaultPlusCode.encode(coordinate, length: plusCodePreferences.locationLength)
         }
-        mapPosition = .region(.init(
-            center: coordinate,
-            span: .init(latitudeDelta: 0.0005, longitudeDelta: 0.0005)
+        mapPosition = .camera(MapCamera(
+            centerCoordinate: coordinate,
+            distance: 120,
+            heading: 0,
+            pitch: mapIs3D ? 55 : 0
         ))
     }
 
@@ -1871,33 +2227,43 @@ struct FireVaultLocationEditorSheet: View {
                         Label(layer.rawValue, systemImage: layer.symbol).tag(layer)
                     }
                 }
+                Divider()
+                Toggle("3D View", isOn: $mapIs3D)
             } label: {
-                Image(systemName: "square.3.layers.3d.top.filled")
-                    .font(.system(size: 16, weight: .bold))
+                Label(
+                    "\(mapLayer.storageValue.capitalized) \(mapIs3D ? "3D" : "2D")",
+                    systemImage: "square.3.layers.3d.top.filled"
+                )
+                    .font(.caption.weight(.bold))
                     .foregroundStyle(.primary)
-                    .frame(width: 40, height: 40)
-                    .background(.regularMaterial, in: Circle())
+                    .padding(.horizontal, 11)
+                    .frame(height: 40)
+                    .background(.regularMaterial, in: Capsule())
                     .shadow(color: .black.opacity(0.25), radius: 5, y: 3)
             }
             .padding(10)
-            .accessibilityLabel("Map Layer")
+            .accessibilityLabel("Map Layer, \(mapLayer.storageValue.capitalized) \(mapIs3D ? "3D" : "2D")")
+        }
+        .onChange(of: mapIs3D) { _, _ in
+            guard let locationCoordinate else { return }
+            mapPosition = .camera(MapCamera(
+                centerCoordinate: locationCoordinate,
+                distance: 120,
+                heading: 0,
+                pitch: mapIs3D ? 55 : 0
+            ))
         }
     }
 
     @ViewBuilder
     private var locationPinMapForSelectedLayer: some View {
-        switch mapLayer {
-        case .standard:
-            locationPinMapContent.mapStyle(.standard(elevation: .realistic))
-        case .satellite:
-            locationPinMapContent.mapStyle(.imagery(elevation: .realistic))
-        case .hybrid:
-            locationPinMapContent.mapStyle(.hybrid(elevation: .realistic))
-        }
+        locationPinMapContent.modifier(
+            FireVaultArrivalMapStyleModifier(layer: mapLayer.storageValue, is3D: mapIs3D)
+        )
     }
 
     private var locationPinMapContent: some View {
-        Map(position: $mapPosition, interactionModes: []) {
+        Map(position: $mapPosition, interactionModes: [.pan, .zoom, .rotate, .pitch]) {
             if let locationCoordinate {
                 Annotation("", coordinate: locationCoordinate) {
                     VStack(spacing: 3) {
@@ -1916,11 +2282,19 @@ struct FireVaultLocationEditorSheet: View {
                 }
             }
         }
+        .mapControls {
+            MapCompass()
+            MapScaleView()
+            MapPitchToggle()
+        }
+        .accessibilityHint("Pinch to zoom, drag to pan, or use two fingers to rotate and adjust perspective")
     }
 }
 
 private struct WorkspaceMap: View {
     let account: FireVaultWorkspaceAccount
+    let mapLayer: String
+    let is3D: Bool
 
     private var validLocations: [FireVaultWorkspaceLocation] {
         account.locations.filter { $0.coordinate != nil }
@@ -1946,8 +2320,36 @@ private struct WorkspaceMap: View {
         )
     }
 
+    private var camera: MapCamera {
+        let widestSpan = max(region.span.latitudeDelta, region.span.longitudeDelta)
+        return MapCamera(
+            centerCoordinate: region.center,
+            distance: max(120, min(widestSpan * 111_000 * 1.8, 12_000)),
+            heading: 0,
+            pitch: is3D ? 55 : 0
+        )
+    }
+
+    @ViewBuilder
     var body: some View {
-        Map(initialPosition: .region(region)) {
+        switch (mapLayer, is3D) {
+        case ("satellite", true):
+            mapContent.mapStyle(.imagery(elevation: .realistic))
+        case ("satellite", false):
+            mapContent.mapStyle(.imagery(elevation: .flat))
+        case ("hybrid", true):
+            mapContent.mapStyle(.hybrid(elevation: .realistic))
+        case ("hybrid", false):
+            mapContent.mapStyle(.hybrid(elevation: .flat))
+        case (_, true):
+            mapContent.mapStyle(.standard(elevation: .realistic))
+        default:
+            mapContent.mapStyle(.standard(elevation: .flat))
+        }
+    }
+
+    private var mapContent: some View {
+        Map(initialPosition: .camera(camera)) {
             if let coordinate = account.coordinate {
                 Marker(account.name, systemImage: "shield.fill", coordinate: coordinate)
                     .tint(FieldWorkspacePalette.red)
@@ -1955,27 +2357,30 @@ private struct WorkspaceMap: View {
             ForEach(validLocations) { location in
                 if let coordinate = location.coordinate {
                     Annotation(location.label, coordinate: coordinate, anchor: .bottom) {
-                        if isParkingLocation(location) {
-                            Image(systemName: "parkingsign.circle.fill")
-                                .font(.system(size: 32, weight: .black))
-                                .foregroundStyle(FieldWorkspacePalette.red)
+                        VStack(spacing: 3) {
+                            Image(systemName: isParkingLocation(location) ? "parkingsign.circle.fill" : location.arrivalMapSymbol)
+                                .font(.system(size: isParkingLocation(location) ? 28 : 21, weight: .bold))
+                                .foregroundStyle(isParkingLocation(location) ? FieldWorkspacePalette.red : location.resolvedPinColor.color)
+                                .frame(width: 32, height: 32)
                                 .background(.white, in: Circle())
                                 .overlay(Circle().stroke(.white, lineWidth: 2))
-                            .shadow(radius: 4, y: 2)
-                            .accessibilityLabel("Parking, \(location.label)")
-                        } else {
-                            Image(systemName: location.arrivalMapSymbol)
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundStyle(location.resolvedPinColor.color)
-                                .background(.white, in: Circle())
-                                .shadow(radius: 3, y: 1)
-                                .accessibilityLabel(location.label)
+                                .shadow(radius: 4, y: 2)
+                            Text(location.label.isEmpty ? "Arrival point" : location.label)
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(.regularMaterial, in: Capsule())
+                                .overlay {
+                                    Capsule().stroke(.white.opacity(0.55), lineWidth: 0.5)
+                                }
                         }
+                        .accessibilityLabel(isParkingLocation(location) ? "Parking, \(location.label)" : location.label)
                     }
                 }
             }
         }
-        .mapStyle(.imagery(elevation: .realistic))
     }
 
     private func isParkingLocation(_ location: FireVaultWorkspaceLocation) -> Bool {
@@ -1987,37 +2392,151 @@ private struct WorkspaceMap: View {
 private struct NotesWorkspaceView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
-    @State private var editingNote: FireVaultWorkspaceNote?
-    @State private var isShowingEditor = false
+    @State private var editorRoute: NoteEditorRoute?
+    @State private var searchText = ""
+    @State private var expandedNoteIDs: Set<String> = []
+
+    private enum NoteEditorRoute: Identifiable {
+        case new
+        case edit(FireVaultWorkspaceNote)
+
+        var id: String {
+            switch self {
+            case .new: "new-note"
+            case let .edit(note): "edit-\(note.id)"
+            }
+        }
+
+        var note: FireVaultWorkspaceNote? {
+            switch self {
+            case .new: nil
+            case let .edit(note): note
+            }
+        }
+    }
+
+    private var currentAccount: FireVaultWorkspaceAccount {
+        store.accounts.first(where: { $0.id == account.id }) ?? account
+    }
+
+    private var searchQuery: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var filteredNotes: [FireVaultWorkspaceNote] {
+        guard !searchQuery.isEmpty else { return currentAccount.notes }
+        return currentAccount.notes.filter { note in
+            FireVaultAccountSearch.matches(searchQuery, values: [note.title, note.text])
+        }
+    }
 
     var body: some View {
         List {
-            if account.notes.isEmpty {
+            Section {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                    TextField("Search note titles and text", text: $searchText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear note search")
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+
+            if currentAccount.notes.isEmpty {
                 ContentUnavailableView(
                     "No Field Notes",
                     systemImage: "note.text.badge.plus",
                     description: Text("Add the first note for this account.")
                 )
+            } else if filteredNotes.isEmpty {
+                ContentUnavailableView.search(text: searchQuery)
             } else {
-                ForEach(account.notes) { note in
-                    Button {
-                        editingNote = note
-                        isShowingEditor = true
-                    } label: {
-                        VStack(alignment: .leading, spacing: 7) {
-                            HStack {
-                                Text(note.title).font(.caption.bold()).foregroundStyle(FieldWorkspacePalette.amber)
-                                Spacer()
-                                Text(note.date).font(.caption2).foregroundStyle(.tertiary)
+                ForEach(filteredNotes) { note in
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button {
+                            toggleNote(note)
+                        } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(FireVaultAccountSearch.highlighted(note.title, query: searchQuery))
+                                    .font(.headline.weight(.bold))
+                                    .foregroundStyle(FieldWorkspacePalette.red)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.72)
+                                    .allowsTightening(true)
+                                    .layoutPriority(1)
+                                if note.showsOnArrival {
+                                    Label("Arrival", systemImage: "bell.badge.fill")
+                                        .font(.caption2.bold())
+                                        .foregroundStyle(FieldWorkspacePalette.red)
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 3)
+                                        .background(FieldWorkspacePalette.red.opacity(0.10), in: Capsule())
+                                }
+                                Spacer(minLength: 6)
+                                Text(noteTimestamp(note))
+                                    .font(.caption.weight(.semibold).monospacedDigit())
+                                    .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                                Image(systemName: expandedNoteIDs.contains(note.id) ? "chevron.up" : "chevron.down")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(FieldWorkspacePalette.secondaryText)
                             }
-                            Text(note.text)
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        if expandedNoteIDs.contains(note.id) {
+                            Divider()
+                            Text(FireVaultAccountSearch.highlighted(note.text, query: searchQuery))
                                 .font(.body)
                                 .foregroundStyle(.primary)
                                 .fixedSize(horizontal: false, vertical: true)
+                                .padding(.top, 10)
+
+                            HStack {
+                                if !searchQuery.isEmpty {
+                                    Label("Search match", systemImage: "highlighter")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                                }
+                                Spacer()
+                                Button("Edit Note", systemImage: "pencil") {
+                                    editorRoute = .edit(note)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                            .padding(.top, 10)
+                            .padding(.bottom, 5)
                         }
-                        .padding(.vertical, 6)
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .background(
+                        FieldWorkspacePalette.surface,
+                        in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            .stroke(FieldWorkspacePalette.navigationDivider, lineWidth: 1)
+                    }
+                    .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+                    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button("Delete", systemImage: "trash", role: .destructive) {
                             store.deleteNote(accountID: account.id, noteID: note.id)
@@ -2030,34 +2549,60 @@ private struct NotesWorkspaceView: View {
         .background(FieldWorkspacePalette.background)
         .navigationTitle("Field Notes")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: searchText) { _, _ in
+            if searchQuery.isEmpty {
+                expandedNoteIDs.removeAll()
+            } else {
+                expandedNoteIDs = Set(filteredNotes.map(\.id))
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             Button("Add Note", systemImage: "square.and.pencil") {
-                editingNote = nil
-                isShowingEditor = true
+                editorRoute = .new
             }
                 .buttonStyle(.glassProminent)
                 .padding(12)
                 .glassEffect()
         }
-        .sheet(isPresented: $isShowingEditor) {
-            FireVaultNoteEditorSheet(accountName: account.name, note: editingNote) { draft in
-                if let editingNote {
+        .sheet(item: $editorRoute) { route in
+            FireVaultNoteEditorSheet(accountName: currentAccount.name, note: route.note) { draft in
+                if let editingNote = route.note {
                     return store.updateNote(
                         accountID: account.id,
                         noteID: editingNote.id,
                         title: draft.title,
-                        text: draft.text
+                        text: draft.text,
+                        showOnArrival: draft.showOnArrival
                     )
                 }
-                return store.addNote(to: account.id, title: draft.title, text: draft.text) != nil
+                return store.addNote(
+                    to: account.id,
+                    title: draft.title,
+                    text: draft.text,
+                    showOnArrival: draft.showOnArrival
+                ) != nil
             }
         }
     }
+
+    private func noteTimestamp(_ note: FireVaultWorkspaceNote) -> String {
+        FireVaultAccountTimestamp.dateOnly(legacy: note.date, timestamp: note.updatedAt)
+    }
+
+    private func toggleNote(_ note: FireVaultWorkspaceNote) {
+        if expandedNoteIDs.contains(note.id) {
+            expandedNoteIDs.remove(note.id)
+        } else {
+            expandedNoteIDs.insert(note.id)
+        }
+    }
+
 }
 
 struct FireVaultNoteDraft: Equatable {
     var title: String
     var text: String
+    var showOnArrival: Bool
 }
 
 struct FireVaultNoteEditorSheet: View {
@@ -2068,6 +2613,7 @@ struct FireVaultNoteEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var title: String
     @State private var text: String
+    @State private var showOnArrival: Bool
     @FocusState private var isTextInputFocused: Bool
 
     init(
@@ -2080,6 +2626,7 @@ struct FireVaultNoteEditorSheet: View {
         self.save = save
         _title = State(initialValue: note?.title ?? "")
         _text = State(initialValue: note?.text ?? "")
+        _showOnArrival = State(initialValue: note?.showsOnArrival ?? false)
     }
 
     private var canSave: Bool {
@@ -2091,7 +2638,7 @@ struct FireVaultNoteEditorSheet: View {
             Form {
                 Section("Account") {
                     Text(accountName)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
                 }
                 Section("Note") {
                     TextField("Title (optional)", text: $title)
@@ -2100,6 +2647,22 @@ struct FireVaultNoteEditorSheet: View {
                         .lineLimit(6...14)
                         .focused($isTextInputFocused)
                 }
+                Section {
+                    Toggle(isOn: $showOnArrival) {
+                        Label("Show on arrival", systemImage: "bell.badge")
+                    }
+                    .onChange(of: showOnArrival) { _, isEnabled in
+                        guard isEnabled else { return }
+                        Task {
+                            _ = try? await FireVaultNotificationService.shared.requestAuthorization()
+                        }
+                    }
+                    Text("When Trip Log confirms arrival, this note appears in the arrival alert and on the CarPlay Arrived screen.")
+                        .font(.caption)
+                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                } header: {
+                    Text("Arrival")
+                }
             }
             .fireVaultThemedCollection()
             .navigationTitle(note == nil ? "New Note" : "Edit Note")
@@ -2107,11 +2670,11 @@ struct FireVaultNoteEditorSheet: View {
             .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    WorkspaceEditorToolbarButton(kind: .cancel) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        if save(.init(title: title, text: text)) {
+                    WorkspaceEditorToolbarButton(kind: .save) {
+                        if save(.init(title: title, text: text, showOnArrival: showOnArrival)) {
                             dismiss()
                         }
                     }
@@ -2123,62 +2686,117 @@ struct FireVaultNoteEditorSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 }
 
 private struct FilesScansView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
+    @State private var searchText = ""
+    @State private var expandedDocumentIDs: Set<String> = []
+    @State private var showsDocumentScanner = false
+    @State private var scannerError = ""
+    @State private var showsScannerError = false
+
+    private var currentAccount: FireVaultWorkspaceAccount {
+        store.accounts.first(where: { $0.id == account.id }) ?? account
+    }
+
+    private var searchQuery: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var fileDocuments: [FireVaultWorkspaceDocument] {
+        currentAccount.documents.filter { $0.kind != "photo" && $0.kind != "video" }
+    }
+
+    private var filteredDocuments: [FireVaultWorkspaceDocument] {
+        guard !searchQuery.isEmpty else { return fileDocuments }
+        return fileDocuments.filter { document in
+            FireVaultAccountSearch.matches(
+                searchQuery,
+                values: [document.title, document.subtitle, document.kind, document.date]
+            )
+        }
+    }
 
     var body: some View {
         List {
-            if account.documents.isEmpty {
+            WorkspaceSearchField(text: $searchText, prompt: "Search files and scans")
+
+            if fileDocuments.isEmpty {
                 ContentUnavailableView(
                     "No Files or Scans",
                     systemImage: "doc.viewfinder",
                     description: Text("Scan a document or add a saved field file.")
                 )
+            } else if filteredDocuments.isEmpty {
+                ContentUnavailableView.search(text: searchQuery)
             } else {
-                ForEach(account.documents) { document in
-                    NavigationLink {
-                        if document.kind == "video",
-                           let url = store.mediaURL(accountID: account.id, documentID: document.id) {
-                            FireVaultVideoDetailView(
-                                accountID: account.id,
-                                document: document,
-                                url: url,
-                                store: store
-                            )
-                        } else {
-                            NativeRecordDetailView(
-                                title: document.title,
-                                subtitle: document.subtitle,
-                                symbol: documentSymbol(document.kind)
-                            )
-                        }
-                    } label: {
-                        HStack(spacing: 12) {
+                ForEach(filteredDocuments) { document in
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button {
+                            toggleDocument(document)
+                        } label: {
+                            HStack(spacing: 12) {
                             Image(systemName: documentSymbol(document.kind))
                                 .font(.headline)
                                 .foregroundStyle(documentTint(document.kind))
                                 .frame(width: 38, height: 38)
                                 .background(documentTint(document.kind).opacity(0.14), in: RoundedRectangle(cornerRadius: 11))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(document.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
-                                Text([document.subtitle, document.date].filter { !$0.isEmpty }.joined(separator: " • "))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                Text(FireVaultAccountSearch.highlighted(document.title, query: searchQuery))
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
                                     .lineLimit(2)
-                            }
                             Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                                Text(FireVaultAccountTimestamp.display(legacy: document.date, timestamp: document.updatedAt))
+                                    .font(.caption.weight(.semibold).monospacedDigit())
+                                    .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                                    .fixedSize(horizontal: true, vertical: false)
+                                Image(systemName: expandedDocumentIDs.contains(document.id) ? "chevron.up" : "chevron.down")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                            }
+                            .padding(.vertical, 7)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.vertical, 4)
+                        .buttonStyle(.plain)
+
+                        if expandedDocumentIDs.contains(document.id) {
+                            Divider().padding(.leading, 50)
+                            Text(FireVaultAccountSearch.highlighted(document.subtitle, query: searchQuery))
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                                .padding(.top, 10)
+
+                            HStack {
+                                if !searchQuery.isEmpty {
+                                    Label("Search match", systemImage: "highlighter")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                                }
+                                Spacer()
+                                NavigationLink {
+                                    documentDestination(document)
+                                } label: {
+                                    Label(document.kind == "video" ? "Open Video" : "Open File", systemImage: "arrow.up.right.square")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                            .padding(.top, 10)
+                            .padding(.bottom, 5)
+                        }
                     }
-                    .buttonStyle(.plain)
                     .contextMenu {
                         Button("Delete File", systemImage: "trash", role: .destructive) {
+                            store.deleteDocument(accountID: account.id, documentID: document.id)
+                        }
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button("Delete", systemImage: "trash", role: .destructive) {
                             store.deleteDocument(accountID: account.id, documentID: document.id)
                         }
                     }
@@ -2189,24 +2807,353 @@ private struct FilesScansView: View {
         .background(FieldWorkspacePalette.background)
         .navigationTitle("Files & Scans")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: searchText) { _, _ in
+            expandedDocumentIDs = searchQuery.isEmpty
+                ? []
+                : Set(filteredDocuments.map(\.id))
+        }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 10) {
                 Button("Add File", systemImage: "plus") { store.addDocument(to: account.id, scan: false) }
                     .buttonStyle(.glass)
-                Button("Scan Document", systemImage: "doc.viewfinder") { store.addDocument(to: account.id, scan: true) }
+                Button("Scan Document", systemImage: "doc.viewfinder") { beginDocumentScan() }
                     .buttonStyle(.glassProminent)
             }
             .padding(12)
             .glassEffect()
         }
+        .fullScreenCover(isPresented: $showsDocumentScanner) {
+            NativeDocumentScannerView(
+                onScan: saveScannedPages,
+                onCancel: { showsDocumentScanner = false },
+                onFailure: showScannerFailure
+            )
+            .ignoresSafeArea()
+        }
+        .alert("Scanner Unavailable", isPresented: $showsScannerError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(scannerError)
+        }
+    }
+
+    private func beginDocumentScan() {
+        guard VNDocumentCameraViewController.isSupported else {
+            showScannerFailure("Document scanning is not available on this device.")
+            return
+        }
+        showsDocumentScanner = true
+    }
+
+    private func saveScannedPages(_ pages: [UIImage]) {
+        do {
+            try store.attachScannedDocument(pages, to: account.id)
+            showsDocumentScanner = false
+        } catch {
+            showsDocumentScanner = false
+            showScannerFailure(error.localizedDescription)
+        }
+    }
+
+    private func showScannerFailure(_ message: String) {
+        showsDocumentScanner = false
+        scannerError = message
+        showsScannerError = true
     }
 
     private func documentSymbol(_ kind: String) -> String {
-        switch kind { case "scan": return "doc.viewfinder"; case "photo": return "photo"; case "video": return "video.fill"; default: return "doc" }
+        switch kind { case "scan": return "doc.viewfinder"; case "report": return "doc.richtext.fill"; case "photo": return "photo"; case "video": return "video.fill"; default: return "doc" }
     }
 
     private func documentTint(_ kind: String) -> Color {
-        switch kind { case "scan": return FieldWorkspacePalette.blue; case "photo", "video": return FieldWorkspacePalette.purple; default: return FieldWorkspacePalette.green }
+        switch kind { case "scan": return FieldWorkspacePalette.blue; case "report": return FieldWorkspacePalette.red; case "photo", "video": return FieldWorkspacePalette.purple; default: return FieldWorkspacePalette.green }
+    }
+
+    private func toggleDocument(_ document: FireVaultWorkspaceDocument) {
+        if expandedDocumentIDs.contains(document.id) {
+            expandedDocumentIDs.remove(document.id)
+        } else {
+            expandedDocumentIDs.insert(document.id)
+        }
+    }
+
+    @ViewBuilder
+    private func documentDestination(_ document: FireVaultWorkspaceDocument) -> some View {
+        if let url = store.mediaURL(accountID: account.id, documentID: document.id),
+           url.pathExtension.localizedCaseInsensitiveCompare("pdf") == .orderedSame {
+            FireVaultStoredPDFDetailView(document: document, url: url)
+        } else if document.kind == "video",
+                  let url = store.mediaURL(accountID: account.id, documentID: document.id) {
+            FireVaultVideoDetailView(
+                accountID: account.id,
+                document: document,
+                url: url,
+                store: store
+            )
+        } else {
+            NativeRecordDetailView(
+                title: document.title,
+                subtitle: document.subtitle,
+                symbol: documentSymbol(document.kind)
+            )
+        }
+    }
+}
+
+private struct PhotoVideoLibraryView: View {
+    let account: FireVaultWorkspaceAccount
+    @ObservedObject var store: FireVaultStore
+    @ObservedObject var settings: FireVaultNativeSettingsStore
+    @State private var searchText = ""
+    @State private var isSelectingPhotos = false
+    @State private var selectedPhotoIDs: Set<String> = []
+    @State private var showsReportBuilder = false
+
+    private var currentAccount: FireVaultWorkspaceAccount {
+        store.accounts.first(where: { $0.id == account.id }) ?? account
+    }
+
+    private var searchQuery: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var mediaDocuments: [FireVaultWorkspaceDocument] {
+        let media = currentAccount.documents.filter { $0.kind == "photo" || $0.kind == "video" }
+        guard !searchQuery.isEmpty else { return media }
+        return media.filter { document in
+            FireVaultAccountSearch.matches(
+                searchQuery,
+                values: [document.title, document.subtitle, document.kind, document.date]
+            )
+        }
+    }
+
+    var body: some View {
+        List {
+            WorkspaceSearchField(text: $searchText, prompt: "Search photos and videos")
+
+            if currentAccount.documents.allSatisfy({ $0.kind != "photo" && $0.kind != "video" }) {
+                ContentUnavailableView(
+                    "No Photos or Videos",
+                    systemImage: "photo.on.rectangle.angled",
+                    description: Text("Captured account photos and videos will appear here.")
+                )
+            } else if mediaDocuments.isEmpty {
+                ContentUnavailableView.search(text: searchQuery)
+            } else {
+                ForEach(mediaDocuments) { document in
+                    if isSelectingPhotos {
+                        Button {
+                            guard document.kind == "photo" else { return }
+                            togglePhoto(document.id)
+                        } label: {
+                            HStack(spacing: 12) {
+                                mediaRow(document)
+                                Image(systemName: selectedPhotoIDs.contains(document.id) ? "checkmark.circle.fill" : "circle")
+                                    .font(.title3)
+                                    .foregroundStyle(
+                                        document.kind == "photo"
+                                            ? (selectedPhotoIDs.contains(document.id) ? FieldWorkspacePalette.red : FieldWorkspacePalette.secondaryText)
+                                            : Color.clear
+                                    )
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(document.kind != "photo")
+                        .opacity(document.kind == "photo" ? 1 : 0.48)
+                    } else {
+                        NavigationLink {
+                            mediaDestination(document)
+                        } label: {
+                            mediaRow(document)
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button("Delete", systemImage: "trash", role: .destructive) {
+                                store.deleteDocument(accountID: account.id, documentID: document.id)
+                            }
+                        }
+                        .contextMenu {
+                            Button("Delete", systemImage: "trash", role: .destructive) {
+                                store.deleteDocument(accountID: account.id, documentID: document.id)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(FieldWorkspacePalette.background)
+        .navigationTitle("Photos & Videos")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if mediaDocuments.contains(where: { $0.kind == "photo" }) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(isSelectingPhotos ? "Done" : "Select Photos") {
+                        withAnimation {
+                            isSelectingPhotos.toggle()
+                            if !isSelectingPhotos { selectedPhotoIDs.removeAll() }
+                        }
+                    }
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if isSelectingPhotos, !selectedPhotoIDs.isEmpty {
+                Button {
+                    showsReportBuilder = true
+                } label: {
+                    Label(
+                        "Generate Report from \(selectedPhotoIDs.count) Photo\(selectedPhotoIDs.count == 1 ? "" : "s")",
+                        systemImage: "doc.badge.plus"
+                    )
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(FieldWorkspacePalette.red)
+                .padding(12)
+                .background(.regularMaterial)
+            }
+        }
+        .navigationDestination(isPresented: $showsReportBuilder) {
+            FireVaultAccountReportBuilderView(
+                account: account,
+                store: store,
+                settings: settings,
+                preselectedPhotoIDs: selectedPhotoIDs
+            )
+        }
+    }
+
+    private func togglePhoto(_ documentID: String) {
+        if selectedPhotoIDs.contains(documentID) {
+            selectedPhotoIDs.remove(documentID)
+        } else {
+            selectedPhotoIDs.insert(documentID)
+        }
+    }
+
+    private func mediaRow(_ document: FireVaultWorkspaceDocument) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: document.kind == "video" ? "video.fill" : "photo.fill")
+                .font(.headline)
+                .foregroundStyle(FieldWorkspacePalette.purple)
+                .frame(width: 42, height: 42)
+                .background(
+                    FieldWorkspacePalette.purple.opacity(0.14),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(document.title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                Text(document.subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(FireVaultAccountTimestamp.display(legacy: document.date, timestamp: document.updatedAt))
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private func mediaDestination(_ document: FireVaultWorkspaceDocument) -> some View {
+        if let url = store.mediaURL(accountID: account.id, documentID: document.id) {
+            if document.kind == "video" {
+                FireVaultVideoDetailView(
+                    accountID: account.id,
+                    document: document,
+                    url: url,
+                    store: store
+                )
+            } else if let image = UIImage(contentsOfFile: url.path) {
+                FireVaultPhotoDetailView(
+                    accountID: account.id,
+                    document: document,
+                    url: url,
+                    image: image,
+                    store: store
+                )
+            } else {
+                NativeRecordDetailView(
+                    title: "Photo Unavailable",
+                    subtitle: "The saved photo file could not be opened.",
+                    symbol: "photo.badge.exclamationmark"
+                )
+            }
+        } else {
+            NativeRecordDetailView(
+                title: "Media Unavailable",
+                subtitle: "The saved media file could not be found.",
+                symbol: "exclamationmark.triangle"
+            )
+        }
+    }
+}
+
+private struct FireVaultPhotoDetailView: View {
+    let accountID: String
+    let document: FireVaultWorkspaceDocument
+    let url: URL
+    let image: UIImage
+    @ObservedObject var store: FireVaultStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirmsDeletion = false
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .nativeSurfaceCard(cornerRadius: 18)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(document.title).font(.headline)
+                    Text([
+                        document.subtitle,
+                        FireVaultAccountTimestamp.display(legacy: document.date, timestamp: document.updatedAt)
+                    ].filter { !$0.isEmpty }.joined(separator: " • "))
+                        .font(.subheadline)
+                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 12) {
+                    ShareLink(item: url) {
+                        Label("Share Photo", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Delete", systemImage: "trash", role: .destructive) {
+                        confirmsDeletion = true
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(16)
+        }
+        .background(FieldWorkspacePalette.background)
+        .navigationTitle("Field Photo")
+        .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog("Delete this field photo?", isPresented: $confirmsDeletion) {
+            Button("Delete Photo", role: .destructive) {
+                if store.deleteDocument(accountID: accountID, documentID: document.id) {
+                    dismiss()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 }
 
@@ -2220,15 +3167,17 @@ private struct FireVaultVideoDetailView: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            VideoPlayer(player: AVPlayer(url: url))
-                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            FireVaultAspectCorrectVideoPlayer(url: url)
                 .nativeSurfaceCard(cornerRadius: 18)
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(document.title).font(.headline)
-                Text([document.subtitle, document.date].filter { !$0.isEmpty }.joined(separator: " • "))
+                Text([
+                    document.subtitle,
+                    FireVaultAccountTimestamp.display(legacy: document.date, timestamp: document.updatedAt)
+                ].filter { !$0.isEmpty }.joined(separator: " • "))
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(FieldWorkspacePalette.secondaryText)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -2345,40 +3294,91 @@ private struct EquipmentWorkspaceView: View {
     @State private var isShowingEditor = false
     @State private var isImportingCSV = false
     @State private var importNotice: FireVaultEquipmentImportNotice?
+    @State private var searchText = ""
+    @State private var expandedEquipmentIDs: Set<String> = []
+
+    private var searchQuery: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var filteredEquipment: [FireVaultWorkspaceEquipment] {
+        guard !searchQuery.isEmpty else { return account.equipment }
+        return account.equipment.filter { equipment in
+            FireVaultAccountSearch.matches(
+                searchQuery,
+                values: [equipment.title, equipment.subtitle, equipment.deviceAddress]
+            )
+        }
+    }
 
     var body: some View {
         List {
+            WorkspaceSearchField(text: $searchText, prompt: "Search equipment")
+
             if account.equipment.isEmpty {
                 ContentUnavailableView(
                     "No Equipment Saved",
                     systemImage: "wrench.and.screwdriver",
                     description: Text("Add the panel, communicator, power supplies, and other serviceable equipment.")
                 )
+            } else if filteredEquipment.isEmpty {
+                ContentUnavailableView.search(text: searchQuery)
             } else {
-                ForEach(account.equipment) { equipment in
-                    Button {
-                        editingEquipment = equipment
-                        isShowingEditor = true
-                    } label: {
-                        HStack(spacing: 12) {
+                ForEach(filteredEquipment) { equipment in
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button {
+                            toggleEquipment(equipment)
+                        } label: {
+                            HStack(spacing: 12) {
                             Image(systemName: "wrench.and.screwdriver.fill")
                                 .foregroundStyle(FieldWorkspacePalette.green)
                                 .frame(width: 38, height: 38)
                                 .background(FieldWorkspacePalette.green.opacity(0.14), in: RoundedRectangle(cornerRadius: 11))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(equipment.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
-                                Text(equipment.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                            }
+                                Text(FireVaultAccountSearch.highlighted(equipment.title, query: searchQuery))
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(2)
                             Spacer()
                             if !equipment.deviceAddress.isEmpty {
-                                Text(equipment.deviceAddress)
+                                    Text(FireVaultAccountSearch.highlighted(equipment.deviceAddress, query: searchQuery))
                                     .font(.caption2.monospaced().bold())
                                     .foregroundStyle(FieldWorkspacePalette.green)
                             }
+                                Image(systemName: expandedEquipmentIDs.contains(equipment.id) ? "chevron.up" : "chevron.down")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                            }
+                            .padding(.vertical, 7)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.vertical, 4)
+                        .buttonStyle(.plain)
+
+                        if expandedEquipmentIDs.contains(equipment.id) {
+                            Divider().padding(.leading, 50)
+                            if !equipment.subtitle.isEmpty {
+                                Text(FireVaultAccountSearch.highlighted(equipment.subtitle, query: searchQuery))
+                                    .font(.body)
+                                    .foregroundStyle(.primary)
+                                    .padding(.top, 10)
+                            }
+                            HStack {
+                                if !searchQuery.isEmpty {
+                                    Label("Search match", systemImage: "highlighter")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                                }
+                                Spacer()
+                                Button("Edit Equipment", systemImage: "pencil") {
+                                    editingEquipment = equipment
+                                    isShowingEditor = true
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                            .padding(.top, 10)
+                            .padding(.bottom, 5)
+                        }
                     }
-                    .buttonStyle(.plain)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button("Delete", systemImage: "trash", role: .destructive) {
                             store.deleteEquipment(accountID: account.id, equipmentID: equipment.id)
@@ -2391,6 +3391,11 @@ private struct EquipmentWorkspaceView: View {
         .background(FieldWorkspacePalette.background)
         .navigationTitle("Equipment")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: searchText) { _, _ in
+            expandedEquipmentIDs = searchQuery.isEmpty
+                ? []
+                : Set(filteredEquipment.map(\.id))
+        }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 10) {
                 Button("Import CSV", systemImage: "square.and.arrow.down") {
@@ -2450,6 +3455,14 @@ private struct EquipmentWorkspaceView: View {
                 message: Text(notice.message),
                 dismissButton: .default(Text("OK"))
             )
+        }
+    }
+
+    private func toggleEquipment(_ equipment: FireVaultWorkspaceEquipment) {
+        if expandedEquipmentIDs.contains(equipment.id) {
+            expandedEquipmentIDs.remove(equipment.id)
+        } else {
+            expandedEquipmentIDs.insert(equipment.id)
         }
     }
 
@@ -2638,10 +3651,10 @@ struct FireVaultEquipmentEditorSheet: View {
             .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    WorkspaceEditorToolbarButton(kind: .cancel) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    WorkspaceEditorToolbarButton(kind: .save) {
                         if save(.init(
                             title: title,
                             subtitle: subtitle,
@@ -2774,6 +3787,14 @@ private struct FireVaultFullScreenPinEditor: View {
 
         var id: String { rawValue }
 
+        init(storageValue: String) {
+            switch storageValue {
+            case "satellite": self = .imagery
+            case "hybrid": self = .hybrid
+            default: self = .standard
+            }
+        }
+
         var symbol: String {
             switch self {
             case .standard: "map"
@@ -2793,7 +3814,7 @@ private struct FireVaultFullScreenPinEditor: View {
     @State private var mapSpan: CLLocationDegrees = 0.0005
     @State private var mapPosition: MapCameraPosition
     @State private var mapLayer: MapLayer = .standard
-    @State private var is3DEnabled = false
+    @State private var is3DEnabled = true
     @GestureState private var pinDragTranslation: CGSize = .zero
 
     init(
@@ -2802,6 +3823,8 @@ private struct FireVaultFullScreenPinEditor: View {
         pinTint: Color,
         initialCoordinate: CLLocationCoordinate2D?,
         fallbackCoordinate: CLLocationCoordinate2D?,
+        initialMapLayer: String = "standard",
+        initialMapIs3D: Bool = true,
         save: @escaping (CLLocationCoordinate2D) -> Void
     ) {
         let start = initialCoordinate
@@ -2812,9 +3835,13 @@ private struct FireVaultFullScreenPinEditor: View {
         self.pinTint = pinTint
         self.save = save
         _coordinate = State(initialValue: start)
-        _mapPosition = State(initialValue: .region(.init(
-            center: start,
-            span: .init(latitudeDelta: 0.0005, longitudeDelta: 0.0005)
+        _mapLayer = State(initialValue: MapLayer(storageValue: initialMapLayer))
+        _is3DEnabled = State(initialValue: initialMapIs3D)
+        _mapPosition = State(initialValue: .camera(MapCamera(
+            centerCoordinate: start,
+            distance: FireVaultAccountPinMapCamera.distance,
+            heading: FireVaultAccountPinMapCamera.heading,
+            pitch: initialMapIs3D ? FireVaultAccountPinMapCamera.pitch : 0
         )))
     }
 
@@ -2879,7 +3906,10 @@ private struct FireVaultFullScreenPinEditor: View {
                                     )
                                 }
                             } label: {
-                                Label(mapLayer.rawValue, systemImage: "square.3.layers.3d.top.filled")
+                                Label(
+                                    "\(mapLayer.rawValue) \(is3DEnabled ? "3D" : "2D")",
+                                    systemImage: "square.3.layers.3d.top.filled"
+                                )
                             }
                             .buttonStyle(.borderedProminent)
 
@@ -2985,6 +4015,10 @@ private struct FireVaultFullScreenPinEditor: View {
     }
 
     private func recenterMap() {
+        if is3DEnabled {
+            updatePerspective()
+            return
+        }
         mapPosition = .region(.init(
             center: coordinate,
             span: .init(latitudeDelta: mapSpan, longitudeDelta: mapSpan)
@@ -3014,6 +4048,38 @@ private struct NativeRecordDetailView: View {
     }
 }
 
+private struct WorkspaceSearchField: View {
+    @Binding var text: String
+    let prompt: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(FieldWorkspacePalette.secondaryText)
+            TextField(prompt, text: $text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 44)
+        .background(FieldWorkspacePalette.surface, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(FieldWorkspacePalette.navigationDivider, lineWidth: 1)
+        }
+    }
+}
+
 private struct WorkspaceCard<Content: View>: View {
     let content: Content
 
@@ -3024,12 +4090,12 @@ private struct WorkspaceCard<Content: View>: View {
     var body: some View {
         content
             .background(FieldWorkspacePalette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(.white.opacity(0.075), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(FieldWorkspacePalette.navigationDivider, lineWidth: 1)
             }
-            .shadow(color: .black.opacity(0.20), radius: 9, y: 5)
+            .shadow(color: NativeShellPalette.cardShadow, radius: 8, y: 4)
     }
 }
 
@@ -3039,9 +4105,11 @@ private struct WorkspaceSectionTitle: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title).font(.caption.bold()).tracking(1.15).foregroundStyle(.secondary)
+            Text(title).font(.title3.weight(.bold)).foregroundStyle(.primary)
             Spacer()
-            Text(subtitle).font(.caption2).foregroundStyle(.tertiary)
+            Text(subtitle)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(FieldWorkspacePalette.secondaryText)
         }
     }
 }
@@ -3053,32 +4121,43 @@ private struct WorkspaceDestinationTile: View {
     let color: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Image(systemName: symbol)
-                    .font(.subheadline.bold())
-                    .foregroundStyle(color)
-                    .frame(width: 32, height: 32)
-                    .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
-                Spacer()
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 40, height: 44)
+                .background(color.opacity(0.11), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+                    .allowsTightening(true)
                 Text("\(count)")
-                    .font(.subheadline.bold().monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .font(.title2.weight(.bold).monospacedDigit())
+                    .foregroundStyle(.primary)
             }
-            HStack {
-                Text(title).font(.subheadline.bold()).foregroundStyle(.primary).lineLimit(1).minimumScaleFactor(0.78)
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary)
-            }
+
+            Spacer(minLength: 0)
         }
-        .padding(12)
+        .padding(.leading, 10)
+        .padding(.trailing, 23)
+        .padding(.vertical, 11)
         .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
-        .background(FieldWorkspacePalette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(FieldWorkspacePalette.surface, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 17, style: .continuous)
                 .stroke(color.opacity(0.16), lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+        .overlay(alignment: .trailing) {
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+                .padding(.trailing, 9)
+        }
+        .shadow(color: NativeShellPalette.cardShadow, radius: 6, y: 3)
     }
 }
 
@@ -3086,21 +4165,31 @@ private struct WorkspaceRecentRow: View {
     let item: FireVaultWorkspaceRecent
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 9) {
             Image(systemName: recentSymbol(item.kind))
-                .font(.subheadline.bold())
+                .font(.caption.bold())
                 .foregroundStyle(recentColor(item.kind))
-                .frame(width: 34, height: 34)
+                .frame(width: 28, height: 28)
                 .background(recentColor(item.kind).opacity(0.13), in: Circle())
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
-                Text(item.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(item.subtitle)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                    .lineLimit(1)
             }
-            Spacer()
-            Text(item.date).font(.caption2).foregroundStyle(.tertiary)
+            Spacer(minLength: 6)
+            Text(FireVaultAccountTimestamp.display(legacy: item.date, timestamp: item.updatedAt))
+                .font(.caption2.weight(.semibold).monospacedDigit())
+                .foregroundStyle(FieldWorkspacePalette.secondaryText)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 7)
     }
 
     private func recentSymbol(_ kind: String) -> String {
@@ -3121,24 +4210,17 @@ private struct WorkspaceQuickAction: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
+            VStack(spacing: 5) {
                 Image(systemName: symbol)
-                    .font(.system(size: 17, weight: .bold))
-                    .frame(width: 32, height: 32)
-                    .background(tint.opacity(0.14), in: Circle())
-                Text(title).font(.caption2.bold()).lineLimit(1)
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(height: 24)
+                Text(title)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
             }
             .foregroundStyle(tint)
             .frame(maxWidth: .infinity)
-            .frame(height: 64)
-            .background(
-                FieldWorkspacePalette.surfaceRaised.opacity(0.48),
-                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(tint.opacity(0.16), lineWidth: 1)
-            }
+            .frame(height: 54)
         }
         .buttonStyle(.plain)
         .disabled(disabled)
@@ -3174,6 +4256,52 @@ private struct WorkspaceNavButton: View {
     }
 }
 
+private struct WorkspaceEditorToolbarButton: View {
+    enum Kind {
+        case cancel
+        case save
+
+        var title: String { self == .save ? "Save" : "Cancel" }
+        var symbol: String { self == .save ? "checkmark" : "xmark" }
+    }
+
+    let kind: Kind
+    let action: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Button(action: action) {
+            Label(kind.title, systemImage: kind.symbol)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(kind == .save ? Color.white : Color.primary)
+                .padding(.horizontal, 12)
+                .frame(height: 34)
+                .background(buttonBackground, in: Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(buttonBorder, lineWidth: 1)
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .opacity(isEnabled ? 1 : 0.42)
+        .accessibilityLabel(kind.title)
+    }
+
+    private var buttonBackground: Color {
+        kind == .save
+            ? FieldWorkspacePalette.red
+            : FieldWorkspacePalette.surfaceRaised
+    }
+
+    private var buttonBorder: Color {
+        kind == .save
+            ? FieldWorkspacePalette.red.opacity(0.7)
+            : FieldWorkspacePalette.navigationDivider
+    }
+}
+
 private extension View {
     func workspacePill(color: Color) -> some View {
         self
@@ -3201,6 +4329,7 @@ private enum FieldWorkspacePalette {
     static let navigationBackground = NativeShellPalette.navigationBackground
     static let navigationInactive = NativeShellPalette.navigationInactive
     static let navigationDivider = NativeShellPalette.navigationDivider
+    static let secondaryText = NativeShellPalette.navigationInactive
 }
 
 private struct FieldWorkspaceView_Previews: PreviewProvider {

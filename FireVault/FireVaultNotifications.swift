@@ -89,14 +89,33 @@ final class FireVaultNotificationService {
 
     func accountArrivalDetected(
         stop: FireVaultBreadcrumbStop,
-        preferences: FireVaultNotificationPreferences
+        preferences: FireVaultNotificationPreferences,
+        arrivalNotes: [FireVaultWorkspaceNote] = [],
+        parkingLocation: FireVaultWorkspaceLocation? = nil
     ) {
-        guard preferences.isEnabled, preferences.arrivalAlerts ?? false else { return }
+        let visibleArrivalNotes = arrivalNotes.filter(\.showsOnArrival)
+        guard preferences.isEnabled,
+              (preferences.arrivalAlerts ?? false) || !visibleArrivalNotes.isEmpty else { return }
         let content = UNMutableNotificationContent()
-        content.title = "Account arrival confirmed"
-        content.body = preferences.hidesSensitiveDetails
-            ? "Trip Log confirmed an on-site account stop."
-            : "Trip Log confirmed your arrival at \(stop.accountName ?? "an account")."
+        if visibleArrivalNotes.isEmpty, parkingLocation == nil {
+            content.title = "Account arrival confirmed"
+            content.body = preferences.hidesSensitiveDetails
+                ? "Trip Log confirmed an on-site account stop."
+                : "Trip Log confirmed your arrival at \(stop.accountName ?? "an account")."
+        } else {
+            content.title = visibleArrivalNotes.isEmpty ? "Parking location" : "Arrival instructions"
+            if preferences.hidesSensitiveDetails {
+                content.body = "Open FireVault to view the arrival instructions for this account."
+            } else {
+                var instructions: [String] = []
+                if let parkingLocation {
+                    let label = parkingLocation.label.trimmingCharacters(in: .whitespacesAndNewlines)
+                    instructions.append("Parking: \(label.isEmpty ? "Saved parking location" : label)")
+                }
+                instructions.append(contentsOf: visibleArrivalNotes.prefix(3).map(\.text))
+                content.body = instructions.joined(separator: " • ")
+            }
+        }
         content.sound = .default
         content.categoryIdentifier = Category.handsetOnly
         center.add(.init(
@@ -130,6 +149,7 @@ final class FireVaultNotificationService {
         center.removeDeliveredNotifications(withIdentifiers: identifiers)
     }
 
+#if DEBUG
     func sendDeveloperTest(title: String, body: String, delay: TimeInterval, sound: Bool) async throws -> String {
         let identifier = "firevault.developer.test.\(UUID().uuidString)"
         let content = UNMutableNotificationContent()
@@ -159,6 +179,7 @@ final class FireVaultNotificationService {
             center.removePendingNotificationRequests(withIdentifiers: identifiers)
         }
     }
+#endif
 
     func clearDeliveredNotifications() {
         center.removeAllDeliveredNotifications()

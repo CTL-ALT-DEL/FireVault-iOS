@@ -408,23 +408,58 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
         )
         accountItem.isEnabled = false
 
+        var sections = [
+            CPListSection(items: [accountItem], header: "Arrived", sectionIndexTitle: nil)
+        ]
+
         let locations = Array(arrivalPoints(in: account).prefix(6))
-        guard !locations.isEmpty else {
-            return [
-                CPListSection(items: [accountItem], header: "Arrived", sectionIndexTitle: nil),
-                CPListSection(items: [emptyAccountItem(
-                    title: "No drop-pin locations",
-                    detail: "No saved parking, entrance, panel, or riser pins."
-                )], header: "Drop-pin locations", sectionIndexTitle: nil)
-            ]
+        let parkingLocations = locations.filter { arrivalPriority(for: $0) == 0 }
+        let otherLocations = locations.filter { arrivalPriority(for: $0) != 0 }
+
+        if !parkingLocations.isEmpty {
+            sections.append(CPListSection(
+                items: parkingLocations.map { dropPinItem($0, account: account) },
+                header: "Parking • Start here",
+                sectionIndexTitle: nil
+            ))
         }
 
-        let pinItems = locations.map { dropPinItem($0, account: account) }
+        let arrivalNoteItems = account.notes
+            .filter(\.showsOnArrival)
+            .prefix(3)
+            .map { note in
+                let item = CPListItem(
+                    text: note.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Arrival note" : note.title,
+                    detailText: note.text,
+                    image: carPlayIcon("bell.badge.fill", color: .systemOrange)
+                )
+                item.isEnabled = false
+                return item
+            }
+        if !arrivalNoteItems.isEmpty {
+            sections.append(CPListSection(
+                items: Array(arrivalNoteItems),
+                header: "Arrival notes",
+                sectionIndexTitle: nil
+            ))
+        }
 
-        return [
-            CPListSection(items: [accountItem], header: "Arrived", sectionIndexTitle: nil),
-            CPListSection(items: pinItems, header: "Drop-pin locations", sectionIndexTitle: nil)
-        ]
+        guard !locations.isEmpty else {
+            sections.append(CPListSection(items: [emptyAccountItem(
+                    title: "No drop-pin locations",
+                    detail: "No saved parking, entrance, panel, or riser pins."
+                )], header: "Drop-pin locations", sectionIndexTitle: nil))
+            return sections
+        }
+
+        if !otherLocations.isEmpty {
+            sections.append(CPListSection(
+                items: otherLocations.map { dropPinItem($0, account: account) },
+                header: "Other site locations",
+                sectionIndexTitle: nil
+            ))
+        }
+        return sections
     }
 
     private func makeAccountItem(
@@ -574,16 +609,17 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
         let label = location.label.trimmingCharacters(in: .whitespacesAndNewlines)
         let item = CPListItem(
             text: label.isEmpty ? displayLocationType(location.type) : label,
-            detailText: "\(displayLocationType(location.type)) • Directions",
+            detailText: "\(displayLocationType(location.type)) • \(location.resolvedDirectionsMode == .driving ? "Drive" : "Walk") directions",
             image: carPlayIcon(arrivalSymbol(for: location), color: arrivalColor(for: location)),
             accessoryImage: nil,
             accessoryType: .disclosureIndicator
         )
         item.handler = { [weak self] _, completion in
             if let coordinate = location.coordinate {
-                self?.openDrivingDirections(
+                self?.openDirections(
                     to: coordinate,
-                    name: "\(account.name) • \(label.isEmpty ? location.type : label)"
+                    name: "\(account.name) • \(label.isEmpty ? location.type : label)",
+                    mode: location.resolvedDirectionsMode
                 )
             }
             completion()
@@ -672,10 +708,18 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
     }
 
     private func openDrivingDirections(to coordinate: CLLocationCoordinate2D, name: String) {
+        openDirections(to: coordinate, name: name, mode: .driving)
+    }
+
+    private func openDirections(
+        to coordinate: CLLocationCoordinate2D,
+        name: String,
+        mode: FireVaultDirectionsMode
+    ) {
         var components = URLComponents(string: "https://maps.apple.com/")
         components?.queryItems = [
             URLQueryItem(name: "daddr", value: "\(coordinate.latitude),\(coordinate.longitude)"),
-            URLQueryItem(name: "dirflg", value: "d"),
+            URLQueryItem(name: "dirflg", value: mode == .driving ? "d" : "w"),
             URLQueryItem(name: "q", value: name)
         ]
         guard let url = components?.url else { return }

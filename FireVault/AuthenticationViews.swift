@@ -169,31 +169,50 @@ struct FireVaultAuthGate: View {
 
     var body: some View {
         Group {
-            switch authentication.phase {
-            case .loading:
-                ZStack {
-                    NativeShellPalette.background.ignoresSafeArea()
-                    ProgressView("Checking your session…")
-                        .tint(NativeShellPalette.red)
-                        .foregroundStyle(.secondary)
-                }
-                .preferredColorScheme(.dark)
-            case .signedOut:
-                FireVaultAuthenticationView()
-                    .preferredColorScheme(.dark)
-            case .signedIn:
+            if bypassesAuthenticationForUITesting {
                 ContentView()
+            } else {
+                authenticatedContent
             }
         }
         .environmentObject(authentication)
         .onAppear {
-            authentication.start()
+            if !bypassesAuthenticationForUITesting {
+                authentication.start()
+            }
         }
         .onOpenURL { url in
             if !FireVaultWidgetDeepLinkCenter.shared.receive(url) {
                 SupabaseManager.client.auth.handle(url)
             }
         }
+    }
+
+    @ViewBuilder
+    private var authenticatedContent: some View {
+        switch authentication.phase {
+        case .loading:
+            ZStack {
+                NativeShellPalette.background.ignoresSafeArea()
+                ProgressView("Checking your session…")
+                    .tint(NativeShellPalette.red)
+                    .foregroundStyle(.secondary)
+            }
+            .preferredColorScheme(.dark)
+        case .signedOut:
+            FireVaultAuthenticationView()
+                .preferredColorScheme(.dark)
+        case .signedIn:
+            ContentView()
+        }
+    }
+
+    private var bypassesAuthenticationForUITesting: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-FireVaultUITesting")
+#else
+        false
+#endif
     }
 }
 

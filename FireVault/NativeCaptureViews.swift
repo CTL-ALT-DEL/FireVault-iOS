@@ -8,6 +8,7 @@
 import SwiftUI
 import UIKit
 import AVFoundation
+import AVKit
 import VisionKit
 import CoreImage.CIFilterBuiltins
 import CoreLocation
@@ -1351,6 +1352,43 @@ struct NativeCameraCaptureView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: FireVaultCameraViewController, context: Context) {}
 }
 
+public enum FireVaultVideoDisplayGeometry {
+    public static func displaySize(
+        naturalSize: CGSize,
+        preferredTransform: CGAffineTransform
+    ) -> CGSize {
+        let transformed = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
+        return CGSize(width: abs(transformed.width), height: abs(transformed.height))
+    }
+
+    public static func aspectRatio(for url: URL) async -> CGFloat? {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let naturalSize = try? await track.load(.naturalSize),
+              let preferredTransform = try? await track.load(.preferredTransform) else { return nil }
+        let size = displaySize(naturalSize: naturalSize, preferredTransform: preferredTransform)
+        guard size.width > 0, size.height > 0 else { return nil }
+        return size.width / size.height
+    }
+}
+
+struct FireVaultAspectCorrectVideoPlayer: View {
+    let url: URL
+    var maximumHeight: CGFloat? = nil
+    @State private var displayAspectRatio: CGFloat = 16.0 / 9.0
+
+    var body: some View {
+        VideoPlayer(player: AVPlayer(url: url))
+            .aspectRatio(displayAspectRatio, contentMode: .fit)
+            .frame(maxHeight: maximumHeight)
+            .task(id: url) {
+                if let resolved = await FireVaultVideoDisplayGeometry.aspectRatio(for: url) {
+                    displayAspectRatio = resolved
+                }
+            }
+    }
+}
+
 private struct FireVaultCameraLiveOverlay: View {
     let preferences: FireVaultOverlayPreferences
     let technicianName: String
@@ -1391,7 +1429,12 @@ final class FireVaultCameraViewController: UIViewController,
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
     private let sessionQueue = DispatchQueue(label: "us.bannerman.firevault.camera")
+    private let topControls = UIView()
+    private let portraitPreviewArea = UILayoutGuide()
+    private let landscapePreviewArea = UILayoutGuide()
     private let photoCanvas = UIView()
+    private let bottomControls = UIView()
+    private let landscapeControls = UIView()
     private let previewLayer: AVCaptureVideoPreviewLayer
     private let onCapture: (UIImage) -> Void
     private let onVideoCapture: (URL) -> Void
@@ -1403,11 +1446,15 @@ final class FireVaultCameraViewController: UIViewController,
     private var activeCamera: AVCaptureDevice?
     private var availableLenses: [(title: String, device: AVCaptureDevice)] = []
     private var flashMode: AVCaptureDevice.FlashMode = .auto
+    private var videoTorchEnabled = false
     private var beginningZoomFactor: CGFloat = 1
+    private var usesLandscapeLayout: Bool?
+    private var portraitConstraints: [NSLayoutConstraint] = []
+    private var landscapeConstraints: [NSLayoutConstraint] = []
+    private let cancelButton = UIButton(type: .system)
     private let flashButton = UIButton(type: .system)
     private let zoomSlider = UISlider()
     private let lensControl = UISegmentedControl()
-    private let captureModeControl = UISegmentedControl(items: ["PHOTO", "VIDEO"])
     private let shutter = UIButton(type: .system)
 
     init(
@@ -1449,64 +1496,53 @@ final class FireVaultCameraViewController: UIViewController,
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
+        view.addLayoutGuide(portraitPreviewArea)
+        view.addLayoutGuide(landscapePreviewArea)
+
+        topControls.backgroundColor = .black
+        topControls.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(topControls)
+
         photoCanvas.backgroundColor = .black
         photoCanvas.clipsToBounds = true
+        photoCanvas.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(photoCanvas)
         previewLayer.videoGravity = .resizeAspectFill
         photoCanvas.layer.addSublayer(previewLayer)
         photoCanvas.addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:))))
 
+        bottomControls.backgroundColor = .black
+        bottomControls.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bottomControls)
+
+        landscapeControls.backgroundColor = .black
+        landscapeControls.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(landscapeControls)
+
         if let overlayView = overlayHost?.view {
             photoCanvas.addSubview(overlayView)
         }
 
-        let cancel = UIButton(type: .system)
-        cancel.setImage(UIImage(systemName: "xmark"), for: .normal)
-        cancel.tintColor = .white
-        cancel.backgroundColor = UIColor.black.withAlphaComponent(0.58)
-        cancel.layer.cornerRadius = 22
-        cancel.addTarget(self, action: #selector(cancelCapture), for: .touchUpInside)
-        cancel.accessibilityLabel = "Cancel photo"
-        cancel.frame.size = CGSize(width: 44, height: 44)
-        view.addSubview(cancel)
-        cancel.translatesAutoresizingMaskIntoConstraints = false
+        cancelButton.setImage(UIImage(systemName: "xmark"), for: .normal)
+        cancelButton.tintColor = .white
+        cancelButton.backgroundColor = UIColor.black.withAlphaComponent(0.58)
+        cancelButton.layer.cornerRadius = 22
+        cancelButton.addTarget(self, action: #selector(cancelCapture), for: .touchUpInside)
+        cancelButton.accessibilityLabel = startsInVideoMode ? "Cancel video" : "Cancel photo"
+        view.addSubview(cancelButton)
+        cancelButton.translatesAutoresizingMaskIntoConstraints = false
 
-        shutter.setImage(UIImage(systemName: "camera.fill"), for: .normal)
-        shutter.tintColor = .black
-        shutter.backgroundColor = .white
         shutter.layer.cornerRadius = 34
         shutter.layer.borderWidth = 4
         shutter.layer.borderColor = UIColor.white.withAlphaComponent(0.42).cgColor
         shutter.addTarget(self, action: #selector(capturePhoto), for: .touchUpInside)
-        shutter.accessibilityLabel = "Take photo"
         view.addSubview(shutter)
         shutter.translatesAutoresizingMaskIntoConstraints = false
-
-        captureModeControl.selectedSegmentIndex = startsInVideoMode ? 1 : 0
-        captureModeControl.selectedSegmentTintColor = .white
-        captureModeControl.backgroundColor = UIColor.black.withAlphaComponent(0.58)
-        captureModeControl.setTitleTextAttributes([.foregroundColor: UIColor.black], for: .selected)
-        captureModeControl.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .normal)
-        captureModeControl.addTarget(self, action: #selector(changeCaptureMode), for: .valueChanged)
-        captureModeControl.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(captureModeControl)
-        changeCaptureMode()
+        updateShutterAppearance()
 
         configureCameraControls()
-
-        NSLayoutConstraint.activate([
-            cancel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
-            cancel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
-            cancel.widthAnchor.constraint(equalToConstant: 44),
-            cancel.heightAnchor.constraint(equalToConstant: 44),
-            shutter.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            shutter.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
-            shutter.widthAnchor.constraint(equalToConstant: 68),
-            shutter.heightAnchor.constraint(equalToConstant: 68),
-            captureModeControl.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            captureModeControl.bottomAnchor.constraint(equalTo: shutter.topAnchor, constant: -12),
-            captureModeControl.widthAnchor.constraint(equalToConstant: 176)
-        ])
+        configureLayoutConstraints()
+        updateControlLayout(for: view.bounds.size)
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -1518,6 +1554,7 @@ final class FireVaultCameraViewController: UIViewController,
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         FireVaultOrientationCoordinator.finishCameraCapture()
+        turnOffVideoTorch()
         sessionQueue.async { [session] in
             if session.isRunning { session.stopRunning() }
         }
@@ -1528,6 +1565,7 @@ final class FireVaultCameraViewController: UIViewController,
         with coordinator: any UIViewControllerTransitionCoordinator
     ) {
         super.viewWillTransition(to: size, with: coordinator)
+        updateControlLayout(for: size)
         coordinator.animate(alongsideTransition: { [weak self] _ in
             self?.view.setNeedsLayout()
             self?.view.layoutIfNeeded()
@@ -1537,11 +1575,7 @@ final class FireVaultCameraViewController: UIViewController,
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let orientation = view.window?.windowScene?.effectiveGeometry.interfaceOrientation
-        let photoAspect = orientation?.isLandscape == true
-            ? CGSize(width: 4, height: 3)
-            : CGSize(width: 3, height: 4)
-        photoCanvas.frame = AVMakeRect(aspectRatio: photoAspect, insideRect: view.bounds).integral
+        updateControlLayout(for: view.bounds.size)
         previewLayer.frame = photoCanvas.bounds
         overlayHost?.view.frame = photoCanvas.bounds
         updateVideoRotation()
@@ -1583,19 +1617,116 @@ final class FireVaultCameraViewController: UIViewController,
         flashButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(flashButton)
         updateFlashButton()
+    }
 
+    private func configureLayoutConstraints() {
         NSLayoutConstraint.activate([
-            flashButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-            flashButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
+            cancelButton.widthAnchor.constraint(equalToConstant: 44),
+            cancelButton.heightAnchor.constraint(equalToConstant: 44),
             flashButton.widthAnchor.constraint(equalToConstant: 44),
             flashButton.heightAnchor.constraint(equalToConstant: 44),
-            lensControl.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            lensControl.bottomAnchor.constraint(equalTo: captureModeControl.topAnchor, constant: -12),
-            lensControl.widthAnchor.constraint(lessThanOrEqualToConstant: 210),
-            zoomSlider.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            zoomSlider.bottomAnchor.constraint(equalTo: lensControl.topAnchor, constant: -10),
-            zoomSlider.widthAnchor.constraint(equalToConstant: 190)
+            shutter.widthAnchor.constraint(equalToConstant: 68),
+            shutter.heightAnchor.constraint(equalToConstant: 68)
         ])
+
+        let portraitPreviewAspect = photoCanvas.widthAnchor.constraint(
+            equalTo: photoCanvas.heightAnchor,
+            multiplier: startsInVideoMode ? 9.0 / 16.0 : 3.0 / 4.0
+        )
+        let portraitPreviewWidth = photoCanvas.widthAnchor.constraint(equalTo: portraitPreviewArea.widthAnchor)
+        portraitPreviewWidth.priority = .init(999)
+        let portraitPreviewHeight = photoCanvas.heightAnchor.constraint(equalTo: portraitPreviewArea.heightAnchor)
+        portraitPreviewHeight.priority = .init(998)
+
+        portraitConstraints = [
+            topControls.topAnchor.constraint(equalTo: view.topAnchor),
+            topControls.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topControls.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            topControls.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 60),
+            bottomControls.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bottomControls.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottomControls.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            bottomControls.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -84),
+            portraitPreviewArea.topAnchor.constraint(equalTo: topControls.bottomAnchor),
+            portraitPreviewArea.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            portraitPreviewArea.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            portraitPreviewArea.bottomAnchor.constraint(equalTo: bottomControls.topAnchor),
+            photoCanvas.centerXAnchor.constraint(equalTo: portraitPreviewArea.centerXAnchor),
+            photoCanvas.centerYAnchor.constraint(equalTo: portraitPreviewArea.centerYAnchor),
+            photoCanvas.widthAnchor.constraint(lessThanOrEqualTo: portraitPreviewArea.widthAnchor),
+            photoCanvas.heightAnchor.constraint(lessThanOrEqualTo: portraitPreviewArea.heightAnchor),
+            portraitPreviewAspect,
+            portraitPreviewWidth,
+            portraitPreviewHeight,
+            cancelButton.leadingAnchor.constraint(equalTo: topControls.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            cancelButton.bottomAnchor.constraint(equalTo: topControls.bottomAnchor, constant: -8),
+            flashButton.trailingAnchor.constraint(equalTo: topControls.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            flashButton.bottomAnchor.constraint(equalTo: topControls.bottomAnchor, constant: -8),
+            shutter.trailingAnchor.constraint(equalTo: bottomControls.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            shutter.centerYAnchor.constraint(equalTo: bottomControls.safeAreaLayoutGuide.centerYAnchor),
+            lensControl.leadingAnchor.constraint(equalTo: bottomControls.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            lensControl.centerYAnchor.constraint(equalTo: bottomControls.safeAreaLayoutGuide.centerYAnchor),
+            lensControl.widthAnchor.constraint(lessThanOrEqualToConstant: 160),
+            zoomSlider.leadingAnchor.constraint(equalTo: lensControl.trailingAnchor, constant: 14),
+            zoomSlider.trailingAnchor.constraint(equalTo: shutter.leadingAnchor, constant: -16),
+            zoomSlider.centerYAnchor.constraint(equalTo: bottomControls.safeAreaLayoutGuide.centerYAnchor),
+            zoomSlider.widthAnchor.constraint(greaterThanOrEqualToConstant: 70)
+        ]
+
+        let landscapePreviewAspect = photoCanvas.widthAnchor.constraint(
+            equalTo: photoCanvas.heightAnchor,
+            multiplier: startsInVideoMode ? 16.0 / 9.0 : 4.0 / 3.0
+        )
+        let landscapePreviewWidth = photoCanvas.widthAnchor.constraint(equalTo: landscapePreviewArea.widthAnchor)
+        landscapePreviewWidth.priority = .init(999)
+        let landscapePreviewHeight = photoCanvas.heightAnchor.constraint(equalTo: landscapePreviewArea.heightAnchor)
+        landscapePreviewHeight.priority = .init(998)
+        let landscapeControlsWidth = landscapeControls.widthAnchor.constraint(equalToConstant: 250)
+        landscapeControlsWidth.priority = .init(999)
+
+        landscapeConstraints = [
+            landscapePreviewArea.topAnchor.constraint(equalTo: view.topAnchor),
+            landscapePreviewArea.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            landscapePreviewArea.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            landscapePreviewArea.trailingAnchor.constraint(equalTo: landscapeControls.leadingAnchor),
+            photoCanvas.centerXAnchor.constraint(equalTo: landscapePreviewArea.centerXAnchor),
+            photoCanvas.centerYAnchor.constraint(equalTo: landscapePreviewArea.centerYAnchor),
+            photoCanvas.widthAnchor.constraint(lessThanOrEqualTo: landscapePreviewArea.widthAnchor),
+            photoCanvas.heightAnchor.constraint(lessThanOrEqualTo: landscapePreviewArea.heightAnchor),
+            landscapePreviewAspect,
+            landscapePreviewWidth,
+            landscapePreviewHeight,
+            landscapeControls.topAnchor.constraint(equalTo: view.topAnchor),
+            landscapeControls.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            landscapeControls.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            landscapeControlsWidth,
+            landscapeControls.widthAnchor.constraint(greaterThanOrEqualToConstant: 210),
+            landscapeControls.widthAnchor.constraint(lessThanOrEqualToConstant: 330),
+            cancelButton.leadingAnchor.constraint(equalTo: landscapeControls.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            cancelButton.topAnchor.constraint(equalTo: landscapeControls.safeAreaLayoutGuide.topAnchor, constant: 14),
+            flashButton.trailingAnchor.constraint(equalTo: landscapeControls.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            flashButton.topAnchor.constraint(equalTo: landscapeControls.safeAreaLayoutGuide.topAnchor, constant: 14),
+            lensControl.leadingAnchor.constraint(equalTo: landscapeControls.safeAreaLayoutGuide.leadingAnchor, constant: 18),
+            lensControl.trailingAnchor.constraint(equalTo: landscapeControls.safeAreaLayoutGuide.trailingAnchor, constant: -18),
+            lensControl.topAnchor.constraint(equalTo: cancelButton.bottomAnchor, constant: 24),
+            zoomSlider.leadingAnchor.constraint(equalTo: landscapeControls.safeAreaLayoutGuide.leadingAnchor, constant: 24),
+            zoomSlider.trailingAnchor.constraint(equalTo: landscapeControls.safeAreaLayoutGuide.trailingAnchor, constant: -24),
+            zoomSlider.topAnchor.constraint(equalTo: lensControl.bottomAnchor, constant: 18),
+            shutter.centerXAnchor.constraint(equalTo: landscapeControls.safeAreaLayoutGuide.centerXAnchor),
+            shutter.bottomAnchor.constraint(equalTo: landscapeControls.safeAreaLayoutGuide.bottomAnchor, constant: -20)
+        ]
+    }
+
+    private func updateControlLayout(for size: CGSize) {
+        let useLandscape = size.width > size.height
+        guard usesLandscapeLayout != useLandscape else { return }
+        usesLandscapeLayout = useLandscape
+
+        NSLayoutConstraint.deactivate(useLandscape ? portraitConstraints : landscapeConstraints)
+        NSLayoutConstraint.activate(useLandscape ? landscapeConstraints : portraitConstraints)
+        topControls.isHidden = useLandscape
+        bottomControls.isHidden = useLandscape
+        landscapeControls.isHidden = !useLandscape
     }
 
     private func preferredCamera() -> AVCaptureDevice? {
@@ -1615,9 +1746,13 @@ final class FireVaultCameraViewController: UIViewController,
                 session.addInput(input)
                 videoInput = input
                 activeCamera = device
+                videoTorchEnabled = false
             }
             session.commitConfiguration()
-            DispatchQueue.main.async { [weak self] in self?.updateZoomControls() }
+            DispatchQueue.main.async { [weak self] in
+                self?.updateZoomControls()
+                self?.updateFlashButton()
+            }
         }
     }
 
@@ -1651,6 +1786,11 @@ final class FireVaultCameraViewController: UIViewController,
     }
 
     @objc private func changeFlashMode() {
+        if startsInVideoMode {
+            toggleVideoTorch()
+            return
+        }
+
         flashMode = switch flashMode {
         case .off: .auto
         case .auto: .on
@@ -1661,6 +1801,23 @@ final class FireVaultCameraViewController: UIViewController,
     }
 
     private func updateFlashButton() {
+        if startsInVideoMode {
+            let torchAvailable = activeCamera?.hasTorch == true
+            flashButton.isEnabled = torchAvailable
+            flashButton.alpha = torchAvailable ? 1 : 0.42
+            flashButton.setImage(
+                UIImage(systemName: videoTorchEnabled ? "bolt.fill" : "bolt.slash.fill"),
+                for: .normal
+            )
+            flashButton.accessibilityLabel = torchAvailable
+                ? "Video light \(videoTorchEnabled ? "on" : "off")"
+                : "Video light unavailable"
+            return
+        }
+
+        let flashAvailable = activeCamera?.hasFlash ?? true
+        flashButton.isEnabled = flashAvailable
+        flashButton.alpha = flashAvailable ? 1 : 0.42
         let symbol = switch flashMode {
         case .off: "bolt.slash.fill"
         case .auto: "bolt.badge.automatic.fill"
@@ -1669,6 +1826,42 @@ final class FireVaultCameraViewController: UIViewController,
         }
         flashButton.setImage(UIImage(systemName: symbol), for: .normal)
         flashButton.accessibilityLabel = "Flash \(flashMode == .off ? "off" : flashMode == .on ? "on" : "automatic")"
+    }
+
+    private func toggleVideoTorch() {
+        guard let camera = activeCamera,
+              camera.hasTorch,
+              camera.isTorchModeSupported(.on) else {
+            videoTorchEnabled = false
+            updateFlashButton()
+            return
+        }
+
+        do {
+            try camera.lockForConfiguration()
+            defer { camera.unlockForConfiguration() }
+            if videoTorchEnabled {
+                camera.torchMode = .off
+                videoTorchEnabled = false
+            } else {
+                try camera.setTorchModeOn(level: AVCaptureDevice.maxAvailableTorchLevel)
+                videoTorchEnabled = true
+            }
+        } catch {
+            videoTorchEnabled = false
+        }
+        updateFlashButton()
+    }
+
+    private func turnOffVideoTorch() {
+        guard videoTorchEnabled, let camera = activeCamera, camera.hasTorch else { return }
+        do {
+            try camera.lockForConfiguration()
+            defer { camera.unlockForConfiguration() }
+            camera.torchMode = .off
+        } catch { }
+        videoTorchEnabled = false
+        updateFlashButton()
     }
 
     private func requestCameraAndStart() {
@@ -1704,8 +1897,11 @@ final class FireVaultCameraViewController: UIViewController,
             guard let self else { return }
             if !configured {
                 session.beginConfiguration()
-                session.sessionPreset = session.canSetSessionPreset(.hd1920x1080)
+                let preferredPreset: AVCaptureSession.Preset = startsInVideoMode
                     ? .hd1920x1080
+                    : .photo
+                session.sessionPreset = session.canSetSessionPreset(preferredPreset)
+                    ? preferredPreset
                     : .high
                 defer { session.commitConfiguration() }
                 guard let camera = preferredCamera(),
@@ -1725,9 +1921,18 @@ final class FireVaultCameraViewController: UIViewController,
                 videoInput = input
                 activeCamera = camera
                 configured = true
-                DispatchQueue.main.async { [weak self] in self?.updateZoomControls() }
+                DispatchQueue.main.async { [weak self] in
+                    self?.updateZoomControls()
+                    self?.updateFlashButton()
+                }
             }
             if !session.isRunning { session.startRunning() }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                view.setNeedsLayout()
+                view.layoutIfNeeded()
+                updateVideoRotation()
+            }
         }
     }
 
@@ -1739,16 +1944,15 @@ final class FireVaultCameraViewController: UIViewController,
         }
     }
 
-    @objc private func changeCaptureMode() {
-        let isVideo = captureModeControl.selectedSegmentIndex == 1
-        shutter.setImage(UIImage(systemName: isVideo ? "video.fill" : "camera.fill"), for: .normal)
-        shutter.backgroundColor = isVideo ? .systemRed : .white
-        shutter.tintColor = isVideo ? .white : .black
-        shutter.accessibilityLabel = isVideo ? "Record video" : "Take photo"
+    private func updateShutterAppearance() {
+        shutter.setImage(UIImage(systemName: startsInVideoMode ? "video.fill" : "camera.fill"), for: .normal)
+        shutter.backgroundColor = startsInVideoMode ? .systemRed : .white
+        shutter.tintColor = startsInVideoMode ? .white : .black
+        shutter.accessibilityLabel = startsInVideoMode ? "Record video" : "Take photo"
     }
 
     @objc private func capturePhoto() {
-        if captureModeControl.selectedSegmentIndex == 1 {
+        if startsInVideoMode {
             toggleVideoRecording()
             return
         }
@@ -1785,7 +1989,6 @@ final class FireVaultCameraViewController: UIViewController,
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("FireVault-Capture-\(UUID().uuidString).mov")
         movieOutput.startRecording(to: url, recordingDelegate: self)
-        captureModeControl.isEnabled = false
         lensControl.isEnabled = false
         shutter.setImage(UIImage(systemName: "stop.fill"), for: .normal)
         shutter.accessibilityLabel = "Stop recording"
@@ -1805,10 +2008,8 @@ final class FireVaultCameraViewController: UIViewController,
         from connections: [AVCaptureConnection],
         error: Error?
     ) {
-        captureModeControl.isEnabled = true
         lensControl.isEnabled = true
-        shutter.setImage(UIImage(systemName: "video.fill"), for: .normal)
-        shutter.accessibilityLabel = "Record video"
+        updateShutterAppearance()
         guard error == nil else {
             try? FileManager.default.removeItem(at: outputFileURL)
             onCancel()

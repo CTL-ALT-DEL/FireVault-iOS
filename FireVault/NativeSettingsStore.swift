@@ -229,12 +229,16 @@ struct FireVaultGPSPreferences: Codable, Equatable {
     var hapticsEnabled: Bool? = true
     var defaultMapLayer: String?
     var defaultMapIs3D: Bool?
+    var arrivalPointMapLayer: String?
+    var arrivalPointMapIs3D: Bool?
     var tripLogMinimumUnknownStopMinutes: Int?
     var tripLogRejectPoorAccuracyStops: Bool?
     var tripLogMergeNearbyStops: Bool?
     var hapticsAreEnabled: Bool { hapticsEnabled ?? true }
     var resolvedDefaultMapLayer: String { defaultMapLayer ?? "standard" }
     var resolvedDefaultMapIs3D: Bool { defaultMapIs3D ?? true }
+    var resolvedArrivalPointMapLayer: String { arrivalPointMapLayer ?? "standard" }
+    var resolvedArrivalPointMapIs3D: Bool { arrivalPointMapIs3D ?? true }
     var resolvedTripLogMinimumUnknownStopMinutes: Int {
         tripLogMinimumUnknownStopMinutes ?? 5
     }
@@ -249,6 +253,10 @@ struct FireVaultGPSPreferences: Codable, Equatable {
             copy.defaultMapLayer = "standard"
         }
         if copy.defaultMapIs3D == nil { copy.defaultMapIs3D = true }
+        if !["standard", "satellite", "hybrid"].contains(copy.resolvedArrivalPointMapLayer) {
+            copy.arrivalPointMapLayer = "standard"
+        }
+        if copy.arrivalPointMapIs3D == nil { copy.arrivalPointMapIs3D = true }
         if ![5, 7, 10].contains(copy.resolvedTripLogMinimumUnknownStopMinutes) {
             copy.tripLogMinimumUnknownStopMinutes = 5
         }
@@ -612,7 +620,11 @@ final class FireVaultNativeSettingsStore: ObservableObject {
 
     func isFeatureVisible(_ id: String) -> Bool {
         guard FireVaultRemoteFeatureDependencies.isEnabled(id, in: remoteFeatureVisibility) else { return false }
+#if DEBUG
         return developer.isEnabled(id)
+#else
+        return true
+#endif
     }
 
     @discardableResult

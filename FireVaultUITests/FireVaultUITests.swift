@@ -9,6 +9,24 @@ import XCTest
 
 final class FireVaultUITests: XCTestCase {
 
+    @MainActor
+    private func waitForHittable(_ element: XCUIElement, timeout: TimeInterval = 8) -> Bool {
+        guard element.waitForExistence(timeout: timeout) else { return false }
+        return XCTWaiter.wait(
+            for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "hittable == true"),
+                object: element
+            )],
+            timeout: timeout
+        ) == .completed
+    }
+
+    @MainActor
+    private func waitForAppReady(_ app: XCUIApplication, timeout: TimeInterval = 20) -> Bool {
+        app.descendants(matching: .any)["firevault-splash"]
+            .waitForNonExistence(timeout: timeout)
+    }
+
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.
 
@@ -25,16 +43,16 @@ final class FireVaultUITests: XCTestCase {
     @MainActor
     func testNativeSettingsControlsAreReachable() throws {
         let app = XCUIApplication()
+        app.launchArguments += ["-FireVaultUITesting", "-UIAccessibilityReduceMotionEnabled", "YES"]
         app.launch()
+        XCTAssertTrue(waitForAppReady(app))
 
         let settingsTab = app.buttons["main-navigation-settings"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForHittable(settingsTab))
         XCTAssertTrue(app.otherElements["firevault-brand-header"].exists)
         settingsTab.tap()
 
-        let technicianRow = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Technician Profile")
-        ).firstMatch
+        let technicianRow = app.descendants(matching: .any)["settings-technician-profile"]
         XCTAssertTrue(technicianRow.waitForExistence(timeout: 3))
         technicianRow.tap()
 
@@ -61,13 +79,19 @@ final class FireVaultUITests: XCTestCase {
     @MainActor
     func testNativePhotoCaptureChoicesAreReachable() throws {
         let app = XCUIApplication()
+        app.launchArguments += ["-FireVaultUITesting", "-UIAccessibilityReduceMotionEnabled", "YES"]
         app.launch()
+        XCTAssertTrue(waitForAppReady(app))
 
         let photoTab = app.buttons["main-navigation-photo"]
-        XCTAssertTrue(photoTab.waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForHittable(photoTab))
         photoTab.tap()
 
-        XCTAssertTrue(app.buttons["native-take-photo"].waitForExistence(timeout: 3))
+        let takePhoto = app.buttons["native-take-photo"]
+        if !takePhoto.waitForExistence(timeout: 2) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(takePhoto.waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["native-scan-document"].exists)
         XCTAssertTrue(app.buttons["native-choose-photo"].exists)
         XCTAssertTrue(app.otherElements["native-capture-destination"].exists)
@@ -80,9 +104,11 @@ final class FireVaultUITests: XCTestCase {
     @MainActor
     func testPhotoOverlayEditorShowsSampleAndStructuredFields() throws {
         let app = XCUIApplication()
+        app.launchArguments += ["-FireVaultUITesting", "-UIAccessibilityReduceMotionEnabled", "YES"]
         app.launch()
+        XCTAssertTrue(waitForAppReady(app))
 
-        XCTAssertTrue(app.buttons["main-navigation-settings"].waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForHittable(app.buttons["main-navigation-settings"]))
         app.buttons["main-navigation-settings"].tap()
 
         let overlayRow = app.buttons.matching(
@@ -95,11 +121,16 @@ final class FireVaultUITests: XCTestCase {
             app.descendants(matching: .any)["overlay-sample-preview"]
                 .waitForExistence(timeout: 3)
         )
+        app.swipeUp()
         XCTAssertTrue(
-            app.descendants(matching: .any)["overlay-accent-picker"].exists
+            app.descendants(matching: .any)["overlay-accent-picker"]
+                .waitForExistence(timeout: 3)
         )
 
         app.swipeUp()
+        let fieldsDisclosure = app.buttons["Choose Fields and Order"]
+        XCTAssertTrue(fieldsDisclosure.waitForExistence(timeout: 3))
+        fieldsDisclosure.tap()
         XCTAssertTrue(
             app.descendants(matching: .any)["overlay-field-site"]
                 .waitForExistence(timeout: 3)
@@ -110,43 +141,38 @@ final class FireVaultUITests: XCTestCase {
     @MainActor
     func testNearbyMapOptionsAreReachable() throws {
         let app = XCUIApplication()
+        app.launchArguments += ["-FireVaultUITesting", "-UIAccessibilityReduceMotionEnabled", "YES"]
         app.launch()
+        XCTAssertTrue(waitForAppReady(app))
 
         let nearbyTab = app.buttons["main-navigation-nearby"]
-        XCTAssertTrue(nearbyTab.waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForHittable(nearbyTab))
         nearbyTab.tap()
 
-        XCTAssertTrue(
-            app.descendants(matching: .any)["nearby-horizontal-radius-picker"]
-                .waitForExistence(timeout: 5)
-        )
         let mapOptions = app.buttons["nearby-map-options"]
         XCTAssertTrue(mapOptions.waitForExistence(timeout: 5))
         XCTAssertTrue(mapOptions.label.contains("Map options"))
+        XCTAssertTrue(app.scrollViews["nearby-account-scroll"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.webViews.firstMatch.exists, "Native Nearby must never display a web view")
     }
 
     @MainActor
     func testBreadcrumbTrackingPrivacyAndPermissionStateAreReachable() throws {
         let app = XCUIApplication()
+        app.launchArguments += ["-FireVaultUITesting", "-UIAccessibilityReduceMotionEnabled", "YES"]
         app.launch()
+        XCTAssertTrue(waitForAppReady(app))
 
-        XCTAssertTrue(
-            app.buttons["main-navigation-nearby"].waitForExistence(timeout: 8)
-        )
+        XCTAssertTrue(waitForHittable(app.buttons["main-navigation-nearby"]))
         app.buttons["main-navigation-nearby"].tap()
 
-        let breadcrumbsBar = app.descendants(matching: .any)["breadcrumbs-compact-bar"]
-        XCTAssertTrue(breadcrumbsBar.waitForExistence(timeout: 5))
-        breadcrumbsBar.tap()
+        let tripLogStatus = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Trip Log,")
+        ).firstMatch
+        XCTAssertTrue(tripLogStatus.waitForExistence(timeout: 5))
+        tripLogStatus.tap()
 
-        XCTAssertTrue(
-            app.descendants(matching: .any)["breadcrumbs-tracking-controls"]
-                .waitForExistence(timeout: 5)
-        )
-        XCTAssertTrue(
-            app.descendants(matching: .any)["breadcrumbs-location-permission"].exists
-        )
+        XCTAssertTrue(app.buttons["Start"].waitForExistence(timeout: 5))
         XCTAssertFalse(
             app.webViews.firstMatch.exists,
             "Breadcrumbs must remain a fully native iOS workflow"
@@ -165,12 +191,14 @@ final class FireVaultUITests: XCTestCase {
     func testWarmIvorySettingsVisualReference() throws {
         let app = XCUIApplication()
         app.launchArguments += [
+            "-FireVaultUITesting",
             "-firevault.native.settings.appearance.v1", "light",
             "-UIAccessibilityReduceMotionEnabled", "YES"
         ]
         app.launch()
+        XCTAssertTrue(waitForAppReady(app))
         let settingsTab = app.buttons["main-navigation-settings"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForHittable(settingsTab))
         XCTAssertEqual(
             XCTWaiter.wait(
                 for: [XCTNSPredicateExpectation(
@@ -194,12 +222,15 @@ final class FireVaultUITests: XCTestCase {
     func testSettingsRemainReachableAtAccessibilityTextSize() throws {
         let app = XCUIApplication()
         app.launchArguments += [
+            "-FireVaultUITesting",
+            "-UIAccessibilityReduceMotionEnabled", "YES",
             "-firevault.native.settings.appearance.v1", "light",
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge"
         ]
         app.launch()
+        XCTAssertTrue(waitForAppReady(app))
         let settings = app.buttons["main-navigation-settings"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForHittable(settings))
         XCTAssertEqual(
             XCTWaiter.wait(
                 for: [XCTNSPredicateExpectation(

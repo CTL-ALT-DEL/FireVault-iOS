@@ -11,7 +11,16 @@ import Foundation
 import MapKit
 import UIKit
 
+enum FireVaultAccountPinMapCamera {
+    static let distance: CLLocationDistance = 120
+    static let heading: CLLocationDirection = 0
+    static let pitch: CGFloat = 55
+}
+
 enum FireVaultNearbyMapCamera {
+    static let selectedAccount3DDistance: CLLocationDistance = 520
+    static let settledAccount3DDistance = FireVaultAccountPinMapCamera.distance
+
     static func userRegion(
         coordinate: CLLocationCoordinate2D,
         radiusMiles: Double
@@ -31,7 +40,7 @@ enum FireVaultNearbyMapCamera {
     static func accountRegion(coordinate: CLLocationCoordinate2D) -> MKCoordinateRegion {
         .init(
             center: coordinate,
-            span: .init(latitudeDelta: 0.012, longitudeDelta: 0.012)
+            span: .init(latitudeDelta: 0.0045, longitudeDelta: 0.0045)
         )
     }
 }

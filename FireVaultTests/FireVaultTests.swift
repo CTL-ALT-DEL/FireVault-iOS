@@ -2263,6 +2263,34 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(FireVaultGPSPreferences.radiusOptions.contains(3.5))
     }
 
+    func testArrivalMapPreferencesSupportEveryLayerIn2DAnd3D() {
+        var preferences = FireVaultGPSPreferences()
+        preferences.arrivalPointMapLayer = "hybrid"
+        preferences.arrivalPointMapIs3D = false
+
+        XCTAssertEqual(preferences.normalized.resolvedArrivalPointMapLayer, "hybrid")
+        XCTAssertFalse(preferences.normalized.resolvedArrivalPointMapIs3D)
+
+        var legacyPreferences = FireVaultGPSPreferences()
+        legacyPreferences.arrivalPointMapIs3D = nil
+        XCTAssertTrue(legacyPreferences.normalized.resolvedArrivalPointMapIs3D)
+    }
+
+    func testSettingsSearchKeywordsIndexAppearanceAndHapticsSubmenus() throws {
+        let items = NativeSettingsCatalog.groups.flatMap(\.items)
+        let appearance = try XCTUnwrap(items.first(where: { $0.id == "appearance" }))
+        let gps = try XCTUnwrap(items.first(where: { $0.id == "gps" }))
+
+        XCTAssertTrue(appearance.searchKeywords.localizedCaseInsensitiveContains("Dark"))
+        XCTAssertTrue(appearance.searchKeywords.localizedCaseInsensitiveContains("Light"))
+        XCTAssertTrue(gps.searchKeywords.localizedCaseInsensitiveContains("HAPTICS"))
+        XCTAssertTrue(gps.searchKeywords.localizedCaseInsensitiveContains("Arrival Point"))
+        XCTAssertEqual(gps.presentedForSearch("HAPTIC").id, "gps")
+        XCTAssertEqual(gps.presentedForSearch("HAPTIC").title, "Haptics")
+        XCTAssertEqual(appearance.presentedForSearch("dark").title, "Dark Appearance")
+        XCTAssertEqual(appearance.presentedForSearch("LIGHT").title, "Light Appearance")
+    }
+
     func testPhotoOverlayPreferencesNormalizeUnsupportedValues() {
         var preferences = FireVaultOverlayPreferences()
         preferences.alignment = "floating"
@@ -2326,6 +2354,28 @@ final class FireVaultTests: XCTestCase {
 
         XCTAssertEqual(size.width / size.height, 4.0 / 3.0, accuracy: 0.000_001)
         XCTAssertEqual(size.height, 430, accuracy: 0.000_001)
+    }
+
+    func testVideoPortraitAspectRatioIsPreserved() {
+        let naturalSize = CGSize(width: 1920, height: 1080)
+        let landscape = FireVaultVideoDisplayGeometry.displaySize(
+            naturalSize: naturalSize,
+            preferredTransform: .identity
+        )
+        let portrait = FireVaultVideoDisplayGeometry.displaySize(
+            naturalSize: naturalSize,
+            preferredTransform: CGAffineTransform(
+                a: 0,
+                b: 1,
+                c: -1,
+                d: 0,
+                tx: 1080,
+                ty: 0
+            )
+        )
+
+        XCTAssertEqual(landscape.width / landscape.height, 16.0 / 9.0, accuracy: 0.000_001)
+        XCTAssertEqual(portrait.width / portrait.height, 9.0 / 16.0, accuracy: 0.000_001)
     }
 
     func testPhotoOverlayPanelExpandsForLongCustomerNameWithinCanvas() {
@@ -2922,8 +2972,15 @@ final class FireVaultTests: XCTestCase {
 
         XCTAssertEqual(region.center.latitude, coordinate.latitude, accuracy: 0.000_001)
         XCTAssertEqual(region.center.longitude, coordinate.longitude, accuracy: 0.000_001)
-        XCTAssertEqual(region.span.latitudeDelta, 0.012, accuracy: 0.000_001)
-        XCTAssertEqual(region.span.longitudeDelta, 0.012, accuracy: 0.000_001)
+        XCTAssertEqual(region.span.latitudeDelta, 0.0045, accuracy: 0.000_001)
+        XCTAssertEqual(region.span.longitudeDelta, 0.0045, accuracy: 0.000_001)
+        XCTAssertEqual(FireVaultNearbyMapCamera.selectedAccount3DDistance, 520)
+        XCTAssertEqual(FireVaultNearbyMapCamera.settledAccount3DDistance, 120)
+        XCTAssertEqual(
+            FireVaultNearbyMapCamera.settledAccount3DDistance,
+            FireVaultAccountPinMapCamera.distance
+        )
+        XCTAssertEqual(FireVaultAccountPinMapCamera.pitch, 55)
     }
 
     func testNearbyPayloadIsSortedClosestFirstAndResetIsObservable() throws {
@@ -3039,9 +3096,8 @@ final class FireVaultTests: XCTestCase {
 
     func testEverySettingsCatalogRowHasANativeDestinationIdentifier() {
         let expected = Set([
-            "overlay", "gps", "plusCodes", "notifications", "reports", "email", "cloudFiles",
-            "microsoftStorage", "sync", "customerImport", "categories", "backup",
-            "webdav", "privacy", "security", "manual", "demo", "about"
+            "overlay", "gps", "notifications", "reports", "cloudFiles", "customerImport",
+            "categories", "backup", "security", "appearance", "manual", "demo", "about"
         ])
 
         XCTAssertEqual(Set(NativeSettingsCatalog.groups.flatMap(\.items).map(\.id)), expected)
@@ -3235,6 +3291,99 @@ final class FireVaultTests: XCTestCase {
             "Aug 22 2026 at 18:04:15"
         )
         XCTAssertEqual(FireVaultBuildInfo.displayText(infoDictionary: [:]), "Unavailable")
+    }
+
+    func testAccountReportProducesValidSummaryAndPhotoEvidencePages() throws {
+        let generatedAt = Date(timeIntervalSince1970: 1_788_000_000)
+        let photo = UIGraphicsImageRenderer(size: CGSize(width: 1200, height: 800)).image { context in
+            UIColor.systemGray6.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 1200, height: 800))
+            UIColor.systemRed.setFill()
+            context.fill(CGRect(x: 120, y: 140, width: 960, height: 520))
+        }
+        let photoURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVault-Report-QA-\(UUID().uuidString).jpg")
+        try XCTUnwrap(photo.jpegData(compressionQuality: 0.9)).write(to: photoURL)
+        defer { try? FileManager.default.removeItem(at: photoURL) }
+
+        let photoDocument = FireVaultWorkspaceDocument(
+            id: "report-photo",
+            title: "Main fire alarm panel",
+            subtitle: "Panel condition at arrival",
+            kind: "photo",
+            date: "08/29/2026",
+            mediaFileName: photoURL.lastPathComponent,
+            updatedAt: generatedAt
+        )
+        let account = FireVaultWorkspaceAccount(
+            id: "report-account",
+            name: "Administrative Services Center",
+            address: "700 West State Street\nBoise, ID 83702",
+            category: "Government",
+            accountId: "DEMO-1027",
+            phone: "(208) 555-0027",
+            favorite: true,
+            latitude: 43.6177,
+            longitude: -116.1968,
+            tags: ["Annual Inspection"],
+            notes: [
+                .init(
+                    id: "note-1",
+                    title: "Panel condition",
+                    text: "Trouble signal was active at technician arrival.",
+                    date: "08/29/2026",
+                    updatedAt: generatedAt
+                )
+            ],
+            documents: [photoDocument],
+            equipment: [
+                .init(
+                    id: "equipment-1",
+                    title: "Fire Alarm Control Panel",
+                    subtitle: "Gamewell-FCI S3 Series",
+                    status: "Lobby electrical room"
+                )
+            ],
+            locations: [],
+            recent: []
+        )
+        let configuration = FireVaultAccountReportConfiguration(
+            template: .serviceCall,
+            title: "Service Call Report",
+            callSummary: "Responded to an active trouble condition reported by the customer.",
+            workPerformed: "Inspected the panel, reviewed event history, and tested the affected circuit.",
+            findings: "A loose field connection caused an intermittent open circuit.",
+            recommendations: "Repair the terminal connection and schedule verification testing.",
+            includeTechnician: true,
+            includeAccountContact: true,
+            includeAccountNotes: true,
+            includeEquipment: true,
+            includeMediaDates: true
+        )
+        let data = FireVaultAccountReportPDFRenderer.render(
+            account: account,
+            configuration: configuration,
+            technician: .init(
+                name: "David Bannerman",
+                company: "FireVault Pro",
+                phone: "(208) 555-0100",
+                email: "technician@example.com",
+                license: "LIC-1027"
+            ),
+            documents: [photoDocument],
+            mediaURLs: [photoDocument.id: photoURL],
+            generatedAt: generatedAt
+        )
+        let pdf = try XCTUnwrap(CGPDFDocument(CGDataProvider(data: data as CFData)!))
+
+        XCTAssertEqual(String(data: data.prefix(4), encoding: .ascii), "%PDF")
+        XCTAssertEqual(pdf.numberOfPages, 2)
+        XCTAssertGreaterThan(data.count, 5_000)
+
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "com.adobe.pdf")
+        attachment.name = "FireVault-Account-Service-Report-QA.pdf"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func testLocation(
