@@ -777,6 +777,17 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
     }
 
     private func makeTripLogActions() -> [CPTextButton] {
+        guard store.demoMode || breadcrumbs.allowsRecordChanges else {
+            if breadcrumbs.activeDay != nil {
+                return [
+                    CPTextButton(title: "End Trip", textStyle: .cancel) { [weak self] _ in
+                        self?.confirmEndTripLog()
+                    }
+                ]
+            }
+            return []
+        }
+
         if breadcrumbs.activeDay == nil {
             return [CPTextButton(title: "Start Trip Log", textStyle: .confirm) { [weak self] _ in
                 guard let self else { return }

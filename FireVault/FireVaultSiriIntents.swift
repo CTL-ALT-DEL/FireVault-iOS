@@ -180,10 +180,14 @@ struct StartFireVaultTripLogIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let breadcrumbs = FireVaultBreadcrumbStore.shared
+        let store = FireVaultStore()
+        breadcrumbs.updateRecordChangeAccess(store.demoMode || store.allowsRecordChanges)
+        guard breadcrumbs.allowsRecordChanges else {
+            return .result(dialog: "Open FireVault and activate a Technician plan to start a Trip Log.")
+        }
         if breadcrumbs.isRecording {
             return .result(dialog: "Trip Log is already recording.")
         }
-        let store = FireVaultStore()
         if breadcrumbs.activeDay?.isPaused == true {
             breadcrumbs.resumeWorkday(accounts: store.accounts)
             return .result(dialog: "Trip Log resumed.")
@@ -218,13 +222,17 @@ struct ResumeFireVaultTripLogIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let breadcrumbs = FireVaultBreadcrumbStore.shared
+        let store = FireVaultStore()
+        breadcrumbs.updateRecordChangeAccess(store.demoMode || store.allowsRecordChanges)
+        guard breadcrumbs.allowsRecordChanges else {
+            return .result(dialog: "Open FireVault and activate a Technician plan to resume a Trip Log.")
+        }
         guard breadcrumbs.activeDay != nil else {
             return .result(dialog: "There is no paused Trip Log to resume.")
         }
         guard breadcrumbs.activeDay?.isPaused == true else {
             return .result(dialog: "Trip Log is already recording.")
         }
-        let store = FireVaultStore()
         breadcrumbs.resumeWorkday(accounts: store.accounts)
         return .result(dialog: "Trip Log resumed.")
     }

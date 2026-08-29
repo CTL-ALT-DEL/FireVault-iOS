@@ -2884,6 +2884,7 @@ private struct NativeAccountRow: View {
 }
 
 struct NativeSettingsView: View {
+    @EnvironmentObject private var subscriptions: FireVaultSubscriptionStore
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
@@ -2924,6 +2925,7 @@ struct NativeSettingsView: View {
         NavigationStack {
             List {
                 profileCard
+                subscriptionCard
                 searchField
 
                 if groups.isEmpty {
@@ -2990,6 +2992,49 @@ struct NativeSettingsView: View {
             .accessibilityLabel("Technician Profile")
             .accessibilityValue(profileAccessibilityValue)
             .accessibilityHint("Opens Technician Profile")
+        }
+    }
+
+    private var subscriptionCard: some View {
+        Section {
+            NavigationLink {
+                FireVaultTechnicianStorefrontView()
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: subscriptionStatus.symbol)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(subscriptionStatus.color)
+                        .frame(width: 40, height: 40)
+                        .background(subscriptionStatus.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 11))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("FireVault Plan")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        Text(subscriptionStatus.title)
+                            .font(.caption)
+                            .foregroundStyle(subscriptionStatus.color)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                }
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("settings-firevault-plan")
+        }
+    }
+
+    private var subscriptionStatus: (title: String, symbol: String, color: Color) {
+        switch subscriptions.access {
+        case .trial: ("Free trial active", "sparkles", NativeShellPalette.green)
+        case .active: ("Technician active", "checkmark.seal.fill", NativeShellPalette.green)
+        case .billingGracePeriod, .offlineGracePeriod: ("Temporary access", "clock.badge.checkmark", .orange)
+        case .billingRetry: ("Payment needs attention", "creditcard.trianglebadge.exclamationmark", .orange)
+        case .expired: ("Subscription expired", "calendar.badge.exclamationmark", .secondary)
+        case .notSubscribed: ("View plans", "person.crop.circle.badge.plus", NativeShellPalette.blue)
+        case .checking: ("Checking access…", "hourglass", .secondary)
+        case .unavailable: ("Plans unavailable", "wifi.exclamationmark", .secondary)
         }
     }
 
@@ -3147,6 +3192,7 @@ struct NativeSettingsView: View {
 }
 
 struct FireVaultIPadSettingsWorkspace: View {
+    @EnvironmentObject private var subscriptions: FireVaultSubscriptionStore
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
@@ -3256,6 +3302,7 @@ struct FireVaultIPadSettingsWorkspace: View {
                             tint: NativeShellPalette.blue,
                             items: [
                                 ("tech", "Technician Profile", "person.text.rectangle"),
+                                ("plan", "FireVault Plan", "creditcard.fill"),
                                 ("appearance", "Appearance", "circle.lefthalf.filled")
                             ]
                         )
@@ -3340,6 +3387,7 @@ struct FireVaultIPadSettingsWorkspace: View {
     private func destination(_ id: String) -> some View {
         switch id {
         case "tech": NativeTechnicianSettingsView(settings: settings, store: store)
+        case "plan": FireVaultTechnicianStorefrontView()
         case "appearance": NativeAppearanceSettingsView(settings: settings)
         case "overlay": NativeOverlaySettingsView(settings: settings)
         case "gps": NativeGPSSettingsView(

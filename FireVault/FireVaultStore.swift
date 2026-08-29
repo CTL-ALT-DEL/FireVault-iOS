@@ -43,6 +43,7 @@ enum FireVaultMediaError: LocalizedError {
     case invalidReportData
     case storageUnavailable
     case writeFailed(String)
+    case subscriptionRequired
 
     var errorDescription: String? {
         switch self {
@@ -58,7 +59,17 @@ enum FireVaultMediaError: LocalizedError {
             "FireVault Pro media storage is unavailable on this iPhone."
         case .writeFailed(let detail):
             "The captured media could not be saved. \(detail)"
+        case .subscriptionRequired:
+            "An active FireVault Technician plan is required to save changes. Your existing data remains available to view."
         }
+    }
+}
+
+enum FireVaultRecordAccessError: LocalizedError, Equatable {
+    case subscriptionRequired
+
+    var errorDescription: String? {
+        "An active FireVault Technician plan is required to save changes. Your existing data remains available to view."
     }
 }
 
@@ -114,6 +125,9 @@ final class FireVaultStore: ObservableObject {
     @Published private(set) var isCloudSyncing = false
     @Published private(set) var cloudSyncCompleted = 0
     @Published private(set) var cloudSyncTotal = 0
+    @Published var presentsSubscriptionRequired = false
+
+    private(set) var allowsRecordChanges: Bool
 
     private let defaults: UserDefaults
     private let accountArchiveURLOverride: URL?
@@ -153,6 +167,9 @@ final class FireVaultStore: ObservableObject {
         cloudLastCheckedAt = defaults.object(forKey: Key.cloudLastCheckedAt) as? Date
         let activeDemoMode = defaults.object(forKey: Key.demoMode) as? Bool ?? true
         demoMode = activeDemoMode
+        allowsRecordChanges = activeDemoMode
+            || defaults !== UserDefaults.standard
+            || FireVaultSubscriptionStore.cachedRecordChangesAreAllowed(defaults: defaults)
         usesFileArchive = defaults === UserDefaults.standard || accountArchiveURL != nil
         accountArchiveURLOverride = accountArchiveURL
         let initialArchiveURL = accountArchiveURL
@@ -218,6 +235,32 @@ final class FireVaultStore: ObservableObject {
         }.count
     }
 
+    func updateRecordChangeAccess(_ isAllowed: Bool) {
+        allowsRecordChanges = isAllowed
+        if isAllowed {
+            presentsSubscriptionRequired = false
+        } else {
+            cancelGeocoding()
+        }
+    }
+
+    func requestSubscriptionForRecordChanges() {
+        guard !demoMode, !allowsRecordChanges else { return }
+        presentsSubscriptionRequired = true
+    }
+
+    private func authorizeRecordChange() -> Bool {
+        guard !demoMode, !allowsRecordChanges else { return true }
+        presentsSubscriptionRequired = true
+        return false
+    }
+
+    private func requireRecordChangeAccess() throws {
+        guard authorizeRecordChange() else {
+            throw FireVaultRecordAccessError.subscriptionRequired
+        }
+    }
+
     func reloadAccounts() {
         let key = demoMode ? Key.demoAccounts : Key.productionAccounts
         guard let refreshed = accountArchiveURL.flatMap(FireVaultAccountArchive.load(from:))
@@ -237,6 +280,7 @@ final class FireVaultStore: ObservableObject {
 
     @discardableResult
     func configureCategoryRules(_ rules: [FireVaultCategoryRule]) -> Int {
+        guard authorizeRecordChange() else { return 0 }
         categoryRules = rules
         let additions = applyCategoryRules()
         persistAccounts()
@@ -244,6 +288,7 @@ final class FireVaultStore: ObservableObject {
     }
 
     func renameCategory(from oldName: String, to newName: String) {
+        guard authorizeRecordChange() else { return }
         let replacement = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !replacement.isEmpty else { return }
         for index in accounts.indices {
@@ -261,6 +306,7 @@ final class FireVaultStore: ObservableObject {
     /// deleted automatic rule from restoring them during the same save.
     @discardableResult
     func removeCategories(_ categoryNames: [String]) -> Int {
+        guard authorizeRecordChange() else { return 0 }
         let removedKeys = Set(categoryNames.compactMap { name -> String? in
             let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
             return value.isEmpty ? nil : value.lowercased()
@@ -347,6 +393,7 @@ final class FireVaultStore: ObservableObject {
     }
 
     func requestCapture(_ action: FireVaultCaptureQuickAction) {
+        guard authorizeRecordChange() else { return }
         pendingCaptureQuickAction = action
     }
 
@@ -364,6 +411,7 @@ final class FireVaultStore: ObservableObject {
     /// Production records are removed locally only after Supabase confirms the
     /// user-owned cloud row is gone (or that no matching cloud row exists).
     func deleteCustomerAccount(id: String) async throws {
+        try requireRecordChangeAccess()
         guard let account = accounts.first(where: { $0.id == id }) else {
             throw FireVaultCustomerAccountDeletionError.accountUnavailable
         }
@@ -422,6 +470,7 @@ final class FireVaultStore: ObservableObject {
     }
 
     func startGeocodingMissingAccounts() {
+        guard authorizeRecordChange() else { return }
         guard geocodingTask == nil else { return }
 
         let requests = accounts.enumerated().compactMap { index, account -> FireVaultGeocodingRequest? in
@@ -563,6 +612,7 @@ final class FireVaultStore: ObservableObject {
         _ matches: [FireVaultGeocodingMatch],
         requests: [FireVaultGeocodingRequest]
     ) {
+        guard authorizeRecordChange() else { return }
         let accountIDByToken = Dictionary(uniqueKeysWithValues: requests.map { ($0.token, $0.accountID) })
         let matchByAccountID = Dictionary(uniqueKeysWithValues: matches.compactMap { match -> (String, FireVaultGeocodingMatch)? in
             guard let accountID = accountIDByToken[match.token] else { return nil }
@@ -578,6 +628,7 @@ final class FireVaultStore: ObservableObject {
     }
 
     func toggleFavorite(_ id: String) {
+        guard authorizeRecordChange() else { return }
         guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
         accounts[index].favorite.toggle()
         persist()
@@ -592,6 +643,7 @@ final class FireVaultStore: ObservableObject {
         accountId: String,
         phone: String
     ) -> Bool {
+        guard authorizeRecordChange() else { return false }
         guard let index = accounts.firstIndex(where: { $0.id == id }) else { return false }
 
         return updateAccount(
@@ -617,6 +669,7 @@ final class FireVaultStore: ObservableObject {
         latitude: Double?,
         longitude: Double?
     ) -> Bool {
+        guard authorizeRecordChange() else { return false }
         guard let index = accounts.firstIndex(where: { $0.id == id }),
               Self.isValidCoordinatePair(latitude: latitude, longitude: longitude) else { return false }
 
@@ -648,6 +701,7 @@ final class FireVaultStore: ObservableObject {
 
     @discardableResult
     func addAccount() -> FireVaultWorkspaceAccount {
+        guard authorizeRecordChange() else { return recordChangePlaceholderAccount }
         let number = accounts.count + 1
         let account = FireVaultWorkspaceAccount(
             id: UUID().uuidString,
@@ -678,6 +732,7 @@ final class FireVaultStore: ObservableObject {
         name: String,
         address: String = ""
     ) -> FireVaultWorkspaceAccount {
+        guard authorizeRecordChange() else { return recordChangePlaceholderAccount }
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
         let account = FireVaultWorkspaceAccount(
@@ -728,6 +783,7 @@ final class FireVaultStore: ObservableObject {
         text: String = "New note",
         showOnArrival: Bool = false
     ) -> FireVaultWorkspaceNote? {
+        guard authorizeRecordChange() else { return nil }
         guard let index = accounts.firstIndex(where: { $0.id == accountID }) else { return nil }
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return nil }
@@ -764,6 +820,7 @@ final class FireVaultStore: ObservableObject {
         text: String,
         showOnArrival: Bool? = nil
     ) -> Bool {
+        guard authorizeRecordChange() else { return false }
         guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
               let noteIndex = accounts[accountIndex].notes.firstIndex(where: { $0.id == noteID }) else {
             return false
@@ -784,6 +841,7 @@ final class FireVaultStore: ObservableObject {
 
     @discardableResult
     func deleteNote(accountID: String, noteID: String) -> Bool {
+        guard authorizeRecordChange() else { return false }
         guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
               let noteIndex = accounts[accountIndex].notes.firstIndex(where: { $0.id == noteID }) else {
             return false
@@ -794,6 +852,7 @@ final class FireVaultStore: ObservableObject {
     }
 
     func addDocument(to accountID: String, scan: Bool) {
+        guard authorizeRecordChange() else { return }
         guard let index = accounts.firstIndex(where: { $0.id == accountID }) else { return }
         let document = FireVaultWorkspaceDocument(
             id: UUID().uuidString,
@@ -809,6 +868,7 @@ final class FireVaultStore: ObservableObject {
 
     @discardableResult
     func attachCapturedPhoto(_ image: UIImage, to accountID: String) throws -> FireVaultWorkspaceDocument {
+        try requireRecordChangeAccess()
         guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
             throw FireVaultMediaError.accountUnavailable
         }
@@ -846,6 +906,7 @@ final class FireVaultStore: ObservableObject {
 
     @discardableResult
     func attachCapturedVideo(at sourceURL: URL, to accountID: String) throws -> FireVaultWorkspaceDocument {
+        try requireRecordChangeAccess()
         guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
             throw FireVaultMediaError.accountUnavailable
         }
@@ -894,6 +955,7 @@ final class FireVaultStore: ObservableObject {
 
     @discardableResult
     func attachScannedDocument(_ pages: [UIImage], to accountID: String) throws -> FireVaultWorkspaceDocument {
+        try requireRecordChangeAccess()
         guard !pages.isEmpty else { throw FireVaultMediaError.emptyScan }
         guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
             throw FireVaultMediaError.accountUnavailable
@@ -946,6 +1008,7 @@ final class FireVaultStore: ObservableObject {
         templateName: String,
         to accountID: String
     ) throws -> FireVaultWorkspaceDocument {
+        try requireRecordChangeAccess()
         guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
             throw FireVaultMediaError.accountUnavailable
         }
@@ -993,6 +1056,7 @@ final class FireVaultStore: ObservableObject {
         longitude: Double? = nil,
         pinColor: String = "Green"
     ) -> FireVaultWorkspaceEquipment? {
+        guard authorizeRecordChange() else { return nil }
         guard let index = accounts.firstIndex(where: { $0.id == accountID }),
               Self.isValidCoordinatePair(latitude: latitude, longitude: longitude) else { return nil }
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1023,6 +1087,7 @@ final class FireVaultStore: ObservableObject {
         longitude: Double? = nil,
         pinColor: String = "Green"
     ) -> Bool {
+        guard authorizeRecordChange() else { return false }
         guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
               let equipmentIndex = accounts[accountIndex].equipment.firstIndex(where: { $0.id == equipmentID }),
               Self.isValidCoordinatePair(latitude: latitude, longitude: longitude) else {
@@ -1044,6 +1109,7 @@ final class FireVaultStore: ObservableObject {
 
     @discardableResult
     func deleteEquipment(accountID: String, equipmentID: String) -> Bool {
+        guard authorizeRecordChange() else { return false }
         guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
               let equipmentIndex = accounts[accountIndex].equipment.firstIndex(where: { $0.id == equipmentID }) else {
             return false
@@ -1110,6 +1176,7 @@ final class FireVaultStore: ObservableObject {
         pinColor: String = "Purple",
         directionsMode: String = FireVaultDirectionsMode.walking.rawValue
     ) -> FireVaultWorkspaceLocation? {
+        guard authorizeRecordChange() else { return nil }
         let plusCodePreferences = FireVaultNativeSettingsStore().preferences.plusCodes
         guard let index = accounts.firstIndex(where: { $0.id == accountID }),
               Self.isValidCoordinatePair(latitude: latitude, longitude: longitude),
@@ -1159,6 +1226,7 @@ final class FireVaultStore: ObservableObject {
         pinColor: String = "Purple",
         directionsMode: String? = nil
     ) -> Bool {
+        guard authorizeRecordChange() else { return false }
         let plusCodePreferences = FireVaultNativeSettingsStore().preferences.plusCodes
         guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
               let locationIndex = accounts[accountIndex].locations.firstIndex(where: { $0.id == locationID }),
@@ -1192,6 +1260,7 @@ final class FireVaultStore: ObservableObject {
 
     @discardableResult
     func deleteLocation(accountID: String, locationID: String) -> Bool {
+        guard authorizeRecordChange() else { return false }
         guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
               let locationIndex = accounts[accountIndex].locations.firstIndex(where: { $0.id == locationID }) else {
             return false
@@ -1262,6 +1331,7 @@ final class FireVaultStore: ObservableObject {
     }
 
     func importAccountsCSV(_ data: Data) throws -> FireVaultCSVImportResult {
+        try requireRecordChangeAccess()
         let analysis = try FireVaultCSVImporter.analyze(data, correctSwappedCoordinates: true)
         return applyCSVImport(analysis)
     }
@@ -1286,6 +1356,7 @@ final class FireVaultStore: ObservableObject {
     }
 
     func syncAccountsNow() async {
+        guard authorizeRecordChange() else { return }
         guard !demoMode, !isCloudSyncing else { return }
         isCloudSyncing = true
         cloudSyncErrorMessage = nil
@@ -1338,6 +1409,7 @@ final class FireVaultStore: ObservableObject {
     }
 
     func refreshAccountsFromCloud() async {
+        guard authorizeRecordChange() else { return }
         guard !demoMode, !isCloudSyncing else { return }
         isCloudSyncing = true
         cloudSyncErrorMessage = nil
@@ -1364,6 +1436,15 @@ final class FireVaultStore: ObservableObject {
         csvData: Data,
         fileName: String
     ) async -> FireVaultCSVImportResult {
+        guard authorizeRecordChange() else {
+            return .init(
+                added: 0,
+                updated: 0,
+                skipped: analysis.records.count,
+                totalRows: analysis.records.count,
+                messages: [FireVaultRecordAccessError.subscriptionRequired.localizedDescription]
+            )
+        }
         let localResult = applyCSVImport(analysis)
         guard !demoMode else { return localResult }
 
@@ -1505,6 +1586,15 @@ final class FireVaultStore: ObservableObject {
     }
 
     func applyCSVImport(_ analysis: FireVaultCSVAnalysis) -> FireVaultCSVImportResult {
+        guard authorizeRecordChange() else {
+            return .init(
+                added: 0,
+                updated: 0,
+                skipped: analysis.records.count,
+                totalRows: analysis.records.count,
+                messages: [FireVaultRecordAccessError.subscriptionRequired.localizedDescription]
+            )
+        }
         var added = 0
         var updated = 0
         var skipped = 0
@@ -1613,6 +1703,7 @@ final class FireVaultStore: ObservableObject {
     }
 
     func mergeAccountsBackup(_ data: Data) throws -> FireVaultBackupMergeResult {
+        try requireRecordChangeAccess()
         let incoming = try JSONDecoder().decode([FireVaultWorkspaceAccount].self, from: data)
         var existingIDs = Set(accounts.map(\.id))
         var existingAccountIDs = Set(
@@ -1664,6 +1755,7 @@ final class FireVaultStore: ObservableObject {
         _ records: [FireVaultVaultMediaRecord],
         allowedAccountIDs: Set<String>
     ) throws -> Int {
+        try requireRecordChangeAccess()
         var restored = 0
         for record in records where allowedAccountIDs.contains(record.accountID) && record.isValid {
             let url = try mediaURL(accountID: record.accountID, fileName: record.fileName)
@@ -1676,6 +1768,7 @@ final class FireVaultStore: ObservableObject {
 
     @discardableResult
     func deleteDocument(accountID: String, documentID: String) -> Bool {
+        guard authorizeRecordChange() else { return false }
         guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
               let documentIndex = accounts[accountIndex].documents.firstIndex(where: { $0.id == documentID }) else {
             return false
@@ -1743,6 +1836,26 @@ final class FireVaultStore: ObservableObject {
 
     private static func csvIdentityKey(name: String, address: String) -> String {
         "\(name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())|\(address.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+    }
+
+    private var recordChangePlaceholderAccount: FireVaultWorkspaceAccount {
+        accounts.first ?? FireVaultWorkspaceAccount(
+            id: "subscription-required",
+            name: "FireVault Plan Required",
+            address: "",
+            category: "",
+            accountId: "",
+            phone: "",
+            favorite: false,
+            latitude: nil,
+            longitude: nil,
+            tags: [],
+            notes: [],
+            documents: [],
+            equipment: [],
+            locations: [],
+            recent: []
+        )
     }
 
     private func persist() {

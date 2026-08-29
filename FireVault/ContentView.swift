@@ -12,6 +12,7 @@ import CoreLocation
 struct ContentView: View {
     @StateObject private var store = FireVaultStore()
     @StateObject private var settings = FireVaultNativeSettingsStore()
+    @StateObject private var subscriptions = FireVaultSubscriptionStore()
     @StateObject private var locationService = FireVaultLocationService.shared
     @StateObject private var liveBreadcrumbs = FireVaultBreadcrumbStore.shared
     @StateObject private var quickActions = FireVaultQuickActionCenter.shared
@@ -107,7 +108,25 @@ struct ContentView: View {
 
     private var workspaceObservationView: some View {
         settingsObservationView
+        .environmentObject(subscriptions)
+        .sheet(isPresented: $store.presentsSubscriptionRequired) {
+            NavigationStack {
+                FireVaultTechnicianStorefrontView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") {
+                                store.presentsSubscriptionRequired = false
+                            }
+                        }
+                    }
+            }
+            .environmentObject(subscriptions)
+        }
+        .onChange(of: subscriptions.access) { _, _ in
+            synchronizeSubscriptionAccess()
+        }
         .onChange(of: store.demoMode) { _, isDemoMode in
+            synchronizeSubscriptionAccess()
             prepareActiveVault()
             if !isDemoMode { startLegacyBackfillIfNeeded() }
             scheduleWidgetSnapshotUpdate()
@@ -225,6 +244,9 @@ struct ContentView: View {
     }
 
     private func performInitialSetup() async {
+        synchronizeSubscriptionAccess()
+        await subscriptions.start()
+        synchronizeSubscriptionAccess()
         prepareActiveVault()
         startLegacyBackfillIfNeeded()
         await refreshAndReconcileFeatureControls()
@@ -308,6 +330,13 @@ struct ContentView: View {
     private func handlePendingQuickAction() {
         guard !isPrivacyLocked, let action = quickActions.consume() else { return }
 
+        if action == .startLog || action == .photo || action == .scan {
+            guard recordChangesAreAllowed else {
+                store.requestSubscriptionForRecordChanges()
+                return
+            }
+        }
+
         switch action {
         case .startLog:
             store.closeAccount(to: .nearby)
@@ -334,6 +363,13 @@ struct ContentView: View {
     private func handlePendingWidgetDeepLink() {
         guard !isPrivacyLocked, let link = widgetDeepLinks.consume() else { return }
 
+        if link == .startTripLog || link == .photo {
+            guard recordChangesAreAllowed else {
+                store.requestSubscriptionForRecordChanges()
+                return
+            }
+        }
+
         switch link {
         case .tripLog:
             store.closeAccount(to: .trip)
@@ -356,6 +392,18 @@ struct ContentView: View {
             store.closeAccount(to: .settings)
         }
         updateWidgetSnapshot()
+    }
+
+    private var recordChangesAreAllowed: Bool {
+        store.demoMode || !subscriptions.access.preservesReadOnlyAccess
+    }
+
+    private func synchronizeSubscriptionAccess() {
+        let isAllowed = recordChangesAreAllowed
+        store.updateRecordChangeAccess(isAllowed)
+        activeBreadcrumbs.updateRecordChangeAccess(isAllowed) {
+            store.requestSubscriptionForRecordChanges()
+        }
     }
 
     private func updateWidgetSnapshot() {

@@ -13,6 +13,37 @@ import SwiftUI
 
 @MainActor
 final class FireVaultTests: XCTestCase {
+    func testExpiredPlanKeepsProductionRecordsReadOnly() throws {
+        let suite = "FireVaultTests.Subscription.ReadOnly.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let originalAccounts = store.accounts
+
+        store.updateRecordChangeAccess(false)
+        _ = store.addAccount()
+
+        XCTAssertEqual(store.accounts, originalAccounts)
+        XCTAssertTrue(store.presentsSubscriptionRequired)
+    }
+
+    func testDemoModeRemainsEditableWithoutAPlan() throws {
+        let suite = "FireVaultTests.Subscription.Demo.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let originalCount = store.accounts.count
+
+        store.updateRecordChangeAccess(false)
+        let addedAccount = store.addAccount()
+
+        XCTAssertFalse(addedAccount.id.isEmpty)
+        XCTAssertEqual(store.accounts.count, originalCount + 1)
+        XCTAssertFalse(store.presentsSubscriptionRequired)
+    }
+
     func testRemoteFeatureControlDefaultsToEnabledWithoutConfiguration() throws {
         let suite = "FireVaultTests.RemoteFeatures.Defaults.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

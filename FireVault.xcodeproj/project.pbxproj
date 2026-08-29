@@ -51,6 +51,7 @@
 
 /* Begin PBXFileReference section */
 		A85000000000000000000001 /* FireVaultWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FireVaultWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		DC0BEEEF30437F6100BFA771 /* FireVaultSubscriptions.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = FireVaultSubscriptions.storekit; sourceTree = "<group>"; };
 		DC8B01CD300F1E3700372A8B /* FireVault.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FireVault.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DC8B01DA300F1E3800372A8B /* FireVaultTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FireVaultTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DC8B01E4300F1E3800372A8B /* FireVaultUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FireVaultUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -143,6 +144,7 @@
 		DC8B01C4300F1E3700372A8B = {
 			isa = PBXGroup;
 			children = (
+				DC0BEEEF30437F6100BFA771 /* FireVaultSubscriptions.storekit */,
 				DC8B01CF300F1E3700372A8B /* FireVault */,
 				A85000000000000000000005 /* FireVaultWidgets */,
 				A85000000000000000000006 /* FireVaultWidgetShared */,

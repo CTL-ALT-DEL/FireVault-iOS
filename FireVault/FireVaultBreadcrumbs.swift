@@ -665,6 +665,8 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     private var liveActivityControlObservation: AnyCancellable?
     private var gpsPreferences: FireVaultGPSPreferences
     private var notificationPreferences: FireVaultNotificationPreferences
+    private(set) var allowsRecordChanges = FireVaultSubscriptionStore.cachedRecordChangesAreAllowed()
+    private var recordChangeDenied: (() -> Void)?
 
     var activeDay: FireVaultBreadcrumbDay? {
         days.first(where: \.isActive)
@@ -679,6 +681,27 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             authorizationStatus: authorizationStatus,
             accuracyAuthorization: accuracyAuthorization
         )
+    }
+
+    func updateRecordChangeAccess(
+        _ isAllowed: Bool,
+        onDenied: (() -> Void)? = nil
+    ) {
+        allowsRecordChanges = isAllowed
+        recordChangeDenied = onDenied
+        if !isAllowed {
+            stopLocationUpdates()
+            sessionIsPrepared = false
+            statusText = "FireVault Plan required to record a Trip Log"
+        }
+    }
+
+    private func authorizeRecordChange() -> Bool {
+        guard allowsRecordChanges else {
+            recordChangeDenied?()
+            return false
+        }
+        return true
     }
 
     init(
@@ -726,6 +749,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     }
 
     func startWorkday(accounts: [FireVaultWorkspaceAccount]) {
+        guard authorizeRecordChange() else { return }
         self.accounts = accounts
         refreshRuntimePreferences()
         sessionIsPrepared = true
@@ -755,6 +779,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     }
 
     func resumeWorkday(accounts: [FireVaultWorkspaceAccount]) {
+        guard authorizeRecordChange() else { return }
         guard activeDay != nil else {
             startWorkday(accounts: accounts)
             return
@@ -768,6 +793,12 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     }
 
     func restoreActiveWorkday(accounts: [FireVaultWorkspaceAccount]) {
+        guard allowsRecordChanges else {
+            stopLocationUpdates()
+            sessionIsPrepared = false
+            statusText = "FireVault Plan required to resume this Trip Log"
+            return
+        }
         self.accounts = accounts
         refreshRuntimePreferences()
         // A Live Activity/widget intent can run outside the main app process.
@@ -839,12 +870,14 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     }
 
     func deleteDay(_ id: UUID) {
+        guard authorizeRecordChange() else { return }
         guard days.first(where: { $0.id == id })?.isActive != true else { return }
         days.removeAll { $0.id == id }
         persist()
     }
 
     func resolveMissingBoundaryAddresses(for dayID: UUID) {
+        guard authorizeRecordChange() else { return }
         guard let index = days.firstIndex(where: { $0.id == dayID }) else { return }
         var changed = false
 
@@ -880,6 +913,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         _ incoming: [FireVaultBreadcrumbDay],
         restoredAt: Date
     ) -> (added: Int, preserved: Int) {
+        guard authorizeRecordChange() else { return (0, incoming.count) }
         var existingIDs = Set(days.map(\.id))
         var added = 0
         var preserved = 0
@@ -918,6 +952,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         technicianNote: String,
         isPersonal: Bool
     ) -> Bool {
+        guard authorizeRecordChange() else { return false }
         guard let dayIndex = days.firstIndex(where: { $0.id == dayID }),
               let stopIndex = days[dayIndex].stops.firstIndex(where: { $0.id == stopID }) else {
             return false
@@ -954,6 +989,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     @discardableResult
     func confirmStop(dayID: UUID, stopID: UUID) -> Bool {
+        guard authorizeRecordChange() else { return false }
         guard let dayIndex = days.firstIndex(where: { $0.id == dayID }),
               let stopIndex = days[dayIndex].stops.firstIndex(where: { $0.id == stopID }) else {
             return false
@@ -966,6 +1002,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
     @discardableResult
     func deleteStop(dayID: UUID, stopID: UUID) -> Bool {
+        guard authorizeRecordChange() else { return false }
         guard let dayIndex = days.firstIndex(where: { $0.id == dayID }),
               days[dayIndex].stops.contains(where: { $0.id == stopID }) else {
             return false
@@ -1045,6 +1082,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard allowsRecordChanges else { return }
         for location in locations.sorted(by: { $0.timestamp < $1.timestamp }) {
             guard location.horizontalAccuracy >= 0 else { continue }
             latestLocation = location
@@ -1054,6 +1092,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     }
 
     func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
+        guard allowsRecordChanges else { return }
         recoverCompletedVisit(visit)
     }
 
@@ -2521,6 +2560,10 @@ struct FireVaultBreadcrumbStopEditor: View {
     private func createAccountFromStop() {
         guard !normalizedCustomTitle.isEmpty,
               let stop = breadcrumbs.stop(dayID: dayID, stopID: stopID) else {
+            return
+        }
+        guard store.allowsRecordChanges else {
+            store.requestSubscriptionForRecordChanges()
             return
         }
         let account = store.addAccount(
