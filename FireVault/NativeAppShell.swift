@@ -205,6 +205,8 @@ enum FireVaultPublisherInfo {
     static let name = "Bannerman US LLC"
     static let website = "https://Bannerman.us"
     static let supportEmail = "Support@Bannerman.us"
+    static let privacyPolicy = "https://firevault.bannerman.us/privacy"
+    static let termsOfUse = "https://firevault.bannerman.us/terms"
 
     static var websiteURL: URL {
         URL(string: website)!
@@ -212,6 +214,14 @@ enum FireVaultPublisherInfo {
 
     static var supportEmailURL: URL {
         URL(string: "mailto:\(supportEmail)")!
+    }
+
+    static var privacyPolicyURL: URL {
+        URL(string: privacyPolicy)!
+    }
+
+    static var termsOfUseURL: URL {
+        URL(string: termsOfUse)!
     }
 }
 

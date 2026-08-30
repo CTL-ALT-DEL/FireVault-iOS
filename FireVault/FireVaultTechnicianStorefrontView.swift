@@ -16,7 +16,7 @@ struct FireVaultTechnicianStorefrontView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 18) {
+            VStack(spacing: 11) {
                 hero
                 statusCard
                 benefitsCard
@@ -26,7 +26,7 @@ struct FireVaultTechnicianStorefrontView: View {
                 renewalDisclosure
             }
             .padding(.horizontal, 18)
-            .padding(.top, 14)
+            .padding(.top, 8)
             .padding(.bottom, 126)
         }
         .background(NativeShellPalette.background.ignoresSafeArea())
@@ -45,15 +45,15 @@ struct FireVaultTechnicianStorefrontView: View {
     }
 
     private var hero: some View {
-        HStack(spacing: 14) {
-            FireVaultProIconBadge(size: 48, cornerRadius: 12)
+        HStack(spacing: 12) {
+            FireVaultProIconBadge(size: 42, cornerRadius: 11)
 
             VStack(alignment: .leading, spacing: 4) {
                 FireVaultProWordmark(
                     vaultColor: colorScheme == .light ? .black : .white,
                     proColor: colorScheme == .light ? .black : .white,
-                    fontSize: 15,
-                    proFontSize: 6.5,
+                    fontSize: 14,
+                    proFontSize: 6,
                     tracking: 1.2,
                     hasBackground: false
                 )
@@ -67,7 +67,7 @@ struct FireVaultTechnicianStorefrontView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(13)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
@@ -77,11 +77,11 @@ struct FireVaultTechnicianStorefrontView: View {
     }
 
     private var statusCard: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Image(systemName: statusPresentation.symbol)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(statusPresentation.color)
-                .frame(width: 38, height: 38)
+                .frame(width: 34, height: 34)
                 .background(statusPresentation.color.opacity(0.12), in: Circle())
 
             VStack(alignment: .leading, spacing: 2) {
@@ -102,7 +102,7 @@ struct FireVaultTechnicianStorefrontView: View {
             }
             Spacer(minLength: 4)
         }
-        .padding(13)
+        .padding(10)
         .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -111,7 +111,7 @@ struct FireVaultTechnicianStorefrontView: View {
     }
 
     private var benefitsCard: some View {
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("EVERY FIELD TOOL")
                 .font(.headline)
                 .tracking(0.6)
@@ -123,7 +123,7 @@ struct FireVaultTechnicianStorefrontView: View {
                     GridItem(.flexible(), spacing: 10)
                 ],
                 alignment: .leading,
-                spacing: 10
+                spacing: 5
             ) {
                 benefit("Nearby & CarPlay", symbol: "location.fill")
                 benefit("Trip logs & reports", symbol: "point.topleft.down.to.point.bottomright.curvepath")
@@ -132,7 +132,7 @@ struct FireVaultTechnicianStorefrontView: View {
                 benefit("Sync & backup", symbol: "arrow.triangle.2.circlepath.icloud.fill")
             }
         }
-        .padding(15)
+        .padding(12)
         .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
@@ -143,7 +143,7 @@ struct FireVaultTechnicianStorefrontView: View {
                 .frame(maxWidth: .infinity)
                 .padding(28)
         } else if subscriptions.products.isEmpty {
-            VStack(spacing: 10) {
+            VStack(spacing: 8) {
                 Image(systemName: "wifi.exclamationmark")
                     .font(.title2)
                     .foregroundStyle(.secondary)
@@ -215,7 +215,8 @@ struct FireVaultTechnicianStorefrontView: View {
                         .lineLimit(1)
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 10)
             .background(
                 isSelected ? NativeShellPalette.blue.opacity(0.10) : NativeShellPalette.surface,
                 in: RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -248,7 +249,7 @@ struct FireVaultTechnicianStorefrontView: View {
                 }
                 Spacer()
             }
-            .frame(minHeight: 54)
+            .frame(minHeight: 48)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
@@ -274,15 +275,26 @@ struct FireVaultTechnicianStorefrontView: View {
         }
         .font(.subheadline.weight(.semibold))
         .buttonStyle(.bordered)
+        .controlSize(.small)
         .foregroundStyle(NativeShellPalette.blue)
     }
 
     private var renewalDisclosure: some View {
-        Text(renewalDisclosureText)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 6)
+        VStack(spacing: 5) {
+            Text(renewalDisclosureText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            HStack(spacing: 16) {
+                Link("Privacy Policy", destination: FireVaultPublisherInfo.privacyPolicyURL)
+                Link("Terms of Use", destination: FireVaultPublisherInfo.termsOfUseURL)
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(NativeShellPalette.blue)
+            .lineLimit(1)
+        }
+        .padding(.horizontal, 6)
     }
 
     private func benefit(_ title: String, symbol: String) -> some View {
@@ -298,7 +310,7 @@ struct FireVaultTechnicianStorefrontView: View {
                 .minimumScaleFactor(0.68)
             Spacer(minLength: 0)
         }
-        .frame(minHeight: 28)
+        .frame(minHeight: 22)
     }
 
     private var selectedProduct: Product? {
