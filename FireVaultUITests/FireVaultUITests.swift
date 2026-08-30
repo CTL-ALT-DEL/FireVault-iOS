@@ -58,11 +58,8 @@ final class FireVaultUITests: XCTestCase {
 
         let technicianName = app.textFields["Technician name"]
         XCTAssertTrue(technicianName.waitForExistence(timeout: 3))
-        technicianName.tap()
-        technicianName.typeText("Native Test")
-        app.buttons["Done"].tap()
-        app.buttons["Save"].tap()
-
+        // This is a reachability test. Do not edit or save the technician's
+        // persisted profile, because UI tests can share the simulator's app data.
         app.navigationBars.buttons.element(boundBy: 0).tap()
         let gpsRow = app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH %@", "GPS & Maps")

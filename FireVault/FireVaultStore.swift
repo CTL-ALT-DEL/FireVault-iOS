@@ -249,6 +249,13 @@ final class FireVaultStore: ObservableObject {
         presentsSubscriptionRequired = true
     }
 
+    /// Checks access before presenting an editor so a read-only user sees the
+    /// plan prompt instead of an editable form whose save will be rejected.
+    @discardableResult
+    func beginRecordChange() -> Bool {
+        authorizeRecordChange()
+    }
+
     private func authorizeRecordChange() -> Bool {
         guard !demoMode, !allowsRecordChanges else { return true }
         presentsSubscriptionRequired = true

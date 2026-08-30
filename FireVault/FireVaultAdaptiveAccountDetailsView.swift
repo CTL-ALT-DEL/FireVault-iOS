@@ -323,7 +323,9 @@ struct FireVaultAdaptiveAccountDetailsView: View {
 
                 Menu {
                     Button("Edit Account", systemImage: "pencil") {
-                        isShowingAccountEditor = true
+                        if store.beginRecordChange() {
+                            isShowingAccountEditor = true
+                        }
                     }
                     if hasPhone {
                         Button("Call", systemImage: "phone") {
@@ -332,7 +334,9 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                     }
                     Divider()
                     Button("Delete Customer Account", systemImage: "trash", role: .destructive) {
-                        isConfirmingAccountDeletion = true
+                        if store.beginRecordChange() {
+                            isConfirmingAccountDeletion = true
+                        }
                     }
                     .disabled(isDeletingAccount)
                 } label: {
@@ -632,20 +636,26 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 Spacer()
                 if selectedSection == .notes {
                     Button("Add Note", systemImage: "square.and.pencil") {
-                        editingNote = nil
-                        isShowingNoteEditor = true
+                        if store.beginRecordChange() {
+                            editingNote = nil
+                            isShowingNoteEditor = true
+                        }
                     }
                     .buttonStyle(.glass)
                 } else if selectedSection == .equipment {
                     Button("Add Equipment", systemImage: "plus") {
-                        editingEquipment = nil
-                        isShowingEquipmentEditor = true
+                        if store.beginRecordChange() {
+                            editingEquipment = nil
+                            isShowingEquipmentEditor = true
+                        }
                     }
                     .buttonStyle(.glass)
                 } else if selectedSection == .locations {
                     Button("Add Location", systemImage: "plus") {
-                        editingLocation = nil
-                        isShowingLocationEditor = true
+                        if store.beginRecordChange() {
+                            editingLocation = nil
+                            isShowingLocationEditor = true
+                        }
                     }
                     .buttonStyle(.glass)
                 }
@@ -661,8 +671,10 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 } else {
                     ForEach(account.notes) { note in
                         Button {
-                            editingNote = note
-                            isShowingNoteEditor = true
+                            if store.beginRecordChange() {
+                                editingNote = note
+                                isShowingNoteEditor = true
+                            }
                         } label: {
                             dataRow(
                                 title: note.title,
@@ -703,8 +715,10 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 } else {
                     ForEach(account.equipment) { equipment in
                         Button {
-                            editingEquipment = equipment
-                            isShowingEquipmentEditor = true
+                            if store.beginRecordChange() {
+                                editingEquipment = equipment
+                                isShowingEquipmentEditor = true
+                            }
                         } label: {
                             dataRow(title: equipment.title, subtitle: equipment.subtitle, trailing: equipment.deviceAddress, symbol: "wrench.and.screwdriver.fill")
                         }
@@ -722,8 +736,10 @@ struct FireVaultAdaptiveAccountDetailsView: View {
                 } else {
                     ForEach(account.locations) { location in
                         Button {
-                            editingLocation = location
-                            isShowingLocationEditor = true
+                            if store.beginRecordChange() {
+                                editingLocation = location
+                                isShowingLocationEditor = true
+                            }
                         } label: {
                             dataRow(
                                 title: location.label,

@@ -28,6 +28,19 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(store.presentsSubscriptionRequired)
     }
 
+    func testReadOnlyPlanBlocksEditorPresentationAndRequestsStorefront() throws {
+        let suite = "FireVaultTests.Subscription.EditorGate.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+
+        store.updateRecordChangeAccess(false)
+
+        XCTAssertFalse(store.beginRecordChange())
+        XCTAssertTrue(store.presentsSubscriptionRequired)
+    }
+
     func testDemoModeRemainsEditableWithoutAPlan() throws {
         let suite = "FireVaultTests.Subscription.Demo.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

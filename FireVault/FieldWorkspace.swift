@@ -393,11 +393,15 @@ struct FieldWorkspaceView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button("Edit Customer Account", systemImage: "pencil") {
-                            isShowingAccountEditor = true
+                            if store.beginRecordChange() {
+                                isShowingAccountEditor = true
+                            }
                         }
                         Divider()
                         Button("Delete Customer Account", systemImage: "trash", role: .destructive) {
-                            isConfirmingAccountDeletion = true
+                            if store.beginRecordChange() {
+                                isConfirmingAccountDeletion = true
+                            }
                         }
                         .disabled(isDeletingAccount)
                     } label: {
@@ -587,7 +591,9 @@ struct FieldWorkspaceView: View {
                 symbol: "square.and.pencil",
                 tint: FieldWorkspacePalette.red
             ) {
-                isShowingNoteEditor = true
+                if store.beginRecordChange() {
+                    isShowingNoteEditor = true
+                }
             }
             actionDivider
             WorkspaceQuickAction(
@@ -595,7 +601,9 @@ struct FieldWorkspaceView: View {
                 symbol: "pencil",
                 tint: FieldWorkspacePalette.red
             ) {
-                isShowingAccountEditor = true
+                if store.beginRecordChange() {
+                    isShowingAccountEditor = true
+                }
             }
         }
         .padding(.vertical, 7)
@@ -1225,8 +1233,10 @@ private struct MapArrivalView: View {
                         .foregroundStyle(FieldWorkspacePalette.blue)
                     Spacer()
                     Button {
-                        editingLocation = nil
-                        isShowingEditor = true
+                        if store.beginRecordChange() {
+                            editingLocation = nil
+                            isShowingEditor = true
+                        }
                     } label: {
                         Label("Add", systemImage: "plus")
                             .font(.caption.bold())
@@ -1323,8 +1333,10 @@ private struct MapArrivalView: View {
                                     }
                                     Spacer()
                                     Button("Edit", systemImage: "pencil") {
-                                        editingLocation = location
-                                        isShowingEditor = true
+                                        if store.beginRecordChange() {
+                                            editingLocation = location
+                                            isShowingEditor = true
+                                        }
                                     }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
@@ -1456,8 +1468,10 @@ private struct MapArrivalView: View {
                 Section("Edit Saved Locations") {
                     ForEach(sortedLocations) { location in
                         Button(location.label, systemImage: location.arrivalMapSymbol) {
-                            editingLocation = location
-                            isShowingEditor = true
+                            if store.beginRecordChange() {
+                                editingLocation = location
+                                isShowingEditor = true
+                            }
                         }
                     }
                 }
@@ -1651,7 +1665,9 @@ private struct ArrivalPointDetailView: View {
 
                 HStack(spacing: 10) {
                     Button("Edit Point", systemImage: "pencil") {
-                        isShowingEditor = true
+                        if store.beginRecordChange() {
+                            isShowingEditor = true
+                        }
                     }
                     .buttonStyle(.bordered)
                     .frame(maxWidth: .infinity)
@@ -2514,7 +2530,9 @@ private struct NotesWorkspaceView: View {
                                 }
                                 Spacer()
                                 Button("Edit Note", systemImage: "pencil") {
-                                    editorRoute = .edit(note)
+                                    if store.beginRecordChange() {
+                                        editorRoute = .edit(note)
+                                    }
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
@@ -2558,7 +2576,9 @@ private struct NotesWorkspaceView: View {
         }
         .safeAreaInset(edge: .bottom) {
             Button("Add Note", systemImage: "square.and.pencil") {
-                editorRoute = .new
+                if store.beginRecordChange() {
+                    editorRoute = .new
+                }
             }
                 .buttonStyle(.glassProminent)
                 .padding(12)
@@ -3369,8 +3389,10 @@ private struct EquipmentWorkspaceView: View {
                                 }
                                 Spacer()
                                 Button("Edit Equipment", systemImage: "pencil") {
-                                    editingEquipment = equipment
-                                    isShowingEditor = true
+                                    if store.beginRecordChange() {
+                                        editingEquipment = equipment
+                                        isShowingEditor = true
+                                    }
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
@@ -3404,8 +3426,10 @@ private struct EquipmentWorkspaceView: View {
                 .buttonStyle(.glass)
 
                 Button("Add Equipment", systemImage: "plus") {
-                    editingEquipment = nil
-                    isShowingEditor = true
+                    if store.beginRecordChange() {
+                        editingEquipment = nil
+                        isShowingEditor = true
+                    }
                 }
                 .buttonStyle(.glassProminent)
             }
