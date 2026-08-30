@@ -130,6 +130,7 @@ struct FireVaultTechnicianStorefrontView: View {
                 benefit("Notes & equipment", symbol: "folder.fill")
                 benefit("Photos, video & scans", symbol: "camera.fill")
                 benefit("Sync & backup", symbol: "arrow.triangle.2.circlepath.icloud.fill")
+                benefit("Web portal", symbol: "globe")
             }
         }
         .padding(12)
@@ -280,11 +281,17 @@ struct FireVaultTechnicianStorefrontView: View {
     }
 
     private var renewalDisclosure: some View {
-        VStack(spacing: 5) {
-            Text(renewalDisclosureText)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+        VStack(spacing: 6) {
+            VStack(spacing: 2) {
+                ForEach(renewalDisclosureLines, id: \.self) { line in
+                    Text(line)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
+            }
+            .frame(maxWidth: .infinity)
 
             HStack(spacing: 16) {
                 Link("Privacy Policy", destination: FireVaultPublisherInfo.privacyPolicyURL)
@@ -295,6 +302,7 @@ struct FireVaultTechnicianStorefrontView: View {
             .lineLimit(1)
         }
         .padding(.horizontal, 6)
+        .padding(.bottom, 18)
     }
 
     private func benefit(_ title: String, symbol: String) -> some View {
@@ -328,11 +336,15 @@ struct FireVaultTechnicianStorefrontView: View {
         return selectedProductIsEligibleForTrial ? "Start 14-Day Free Trial" : "Subscribe"
     }
 
-    private var renewalDisclosureText: String {
+    private var renewalDisclosureLines: [String] {
         let opening = selectedProductIsEligibleForTrial
-            ? "After the 14-day trial, payment is charged to your Apple Account."
-            : "Payment is charged to your Apple Account when you confirm the purchase."
-        return "\(opening) The subscription renews automatically unless canceled at least 24 hours before the current period ends. Manage or cancel it in your App Store subscription settings."
+            ? "Apple charges your selected plan after the 14-day trial."
+            : "Apple charges your selected plan when you confirm."
+        return [
+            opening,
+            "Renews automatically unless canceled 24 hours before renewal.",
+            "Manage or cancel anytime in App Store settings."
+        ]
     }
 
     private var messageIsPresented: Binding<Bool> {
