@@ -174,12 +174,6 @@ final class FireVaultAppDelegate: NSObject, UIApplicationDelegate, UNUserNotific
         configurationForConnecting connectingSceneSession: UISceneSession,
         options: UIScene.ConnectionOptions
     ) -> UISceneConfiguration {
-        Task { @MainActor in
-            if let shortcutItem = options.shortcutItem {
-                _ = FireVaultQuickActionCenter.shared.receive(shortcutItem)
-            }
-        }
-
         let configuration = UISceneConfiguration(
             name: nil,
             sessionRole: connectingSceneSession.role
@@ -233,6 +227,7 @@ enum FireVaultOrientationCoordinator {
     }
 }
 
+@MainActor
 final class FireVaultSceneDelegate: NSObject, UIWindowSceneDelegate {
     func scene(
         _ scene: UIScene,
@@ -240,18 +235,15 @@ final class FireVaultSceneDelegate: NSObject, UIWindowSceneDelegate {
         options connectionOptions: UIScene.ConnectionOptions
     ) {
         guard let shortcutItem = connectionOptions.shortcutItem else { return }
-        Task { @MainActor in
-            _ = FireVaultQuickActionCenter.shared.receive(shortcutItem)
-        }
+        _ = FireVaultQuickActionCenter.shared.receive(shortcutItem)
     }
 
-    nonisolated func windowScene(
+    func windowScene(
         _ windowScene: UIWindowScene,
-        performActionFor shortcutItem: UIApplicationShortcutItem
-    ) async -> Bool {
-        let shortcutType = shortcutItem.type
-        return await MainActor.run {
-            FireVaultQuickActionCenter.shared.receive(shortcutType: shortcutType)
-        }
+        performActionFor shortcutItem: UIApplicationShortcutItem,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        let handled = FireVaultQuickActionCenter.shared.receive(shortcutItem)
+        completionHandler(handled)
     }
 }

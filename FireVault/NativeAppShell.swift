@@ -2270,6 +2270,32 @@ struct NativePhotoView: View {
                 }
                 .font(.caption.bold())
                 .padding(.horizontal, 4)
+
+                if mediaKind == .photo, let mediaAccountID {
+                    Button {
+                        store.openPhotoVideoLibrary(for: mediaAccountID)
+                    } label: {
+                        Label("View in Account Photos", systemImage: "photo.on.rectangle.angled")
+                            .font(.subheadline.bold())
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(NativeShellPalette.blue)
+                    .accessibilityHint("Opens the saved overlaid photo in this account's Photo and Video library")
+                    .accessibilityIdentifier("native-view-account-photos")
+                } else if mediaKind == .scan, let mediaAccountID {
+                    Button {
+                        store.openFilesScans(for: mediaAccountID)
+                    } label: {
+                        Label("View in Account Files & Scans", systemImage: "doc.viewfinder")
+                            .font(.subheadline.bold())
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(NativeShellPalette.blue)
+                    .accessibilityHint("Opens the saved document in this account's Files and Scans library")
+                    .accessibilityIdentifier("native-view-account-scans")
+                }
             }
         }
     }

@@ -62,12 +62,15 @@ enum FireVaultPurchaseOutcome: Equatable {
 
 enum FireVaultSubscriptionError: LocalizedError {
     case failedVerification
+    case productsUnavailable
     case unknownPurchaseResult
 
     var errorDescription: String? {
         switch self {
         case .failedVerification:
             "Apple could not verify this purchase. No subscription access was changed."
+        case .productsUnavailable:
+            "Apple returned no FireVault subscription products. Check your connection and try again. If this continues in TestFlight, the Paid Apps Agreement or subscription setup in App Store Connect still needs attention."
         case .unknownPurchaseResult:
             "The App Store returned an unfamiliar purchase result. Please try again."
         }
@@ -94,6 +97,7 @@ final class FireVaultSubscriptionStore: ObservableObject {
     }
 
     private static let offlineGraceInterval: TimeInterval = 72 * 60 * 60
+    private static let productRetryDelays: [TimeInterval] = [0, 1, 2]
 
     private let defaults: UserDefaults
     private var transactionUpdatesTask: Task<Void, Never>?
@@ -113,13 +117,12 @@ final class FireVaultSubscriptionStore: ObservableObject {
     }
 
     func refresh() async {
+        guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
 
         do {
-            let loadedProducts = try await Product.products(
-                for: FireVaultSubscriptionCatalog.productIDs
-            )
+            let loadedProducts = try await loadProductsWithRetry()
             products = FireVaultSubscriptionCatalog.sortProducts(loadedProducts)
             var eligibleProductIDs: Set<String> = []
             for product in loadedProducts {
@@ -135,6 +138,32 @@ final class FireVaultSubscriptionStore: ObservableObject {
             lastErrorMessage = error.localizedDescription
             restoreCachedAccessIfNeeded()
         }
+    }
+
+    private func loadProductsWithRetry() async throws -> [Product] {
+        var lastError: Error?
+
+        for delay in Self.productRetryDelays {
+            if delay > 0 {
+                try await Task.sleep(for: .seconds(delay))
+            }
+
+            do {
+                let loadedProducts = try await Product.products(
+                    for: FireVaultSubscriptionCatalog.productIDs
+                )
+                if !loadedProducts.isEmpty {
+                    return loadedProducts
+                }
+            } catch {
+                lastError = error
+            }
+        }
+
+        if let lastError {
+            throw lastError
+        }
+        throw FireVaultSubscriptionError.productsUnavailable
     }
 
     func purchase(_ product: Product) async throws -> FireVaultPurchaseOutcome {
@@ -274,7 +303,8 @@ final class FireVaultSubscriptionStore: ObservableObject {
 
     private func restoreCachedAccessIfNeeded(now: Date = Date()) {
         guard !access.grantsFullAccess else { return }
-        access = Self.restoredAccess(defaults: defaults, now: now)
+        let restored = Self.restoredAccess(defaults: defaults, now: now)
+        access = restored == .checking ? .unavailable : restored
     }
 
     private static func restoredAccess(defaults: UserDefaults, now: Date) -> FireVaultSubscriptionAccess {

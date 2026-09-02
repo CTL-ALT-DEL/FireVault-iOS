@@ -152,6 +152,13 @@ struct FireVaultTechnicianStorefrontView: View {
                     .font(.headline)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
+                if let error = subscriptions.lastErrorMessage {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Button("Try Again") {
                     Task { await subscriptions.refresh() }
                 }

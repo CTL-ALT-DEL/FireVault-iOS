@@ -272,6 +272,9 @@ struct ContentView: View {
             prepareActiveVault()
             resumeNearbyLocationIfNeeded()
             Task { await refreshAndReconcileFeatureControls() }
+            if subscriptions.products.isEmpty {
+                Task { await subscriptions.refresh() }
+            }
             privacyLock.lockIfNeeded(settings.preferences.privacy)
             if isPrivacyLocked {
                 privacyLock.authenticate()

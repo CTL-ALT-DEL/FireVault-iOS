@@ -505,8 +505,11 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
             accessoryType: .disclosureIndicator
         )
         item.handler = { [weak self] _, completion in
-            self?.showAccount(account)
-            completion()
+            guard let self else {
+                completion()
+                return
+            }
+            showAccount(account, selectionCompletion: completion)
         }
         return item
     }
@@ -519,13 +522,22 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
 
     // MARK: - Site actions
 
-    private func showAccount(_ account: FireVaultWorkspaceAccount) {
+    private func showAccount(
+        _ account: FireVaultWorkspaceAccount,
+        selectionCompletion: @escaping () -> Void
+    ) {
+        guard let interfaceController else {
+            selectionCompletion()
+            return
+        }
         rememberRecentAccount(account)
         let template = CPListTemplate(
             title: "Account",
             sections: makeAccountSections(account)
         )
-        interfaceController?.pushTemplate(template, animated: true, completion: nil)
+        interfaceController.pushTemplate(template, animated: true) { _, _ in
+            selectionCompletion()
+        }
     }
 
     private func makeAccountSections(_ account: FireVaultWorkspaceAccount) -> [CPListSection] {
@@ -546,8 +558,16 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
                     : account.address,
                 symbol: "arrow.triangle.turn.up.right.diamond.fill",
                 color: .systemBlue
-            ) { [weak self] in
-                self?.openDrivingDirections(to: coordinate, name: account.name)
+            ) { [weak self] completion in
+                guard let self else {
+                    completion()
+                    return
+                }
+                openDrivingDirections(
+                    to: coordinate,
+                    name: account.name,
+                    completion: completion
+                )
             })
         }
 
@@ -557,8 +577,12 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
                 detail: formattedPhone(account.phone),
                 symbol: "phone.fill",
                 color: .systemGreen
-            ) { [weak self] in
-                self?.openPhone(account.phone)
+            ) { [weak self] completion in
+                guard let self else {
+                    completion()
+                    return
+                }
+                openPhone(account.phone, completion: completion)
             })
         }
 
@@ -586,7 +610,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
         detail: String,
         symbol: String,
         color: UIColor,
-        action: @escaping @MainActor () -> Void
+        action: @escaping @MainActor (@escaping () -> Void) -> Void
     ) -> CPListItem {
         let item = CPListItem(
             text: title,
@@ -596,8 +620,7 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
             accessoryType: .disclosureIndicator
         )
         item.handler = { _, completion in
-            action()
-            completion()
+            action(completion)
         }
         return item
     }
@@ -615,14 +638,16 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
             accessoryType: .disclosureIndicator
         )
         item.handler = { [weak self] _, completion in
-            if let coordinate = location.coordinate {
-                self?.openDirections(
-                    to: coordinate,
-                    name: "\(account.name) • \(label.isEmpty ? location.type : label)",
-                    mode: location.resolvedDirectionsMode
-                )
+            guard let self, let coordinate = location.coordinate else {
+                completion()
+                return
             }
-            completion()
+            openDirections(
+                to: coordinate,
+                name: "\(account.name) • \(label.isEmpty ? location.type : label)",
+                mode: location.resolvedDirectionsMode,
+                completion: completion
+            )
         }
         return item
     }
@@ -707,14 +732,19 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
         return trimmed.uppercased() == "POI" ? "POI" : trimmed
     }
 
-    private func openDrivingDirections(to coordinate: CLLocationCoordinate2D, name: String) {
-        openDirections(to: coordinate, name: name, mode: .driving)
+    private func openDrivingDirections(
+        to coordinate: CLLocationCoordinate2D,
+        name: String,
+        completion: @escaping () -> Void = {}
+    ) {
+        openDirections(to: coordinate, name: name, mode: .driving, completion: completion)
     }
 
     private func openDirections(
         to coordinate: CLLocationCoordinate2D,
         name: String,
-        mode: FireVaultDirectionsMode
+        mode: FireVaultDirectionsMode,
+        completion: @escaping () -> Void
     ) {
         var components = URLComponents(string: "https://maps.apple.com/")
         components?.queryItems = [
@@ -722,15 +752,29 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
             URLQueryItem(name: "dirflg", value: mode == .driving ? "d" : "w"),
             URLQueryItem(name: "q", value: name)
         ]
-        guard let url = components?.url else { return }
-        templateApplicationScene?.open(url, options: nil, completionHandler: nil)
+        guard let url = components?.url, let templateApplicationScene else {
+            completion()
+            return
+        }
+        templateApplicationScene.open(url, options: nil) { _ in
+            completion()
+        }
     }
 
-    private func openPhone(_ value: String) {
+    private func openPhone(
+        _ value: String,
+        completion: @escaping () -> Void = {}
+    ) {
         let digits = value.filter(\.isNumber)
         guard !digits.isEmpty,
-              let url = URL(string: "tel:\(digits)") else { return }
-        templateApplicationScene?.open(url, options: nil, completionHandler: nil)
+              let url = URL(string: "tel:\(digits)"),
+              let templateApplicationScene else {
+            completion()
+            return
+        }
+        templateApplicationScene.open(url, options: nil) { _ in
+            completion()
+        }
     }
 
     // MARK: - Trip Log dashboard
@@ -959,7 +1003,11 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
                 } catch {
                     return
                 }
-                self?.requestMetricRefresh(refreshAccounts: true)
+                // Replacing CPListItem instances while the driver is touching
+                // the Nearby list can cancel focus and selection. Live telemetry
+                // still refreshes every two seconds; account rows refresh on
+                // meaningful state changes instead.
+                self?.requestMetricRefresh(refreshAccounts: false)
             }
         }
     }

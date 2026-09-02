@@ -119,6 +119,8 @@ final class FireVaultStore: ObservableObject {
     @Published private(set) var geocodingProgress: FireVaultGeocodingProgress?
     @Published private(set) var nearbyResetRequestID = UUID()
     @Published private(set) var pendingCaptureQuickAction: FireVaultCaptureQuickAction?
+    @Published private(set) var pendingPhotoVideoLibraryAccountID: String?
+    @Published private(set) var pendingFilesScansAccountID: String?
     @Published private(set) var cloudLastSyncedAt: Date?
     @Published private(set) var cloudLastCheckedAt: Date?
     @Published private(set) var cloudSyncErrorMessage: String? = nil
@@ -407,6 +409,34 @@ final class FireVaultStore: ObservableObject {
     func consumeCaptureQuickAction() -> FireVaultCaptureQuickAction? {
         defer { pendingCaptureQuickAction = nil }
         return pendingCaptureQuickAction
+    }
+
+    func openPhotoVideoLibrary(for accountID: String) {
+        guard accounts.contains(where: { $0.id == accountID }) else { return }
+        captureAccountID = accountID
+        selectedTab = .accounts
+        pendingPhotoVideoLibraryAccountID = accountID
+        selectedAccountID = accountID
+    }
+
+    func consumePhotoVideoLibraryRequest(for accountID: String) -> Bool {
+        guard pendingPhotoVideoLibraryAccountID == accountID else { return false }
+        pendingPhotoVideoLibraryAccountID = nil
+        return true
+    }
+
+    func openFilesScans(for accountID: String) {
+        guard accounts.contains(where: { $0.id == accountID }) else { return }
+        captureAccountID = accountID
+        selectedTab = .accounts
+        pendingFilesScansAccountID = accountID
+        selectedAccountID = accountID
+    }
+
+    func consumeFilesScansRequest(for accountID: String) -> Bool {
+        guard pendingFilesScansAccountID == accountID else { return false }
+        pendingFilesScansAccountID = nil
+        return true
     }
 
     func closeAccount(to tab: FireVaultShellTab? = nil) {
@@ -1792,8 +1822,37 @@ final class FireVaultStore: ObservableObject {
             }
         }
         accounts[accountIndex].documents.remove(at: documentIndex)
+        let deletion = Self.documentDeletionActivity(for: document)
+        accounts[accountIndex].recent.insert(deletion, at: 0)
         persist()
         return true
+    }
+
+    private static func documentDeletionActivity(
+        for document: FireVaultWorkspaceDocument,
+        deletedAt: Date = Date()
+    ) -> FireVaultWorkspaceRecent {
+        let presentation: (title: String, kind: String, location: String)
+        switch document.kind {
+        case "photo":
+            presentation = ("Photo deleted", "deleted-photo", "Photos & Videos")
+        case "video":
+            presentation = ("Video deleted", "deleted-video", "Photos & Videos")
+        case "scan":
+            presentation = ("Scan deleted", "deleted-document", "Files & Scans")
+        case "report":
+            presentation = ("Report deleted", "deleted-document", "Files & Scans")
+        default:
+            presentation = ("File deleted", "deleted-document", "Files & Scans")
+        }
+        return .init(
+            id: UUID().uuidString,
+            title: presentation.title,
+            subtitle: "Removed \(document.title) from \(presentation.location)",
+            kind: presentation.kind,
+            date: "Now",
+            updatedAt: deletedAt
+        )
     }
 
     func mediaStorageReport() -> FireVaultMediaStorageReport {

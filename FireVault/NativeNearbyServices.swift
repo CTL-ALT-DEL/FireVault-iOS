@@ -76,8 +76,16 @@ struct FireVaultPostalAddress: Equatable {
         case 3:
             street = components[0]
             city = components[1]
-            state = components[2]
-            zip = ""
+            let stateAndZIP = components[2]
+                .split(whereSeparator: \Character.isWhitespace)
+                .map(String.init)
+            if stateAndZIP.count >= 2 {
+                state = stateAndZIP.dropLast().joined(separator: " ")
+                zip = stateAndZIP.last ?? ""
+            } else {
+                state = components[2]
+                zip = ""
+            }
         case 2:
             street = components[0]
             city = components[1]

@@ -11,6 +11,7 @@ import MapKit
 import UniformTypeIdentifiers
 import UIKit
 import AVKit
+import QuickLookThumbnailing
 import VisionKit
 
 struct FireVaultWorkspaceAccount: Codable, Identifiable, Equatable {
@@ -320,12 +321,14 @@ struct FieldWorkspaceView: View {
 
     @State private var isShowingAccountEditor = false
     @State private var isShowingNoteEditor = false
+    @State private var isShowingPhotoVideoLibrary = false
+    @State private var isShowingFilesScans = false
     @State private var isConfirmingAccountDeletion = false
     @State private var isDeletingAccount = false
     @State private var accountDeletionError: String?
 
     private let columns = [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)]
-    private let recentActivityDisplayLimit = 20
+    private let recentActivityDisplayLimit = 15
 
     private var photoVideoCount: Int {
         account.documents.filter { $0.kind == "photo" || $0.kind == "video" }.count
@@ -414,6 +417,21 @@ struct FieldWorkspaceView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 appNavigation
             }
+            .navigationDestination(isPresented: $isShowingPhotoVideoLibrary) {
+                PhotoVideoLibraryView(account: account, store: store, settings: settings)
+            }
+            .navigationDestination(isPresented: $isShowingFilesScans) {
+                FilesScansView(account: account, store: store)
+            }
+            .task {
+                openRequestedWorkspaceDestination()
+            }
+            .onChange(of: store.pendingPhotoVideoLibraryAccountID) { _, _ in
+                openRequestedWorkspaceDestination()
+            }
+            .onChange(of: store.pendingFilesScansAccountID) { _, _ in
+                openRequestedWorkspaceDestination()
+            }
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .tint(FieldWorkspacePalette.blue)
@@ -456,6 +474,14 @@ struct FieldWorkspaceView: View {
             Button("OK", role: .cancel) { accountDeletionError = nil }
         } message: {
             Text(accountDeletionError ?? "Nothing was deleted.")
+        }
+    }
+
+    private func openRequestedWorkspaceDestination() {
+        if store.consumePhotoVideoLibraryRequest(for: account.id) {
+            isShowingPhotoVideoLibrary = true
+        } else if store.consumeFilesScansRequest(for: account.id) {
+            isShowingFilesScans = true
         }
     }
 
@@ -795,21 +821,16 @@ struct FieldWorkspaceView: View {
     }
 
     private var addressLines: (street: String, locality: String?) {
-        let normalized = account.address
-            .replacingOccurrences(of: "\n", with: ",")
-            .replacingOccurrences(of: "\r", with: ",")
-        let components = normalized
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard let address = FireVaultPostalAddress(combinedAddress: account.address) else {
+            return ("No address saved", nil)
+        }
+        let stateAndZIP = [address.state, address.zip]
             .filter { !$0.isEmpty }
-
-        guard !components.isEmpty else { return ("No address saved", nil) }
-        guard components.count >= 2 else { return (components[0], nil) }
-
-        let localityStart = max(1, components.count - 2)
-        let street = components[..<localityStart].joined(separator: ", ")
-        let locality = components[localityStart...].joined(separator: ", ")
-        return (street, locality)
+            .joined(separator: " ")
+        let locality = [address.city, stateAndZIP]
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+        return (address.street, locality.isEmpty ? nil : locality)
     }
 
     private var appNavigation: some View {
@@ -863,7 +884,10 @@ struct FireVaultEditAccountSheet: View {
     private let save: (FireVaultAccountEditDraft) -> Bool
 
     @State private var name: String
-    @State private var address: String
+    @State private var streetAddress: String
+    @State private var city: String
+    @State private var regionState: String
+    @State private var postalCode: String
     @State private var category: String
     @State private var accountId: String
     @State private var phone: String
@@ -884,7 +908,11 @@ struct FireVaultEditAccountSheet: View {
         self.locationService = locationService
         self.save = save
         _name = State(initialValue: account.name)
-        _address = State(initialValue: account.address)
+        let postalAddress = FireVaultPostalAddress(combinedAddress: account.address)
+        _streetAddress = State(initialValue: postalAddress?.street ?? "")
+        _city = State(initialValue: postalAddress?.city ?? "")
+        _regionState = State(initialValue: postalAddress?.state ?? "")
+        _postalCode = State(initialValue: postalAddress?.zip ?? "")
         _category = State(initialValue: account.category)
         _accountId = State(initialValue: account.accountId)
         _phone = State(initialValue: account.phone)
@@ -900,6 +928,13 @@ struct FireVaultEditAccountSheet: View {
 
     private var normalizedName: String {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var combinedAddress: String {
+        [streetAddress, city, regionState, postalCode]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
     }
 
     private var parsedCoordinatePair: (Double?, Double?)? {
@@ -960,7 +995,14 @@ struct FireVaultEditAccountSheet: View {
 
                 Section("Site Identity") {
                     accountEditField("Account Name", symbol: "building.2.fill", text: $name)
-                    accountEditField("Street Address", symbol: "mappin.and.ellipse", text: $address, lineLimit: 3)
+                    accountEditField("Street Address", symbol: "mappin.and.ellipse", text: $streetAddress)
+                    HStack(alignment: .top, spacing: 8) {
+                        compactAddressField("CITY", text: $city, width: nil)
+                        compactAddressField("STATE", text: $regionState, width: 68)
+                            .textInputAutocapitalization(.characters)
+                        compactAddressField("ZIP", text: $postalCode, width: 88)
+                            .keyboardType(.numbersAndPunctuation)
+                    }
                     accountEditField("Category", symbol: "tag.fill", text: $category)
                     if !category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button("Remove Category", systemImage: "xmark.circle", role: .destructive) {
@@ -1069,7 +1111,7 @@ struct FireVaultEditAccountSheet: View {
                     WorkspaceEditorToolbarButton(kind: .save) {
                         let draft = FireVaultAccountEditDraft(
                             name: name,
-                            address: address,
+                            address: combinedAddress,
                             category: category,
                             accountId: accountId,
                             phone: phone,
@@ -1131,6 +1173,26 @@ struct FireVaultEditAccountSheet: View {
                     .focused($isTextInputFocused)
             }
         }
+        .padding(.vertical, 4)
+    }
+
+    private func compactAddressField(
+        _ title: String,
+        text: Binding<String>,
+        width: CGFloat?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption2.bold())
+                .tracking(0.45)
+                .foregroundStyle(FieldWorkspacePalette.secondaryText)
+            TextField(title.capitalized, text: text)
+                .font(.body.weight(.semibold))
+                .textFieldStyle(.roundedBorder)
+                .focused($isTextInputFocused)
+        }
+        .frame(width: width)
+        .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
         .padding(.vertical, 4)
     }
 
@@ -3055,14 +3117,10 @@ private struct PhotoVideoLibraryView: View {
 
     private func mediaRow(_ document: FireVaultWorkspaceDocument) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: document.kind == "video" ? "video.fill" : "photo.fill")
-                .font(.headline)
-                .foregroundStyle(FieldWorkspacePalette.purple)
-                .frame(width: 42, height: 42)
-                .background(
-                    FieldWorkspacePalette.purple.opacity(0.14),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                )
+            FireVaultMediaThumbnailView(
+                url: store.mediaURL(accountID: account.id, documentID: document.id),
+                kind: document.kind
+            )
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(document.title)
@@ -3117,6 +3175,85 @@ private struct PhotoVideoLibraryView: View {
                 symbol: "exclamationmark.triangle"
             )
         }
+    }
+}
+
+private enum FireVaultMediaThumbnailCache {
+    static let images = NSCache<NSString, UIImage>()
+}
+
+private struct FireVaultMediaThumbnailView: View {
+    let url: URL?
+    let kind: String
+    @Environment(\.displayScale) private var displayScale
+    @State private var thumbnail: UIImage?
+
+    private var isVideo: Bool { kind == "video" }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(FieldWorkspacePalette.purple.opacity(0.14))
+
+            if let thumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: isVideo ? "video.fill" : "photo.fill")
+                    .font(.headline)
+                    .foregroundStyle(FieldWorkspacePalette.purple)
+            }
+
+            if isVideo, thumbnail != nil {
+                Image(systemName: "play.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(8)
+                    .background(.black.opacity(0.62), in: Circle())
+            }
+        }
+        .frame(width: 64, height: 64)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.black.opacity(0.10), lineWidth: 1)
+        }
+        .accessibilityHidden(true)
+        .task(id: url?.path) {
+            await loadThumbnail()
+        }
+    }
+
+    @MainActor
+    private func loadThumbnail() async {
+        guard let url else {
+            thumbnail = nil
+            return
+        }
+
+        let cacheKey = url.standardizedFileURL.path as NSString
+        if let cached = FireVaultMediaThumbnailCache.images.object(forKey: cacheKey) {
+            thumbnail = cached
+            return
+        }
+
+        let request = QLThumbnailGenerator.Request(
+            fileAt: url,
+            size: CGSize(width: 128, height: 128),
+            scale: displayScale,
+            representationTypes: .thumbnail
+        )
+
+        let image = await withCheckedContinuation { continuation in
+            QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { representation, _ in
+                continuation.resume(returning: representation?.uiImage)
+            }
+        }
+
+        guard !Task.isCancelled, let image else { return }
+        FireVaultMediaThumbnailCache.images.setObject(image, forKey: cacheKey)
+        thumbnail = image
     }
 }
 
@@ -4217,11 +4354,28 @@ private struct WorkspaceRecentRow: View {
     }
 
     private func recentSymbol(_ kind: String) -> String {
-        switch kind { case "document": return "doc"; case "location": return "mappin"; case "visit": return "checkmark.circle"; case "note": return "note.text"; default: return "clock" }
+        switch kind {
+        case "photo": return "photo.fill"
+        case "video": return "video.fill"
+        case "deleted-photo", "deleted-video", "deleted-document": return "trash.fill"
+        case "document", "scan", "report": return "doc.fill"
+        case "location": return "mappin"
+        case "visit": return "checkmark.circle"
+        case "note": return "note.text"
+        default: return "clock"
+        }
     }
 
     private func recentColor(_ kind: String) -> Color {
-        switch kind { case "document": return FieldWorkspacePalette.blue; case "location": return FieldWorkspacePalette.purple; case "visit": return FieldWorkspacePalette.green; case "note": return FieldWorkspacePalette.amber; default: return FieldWorkspacePalette.amber }
+        switch kind {
+        case "photo", "video": return FieldWorkspacePalette.purple
+        case "deleted-photo", "deleted-video", "deleted-document": return FieldWorkspacePalette.red
+        case "document", "scan", "report": return FieldWorkspacePalette.blue
+        case "location": return FieldWorkspacePalette.purple
+        case "visit": return FieldWorkspacePalette.green
+        case "note": return FieldWorkspacePalette.amber
+        default: return FieldWorkspacePalette.amber
+        }
     }
 }
 

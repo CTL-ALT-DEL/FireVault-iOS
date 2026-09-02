@@ -13,6 +13,63 @@ import SwiftUI
 
 @MainActor
 final class FireVaultTests: XCTestCase {
+    func testScanPreviewCanRouteDirectlyToAccountFilesAndScans() throws {
+        let suite = "FireVaultTests.ScanLibraryRoute.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let accountID = try XCTUnwrap(store.accounts.first?.id)
+
+        store.openFilesScans(for: accountID)
+
+        XCTAssertEqual(store.selectedTab, .accounts)
+        XCTAssertEqual(store.selectedAccountID, accountID)
+        XCTAssertEqual(store.pendingFilesScansAccountID, accountID)
+        XCTAssertTrue(store.consumeFilesScansRequest(for: accountID))
+        XCTAssertNil(store.pendingFilesScansAccountID)
+        XCTAssertFalse(store.consumeFilesScansRequest(for: accountID))
+    }
+
+    func testPhotoPreviewCanRouteDirectlyToAccountLibrary() throws {
+        let suite = "FireVaultTests.PhotoLibraryRoute.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let accountID = try XCTUnwrap(store.accounts.first?.id)
+
+        store.openPhotoVideoLibrary(for: accountID)
+
+        XCTAssertEqual(store.selectedTab, .accounts)
+        XCTAssertEqual(store.selectedAccountID, accountID)
+        XCTAssertEqual(store.pendingPhotoVideoLibraryAccountID, accountID)
+        XCTAssertTrue(store.consumePhotoVideoLibraryRequest(for: accountID))
+        XCTAssertNil(store.pendingPhotoVideoLibraryAccountID)
+        XCTAssertFalse(store.consumePhotoVideoLibraryRequest(for: accountID))
+    }
+
+    func testDeletingPhotoAddsClearRecentActivity() throws {
+        let suite = "FireVaultTests.MediaDeletionActivity.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let accountID = try XCTUnwrap(store.accounts.first?.id)
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            UIColor.red.setFill()
+            context.cgContext.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+        let document = try store.attachCapturedPhoto(image, to: accountID)
+
+        XCTAssertTrue(store.deleteDocument(accountID: accountID, documentID: document.id))
+
+        let account = try XCTUnwrap(store.accounts.first(where: { $0.id == accountID }))
+        XCTAssertFalse(account.documents.contains(where: { $0.id == document.id }))
+        XCTAssertEqual(account.recent.first?.title, "Photo deleted")
+        XCTAssertEqual(account.recent.first?.subtitle, "Removed Field photo from Photos & Videos")
+        XCTAssertEqual(account.recent.first?.kind, "deleted-photo")
+        XCTAssertNotNil(account.recent.first?.updatedAt)
+    }
+
     func testExpiredPlanKeepsProductionRecordsReadOnly() throws {
         let suite = "FireVaultTests.Subscription.ReadOnly.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -2933,6 +2990,17 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(address.state, "ID")
         XCTAssertEqual(address.zip, "83702")
         XCTAssertEqual(address.singleLine, "100 Main St, Boise, ID, 83702")
+    }
+
+    func testStandardPostalAddressSplitsStateAndZIP() throws {
+        let address = try XCTUnwrap(
+            FireVaultPostalAddress(combinedAddress: "100 Main St, Boise, ID 83702")
+        )
+
+        XCTAssertEqual(address.street, "100 Main St")
+        XCTAssertEqual(address.city, "Boise")
+        XCTAssertEqual(address.state, "ID")
+        XCTAssertEqual(address.zip, "83702")
     }
 
     func testCensusBatchPayloadUsesOpaqueTokenAndOmitsAccountIdentity() throws {
