@@ -1723,9 +1723,13 @@ final class FireVaultTests: XCTestCase {
             FireVaultCarPlayRefreshPolicy.minimumInterfaceInterval,
             2
         )
-        XCTAssertGreaterThanOrEqual(
+        XCTAssertLessThanOrEqual(
+            FireVaultCarPlayRefreshPolicy.minimumNearbyAccountInterval,
+            5
+        )
+        XCTAssertLessThanOrEqual(
             FireVaultCarPlayRefreshPolicy.minimumPointOfInterestInterval,
-            60
+            5
         )
     }
 
@@ -3074,7 +3078,7 @@ final class FireVaultTests: XCTestCase {
     }
 
     func testLiveNearbyUsesDrivingDistanceRefreshThreshold() {
-        XCTAssertEqual(FireVaultLocationService.liveNearbyDistanceFilter, 50)
+        XCTAssertEqual(FireVaultLocationService.liveNearbyDistanceFilter, 12)
     }
 
     func testNearbyAccountCameraUsesTightAccountZoom() {

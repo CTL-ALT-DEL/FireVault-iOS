@@ -279,7 +279,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
     }
 
     static let shared = FireVaultLocationService()
-    static let liveNearbyDistanceFilter: CLLocationDistance = 50
+    static let liveNearbyDistanceFilter: CLLocationDistance = 12
 
     @Published private(set) var coordinate: CLLocationCoordinate2D?
     @Published private(set) var latestLocation: CLLocation?
@@ -390,7 +390,10 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         manager.desiredAccuracy = wantsHighAccuracyNearby
             ? kCLLocationAccuracyNearestTenMeters
             : kCLLocationAccuracyHundredMeters
-        manager.pausesLocationUpdatesAutomatically = true
+        // Nearby tracking only runs while a handset or CarPlay consumer is
+        // visible. Keep it responsive during that window; automatic pausing
+        // can otherwise leave distance and drive details stale for minutes.
+        manager.pausesLocationUpdatesAutomatically = false
     }
 
     func stopLiveNearbyUpdates(consumer: LiveConsumer = .handset) {

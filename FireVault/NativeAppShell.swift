@@ -493,6 +493,7 @@ private struct NativeNearbyView: View {
     @State private var selectedTripLogDetail: FireVaultTripLogDetail?
     @State private var showsTripLogDetailPicker = false
     @State private var showsAutoRotateEditor = false
+    @State private var livePresentationTick = 0
     @AppStorage("tripLog.autoRotateDetails") private var storedAutoRotateTripLogDetails = FireVaultTripLogDetail.allCases.map(\.rawValue).joined(separator: ",")
 
     private var nearbyRows: [FireVaultNativeNearbyAccount] {
@@ -593,6 +594,9 @@ private struct NativeNearbyView: View {
         }
         .task {
             await cycleTripLogDetails()
+        }
+        .task {
+            await refreshLivePresentation()
         }
         .onDisappear {
             radiusCollapseTask?.cancel()
@@ -977,6 +981,7 @@ private struct NativeNearbyView: View {
     }
 
     private var tripLogDetailSecondaryText: String {
+        _ = livePresentationTick
         if payload.demoMode {
             return switch displayedTripLogDetail {
             case .speed: "Avg 57 · Max 71"
@@ -1047,6 +1052,17 @@ private struct NativeNearbyView: View {
             withAnimation(.easeInOut(duration: 0.55)) {
                 tripLogDetailIndex = (tripLogDetailIndex + 1) % activeAutoRotateTripLogDetails.count
             }
+        }
+    }
+
+    private func refreshLivePresentation() async {
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(for: .seconds(2))
+            } catch {
+                return
+            }
+            livePresentationTick &+= 1
         }
     }
 

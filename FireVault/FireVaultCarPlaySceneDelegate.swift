@@ -64,7 +64,8 @@ enum FireVaultCarPlayRefreshPolicy {
     /// Keep live driving telemetry responsive without coupling the CarPlay
     /// presentation cadence to Trip Log's route-archive sampling interval.
     static let minimumInterfaceInterval: TimeInterval = 2
-    static let minimumPointOfInterestInterval: TimeInterval = 60
+    static let minimumNearbyAccountInterval: TimeInterval = 5
+    static let minimumPointOfInterestInterval: TimeInterval = 5
 }
 
 private enum FireVaultCarPlayAccountEmphasis {
@@ -99,6 +100,8 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
     private var liveRefreshTask: Task<Void, Never>?
     private var metricRefreshTask: Task<Void, Never>?
     private var lastMetricRefreshAt = Date.distantPast
+    private var lastNearbyAccountRefreshAt = Date.distantPast
+    private var pendingAccountRefresh = false
     private var locationObservation: AnyCancellable?
     private var tripLogLocationObservation: AnyCancellable?
     private var tripLogRecordingObservation: AnyCancellable?
@@ -153,6 +156,8 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
         arrivedAccountID = nil
         tabAppearanceSignature = nil
         lastPointOfInterestRefreshAt = .distantPast
+        lastNearbyAccountRefreshAt = .distantPast
+        pendingAccountRefresh = false
         self.interfaceController = nil
         self.templateApplicationScene = nil
     }
@@ -1003,21 +1008,24 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
                 } catch {
                     return
                 }
-                // Replacing CPListItem instances while the driver is touching
-                // the Nearby list can cancel focus and selection. Live telemetry
-                // still refreshes every two seconds; account rows refresh on
-                // meaningful state changes instead.
-                self?.requestMetricRefresh(refreshAccounts: false)
+                // Trip and drive telemetry refresh every two seconds. Nearby
+                // rows are requested here too, then independently limited to a
+                // five-second cadence so they stay current without rebuilding
+                // continuously while the driver is making a selection.
+                self?.requestMetricRefresh(refreshAccounts: true)
             }
         }
     }
 
     private func requestMetricRefresh(refreshAccounts: Bool = false) {
+        pendingAccountRefresh = pendingAccountRefresh || refreshAccounts
         let minimumInterval = FireVaultCarPlayRefreshPolicy.minimumInterfaceInterval
         let elapsed = Date().timeIntervalSince(lastMetricRefreshAt)
         if elapsed >= minimumInterval {
+            let shouldRefreshAccounts = pendingAccountRefresh
+            pendingAccountRefresh = false
             lastMetricRefreshAt = Date()
-            refreshCarPlayState(refreshAccounts: refreshAccounts)
+            refreshCarPlayState(refreshAccounts: shouldRefreshAccounts)
             return
         }
         guard metricRefreshTask == nil else { return }
@@ -1029,19 +1037,24 @@ final class FireVaultCarPlaySceneDelegate: UIResponder,
             }
             guard let self else { return }
             metricRefreshTask = nil
+            let shouldRefreshAccounts = pendingAccountRefresh
+            pendingAccountRefresh = false
             lastMetricRefreshAt = Date()
-            refreshCarPlayState(refreshAccounts: refreshAccounts)
+            refreshCarPlayState(refreshAccounts: shouldRefreshAccounts)
         }
     }
 
     private func refreshCarPlayState(refreshAccounts: Bool = true) {
-        if refreshAccounts {
-            metricRefreshTask?.cancel()
-            metricRefreshTask = nil
-        }
         lastMetricRefreshAt = Date()
-        if refreshAccounts {
+        let now = Date()
+        let shouldRefreshNearby = refreshAccounts
+            && now.timeIntervalSince(lastNearbyAccountRefreshAt)
+                >= FireVaultCarPlayRefreshPolicy.minimumNearbyAccountInterval
+        if shouldRefreshNearby {
+            lastNearbyAccountRefreshAt = now
             nearbyTemplate?.updateSections(makeNearbySections())
+            let accounts = Array(sortedMappedAccounts(favoritesOnly: false).prefix(12))
+            refreshNearbyMapIfAllowed(accounts: accounts)
         }
         tripLogTemplate?.items = makeTripLogInformationItems()
         tripLogTemplate?.actions = makeTripLogActions()
