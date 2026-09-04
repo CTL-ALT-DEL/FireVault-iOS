@@ -354,7 +354,7 @@ function drawContinuationHeader(
   periodStart: string,
 ): number {
   page.drawText("FIREVAULT", { x: 42, y: 755, size: 13, font: bold, color: navy });
-  page.drawText(`${kind.toUpperCase()} TRIP LOG • ${periodStart}`, {
+  page.drawText(`${kind.toUpperCase()} TRIP LOG - ${periodStart}`, {
     x: 410, y: 755, size: 8, font: regular, color: gray,
   });
   page.drawLine({ start: { x: 42, y: 743 }, end: { x: 570, y: 743 }, thickness: 1, color: line });
@@ -442,13 +442,31 @@ function compactDuration(milliseconds: number): string {
   return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
 }
 function formatDate(value: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-US", { timeZone, weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date(value));
+  return pdfText(new Intl.DateTimeFormat("en-US", { timeZone, weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date(value)));
 }
 function formatTime(value: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).format(new Date(value));
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(new Date(value)).filter(part => part.type !== "literal").map(part => [part.type, part.value]));
+  return `${parts.hour}:${parts.minute} ${parts.dayPeriod}`;
 }
 function fit(value: string, length: number): string {
-  return value.length <= length ? value : `${value.slice(0, length - 1)}…`;
+  const safe = pdfText(value);
+  return safe.length <= length ? safe : `${safe.slice(0, Math.max(0, length - 3))}...`;
+}
+function pdfText(value: string): string {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\u00a0\u202f]/g, " ")
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/\u2026/g, "...")
+    .replace(/[^\x20-\x7e]/g, "?");
 }
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
