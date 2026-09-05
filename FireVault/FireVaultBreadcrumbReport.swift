@@ -118,8 +118,9 @@ struct FireVaultBreadcrumbReport: Equatable {
             return "\(latitude.formatted(.number.precision(.fractionLength(5)))), \(longitude.formatted(.number.precision(.fractionLength(5))))"
         }
 
-        var mapStop: FireVaultTripLogMapStop {
-            .init(
+        var mapStop: FireVaultTripLogMapStop? {
+            guard classification != .personal else { return nil }
+            return .init(
                 id: id,
                 sequence: sequence,
                 latitude: mapLatitude,
@@ -139,6 +140,7 @@ struct FireVaultBreadcrumbReport: Equatable {
     let elapsedTime: TimeInterval
     let visits: [Visit]
     let routePoints: [FireVaultTripLogRoutePoint]
+    let routeSegments: [[FireVaultTripLogRoutePoint]]
 
     init(
         day: FireVaultBreadcrumbDay,
@@ -155,14 +157,17 @@ struct FireVaultBreadcrumbReport: Equatable {
         self.technicianName = technicianName.trimmingCharacters(in: .whitespacesAndNewlines)
         self.companyName = companyName.trimmingCharacters(in: .whitespacesAndNewlines)
         totalDistanceMeters = day.totalDistanceMeters
-        elapsedTime = max(0, (day.endedAt ?? generatedAt).timeIntervalSince(day.startedAt))
-        routePoints = day.points.map {
-            .init(
-                latitude: $0.latitude,
-                longitude: $0.longitude,
-                altitudeFeet: $0.altitude.map { $0 * 3.280_84 }
-            )
+        elapsedTime = day.elapsedTime(asOf: generatedAt)
+        routeSegments = day.routeSegments.map { segment in
+            segment.map {
+                .init(
+                    latitude: $0.latitude,
+                    longitude: $0.longitude,
+                    altitudeFeet: $0.altitude.map { $0 * 3.280_84 }
+                )
+            }
         }
+        routePoints = routeSegments.flatMap { $0 }
         visits = day.stops
             .sorted { $0.arrival < $1.arrival }
             .enumerated()
@@ -186,7 +191,7 @@ struct FireVaultBreadcrumbReport: Equatable {
                     classification: classification,
                     accountName: redactsPrivateDetails ? "" : stop.title,
                     accountAddress: redactsPrivateDetails ? "" : (stop.accountAddress ?? ""),
-                    accountID: redactsPrivateDetails ? "" : (stop.accountID ?? ""),
+                    accountID: redactsPrivateDetails ? "" : (stop.accountReference ?? ""),
                     technicianNote: redactsPrivateDetails ? "" : (stop.technicianNote ?? ""),
                     latitude: includeCoordinates && !redactsPrivateDetails ? stop.latitude : nil,
                     longitude: includeCoordinates && !redactsPrivateDetails ? stop.longitude : nil,
@@ -238,6 +243,17 @@ struct FireVaultBreadcrumbReport: Equatable {
         endedAt?.formatted(date: .omitted, time: .shortened) ?? "In progress"
     }
 
+    var startLocationText: String {
+        let value = sourceDay.startedAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? "Starting location unavailable" : value
+    }
+
+    var endLocationText: String {
+        if endedAt == nil { return "Trip Log is still in progress" }
+        let value = sourceDay.endedAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? "Ending location unavailable" : value
+    }
+
     var distanceText: String {
         Self.distanceText(totalDistanceMeters)
     }
@@ -247,7 +263,7 @@ struct FireVaultBreadcrumbReport: Equatable {
     }
 
     var mapStops: [FireVaultTripLogMapStop] {
-        visits.map(\.mapStop)
+        visits.compactMap(\.mapStop)
     }
 
     var mapRegion: MKCoordinateRegion {
@@ -280,6 +296,8 @@ struct FireVaultBreadcrumbReport: Equatable {
             companyName.isEmpty ? "" : companyName,
             technicianName.isEmpty ? "Technician: Not configured" : "Technician: \(technicianName)",
             "Workday: \(workdayTimeText)",
+            "Start location: \(startLocationText)",
+            "End location: \(endLocationText)",
             "Distance: \(distanceText) • Elapsed: \(elapsedText)",
             "Account visits: \(accountVisitCount) • Needs review: \(unassignedVisitCount) • Personal: \(personalStopCount)",
             ""
@@ -470,7 +488,7 @@ struct FireVaultTripLogWeeklyReport: Equatable {
     }
 
     var routeSets: [[FireVaultTripLogRoutePoint]] {
-        dailyReports.map(\.routePoints).filter { !$0.isEmpty }
+        dailyReports.flatMap(\.routeSegments).filter { !$0.isEmpty }
     }
 
     var elevationSetsFeet: [[Double]] {
@@ -560,6 +578,7 @@ struct FireVaultBreadcrumbReportView: View {
     @State private var isGeneratingPDF = false
     @State private var isGeneratingImages = false
     @State private var imageSharePayload: FireVaultImageSharePayload?
+    @State private var pdfSharePayload: FireVaultPDFSharePayload?
 
     init(
         report: FireVaultBreadcrumbReport,
@@ -631,6 +650,14 @@ struct FireVaultBreadcrumbReportView: View {
                     ] + payload.images
                 )
             }
+            .sheet(item: $pdfSharePayload) { payload in
+                FireVaultActivityView(
+                    items: [
+                        FireVaultMailSubjectItemSource(subject: payload.subject),
+                        payload.url
+                    ]
+                )
+            }
         }
         .tint(NativeShellPalette.blue)
     }
@@ -675,12 +702,12 @@ struct FireVaultBreadcrumbReportView: View {
                 dailyHeader
                 reportDivider
                 dailyMetricStrip
+                dailyJourneySummary
                 routeMap(
-                    routeSets: [report.routePoints],
+                    routeSets: report.routeSegments,
                     stops: report.mapStops,
                     region: report.mapRegion
                 )
-                elevationProfile(elevationSets: [report.elevationProfileFeet])
                 dailyStopDetails
             } else {
                 weeklyHeader
@@ -691,7 +718,6 @@ struct FireVaultBreadcrumbReportView: View {
                     stops: detail == .detailed ? weeklyReport.mapStops : [],
                     region: weeklyReport.mapRegion
                 )
-                elevationProfile(elevationSets: weeklyReport.elevationSetsFeet)
                 weeklyDaySummary
                 if detail == .detailed {
                     weeklyStopDetails
@@ -826,6 +852,60 @@ struct FireVaultBreadcrumbReportView: View {
         ])
     }
 
+    private var dailyJourneySummary: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("WORKDAY ROUTE")
+                .font(.caption.bold())
+                .tracking(0.9)
+                .foregroundStyle(FireVaultTripLogReportPalette.navy)
+
+            HStack(alignment: .top, spacing: 12) {
+                journeyLocation(
+                    title: "START",
+                    time: report.startTimeText,
+                    location: report.startLocationText,
+                    symbol: "play.fill",
+                    tint: FireVaultTripLogReportPalette.green
+                )
+                journeyLocation(
+                    title: "END",
+                    time: report.endTimeText,
+                    location: report.endLocationText,
+                    symbol: "stop.fill",
+                    tint: FireVaultTripLogReportPalette.red
+                )
+            }
+        }
+    }
+
+    private func journeyLocation(
+        title: String,
+        time: String,
+        location: String,
+        symbol: String,
+        tint: Color
+    ) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: symbol)
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+                .frame(width: 25, height: 25)
+                .background(tint, in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(title) • \(time)")
+                    .font(.caption2.bold().monospacedDigit())
+                    .foregroundStyle(FireVaultTripLogReportPalette.navy)
+                Text(location)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(9)
+        .background(FireVaultTripLogReportPalette.paleBlue, in: RoundedRectangle(cornerRadius: 12))
+    }
+
     private func metricStrip(_ metrics: [(String, String, String)]) -> some View {
         HStack(spacing: 0) {
             ForEach(Array(metrics.enumerated()), id: \.offset) { index, metric in
@@ -888,6 +968,14 @@ struct FireVaultBreadcrumbReportView: View {
                                 FireVaultTripLogReportPalette.blue,
                                 style: .init(lineWidth: 4, lineCap: .round, lineJoin: .round)
                             )
+                    }
+                    if let start = routeSets.first?.first {
+                        Marker("Start", systemImage: "play.fill", coordinate: start.coordinate)
+                            .tint(FireVaultTripLogReportPalette.green)
+                    }
+                    if let end = routeSets.last?.last {
+                        Marker("End", systemImage: "stop.fill", coordinate: end.coordinate)
+                            .tint(FireVaultTripLogReportPalette.red)
                     }
                     ForEach(stops) { stop in
                         Annotation("Stop \(stop.sequence)", coordinate: stop.coordinate) {
@@ -1009,15 +1097,8 @@ struct FireVaultBreadcrumbReportView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 58)
             } else {
-                let visibleVisits = detail == .compact ? Array(report.visits.prefix(8)) : report.visits
-                ForEach(visibleVisits) { visit in
+                ForEach(report.visits) { visit in
                     stopTableRow(visit)
-                }
-                if detail == .compact, report.visits.count > visibleVisits.count {
-                    Text("+ \(report.visits.count - visibleVisits.count) additional stops included in the detailed report")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 3)
                 }
             }
         }
@@ -1049,8 +1130,16 @@ struct FireVaultBreadcrumbReportView: View {
                 .frame(width: 76, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
                 Text(visit.title).fontWeight(.semibold)
+                Text(visit.classification.rawValue)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(classificationColor(visit.classification))
                 if !visit.addressText.isEmpty {
                     Text(visit.addressText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if visit.classification == .account, !visit.accountID.isEmpty {
+                    Text("Account ID: \(visit.accountID)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -1069,6 +1158,16 @@ struct FireVaultBreadcrumbReportView: View {
         .padding(.vertical, 7)
         .overlay(alignment: .bottom) {
             Rectangle().fill(FireVaultTripLogReportPalette.line).frame(height: 1)
+        }
+    }
+
+    private func classificationColor(
+        _ classification: FireVaultBreadcrumbReport.VisitClassification
+    ) -> Color {
+        switch classification {
+        case .account: FireVaultTripLogReportPalette.blue
+        case .unassigned: .orange
+        case .personal: .secondary
         }
     }
 
@@ -1176,7 +1275,7 @@ struct FireVaultBreadcrumbReportView: View {
                     .foregroundStyle(.secondary)
 
                 Button {
-                    Task { await exportPDF() }
+                    Task { await sharePDF() }
                 } label: {
                     HStack {
                         if isGeneratingPDF {
@@ -1184,13 +1283,24 @@ struct FireVaultBreadcrumbReportView: View {
                         } else {
                             Image(systemName: "doc.richtext.fill")
                         }
-                        Text(isGeneratingPDF ? "Building PDF…" : "Export PDF")
+                        Text(isGeneratingPDF ? "Building PDF…" : "Share PDF")
                             .fontWeight(.bold)
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(isGeneratingPDF)
+
+                Button {
+                    Task { await savePDF() }
+                } label: {
+                    Label("Save PDF to Files", systemImage: "folder.badge.plus")
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                }
+                .buttonStyle(.bordered)
                 .disabled(isGeneratingPDF)
 
                 Button {
@@ -1224,7 +1334,7 @@ struct FireVaultBreadcrumbReportView: View {
                 }
                 .buttonStyle(.bordered)
 
-                Text("JPG pages are shared as images so compatible email apps can display them directly in the message. Personal stops remain redacted.")
+                Text("Share PDF sends the complete report to Mail, AirDrop, or a cloud app. Save PDF to Files supports iCloud Drive and on-device storage. Personal stop details and map pins remain redacted.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1233,39 +1343,59 @@ struct FireVaultBreadcrumbReportView: View {
     }
 
     @MainActor
-    private func exportPDF() async {
+    private func savePDF() async {
+        guard !isGeneratingPDF else { return }
+        isGeneratingPDF = true
+        defer { isGeneratingPDF = false }
+        exportDocument = .init(data: await buildPDFData())
+        showsExporter = true
+    }
+
+    @MainActor
+    private func sharePDF() async {
         guard !isGeneratingPDF else { return }
         isGeneratingPDF = true
         defer { isGeneratingPDF = false }
 
+        do {
+            let data = await buildPDFData()
+            let filename = (scope == .daily ? report.filenameStem : weeklyReport.filenameStem) + ".pdf"
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("FireVault-Trip-Log-Exports", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let url = directory.appendingPathComponent(filename)
+            try data.write(to: url, options: .atomic)
+            pdfSharePayload = .init(subject: reportSubject, url: url)
+        } catch {
+            exportStatus = "The Trip Log PDF could not be shared. \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    private func buildPDFData() async -> Data {
         if scope == .daily {
             let mapImage = await FireVaultTripLogMapSnapshot.image(
-                routeSets: [report.routePoints],
+                routeSets: report.routeSegments,
                 stops: report.mapStops,
                 region: report.mapRegion,
                 size: .init(width: 480, height: 480)
             )
-            let data = FireVaultTripLogPDFRenderer.daily(
-                report: report,
-                detail: detail,
-                mapImage: mapImage
-            )
-            exportDocument = .init(data: data)
-        } else {
-            let mapImage = await FireVaultTripLogMapSnapshot.image(
-                routeSets: weeklyReport.routeSets,
-                stops: detail == .detailed ? weeklyReport.mapStops : [],
-                region: weeklyReport.mapRegion,
-                size: .init(width: 480, height: 480)
-            )
-            let data = FireVaultTripLogPDFRenderer.weekly(
-                report: weeklyReport,
-                detail: detail,
-                mapImage: mapImage
-            )
-            exportDocument = .init(data: data)
+            return FireVaultTripLogPDFRenderer.daily(report: report, detail: detail, mapImage: mapImage)
         }
-        showsExporter = true
+
+        let mapImage = await FireVaultTripLogMapSnapshot.image(
+            routeSets: weeklyReport.routeSets,
+            stops: detail == .detailed ? weeklyReport.mapStops : [],
+            region: weeklyReport.mapRegion,
+            size: .init(width: 480, height: 480)
+        )
+        return FireVaultTripLogPDFRenderer.weekly(report: weeklyReport, detail: detail, mapImage: mapImage)
+    }
+
+    private var reportSubject: String {
+        scope == .daily
+            ? "FireVault Pro Trip Log Daily Report"
+            : "FireVault Pro Trip Log Weekly Report"
     }
 
     @MainActor
@@ -1274,32 +1404,7 @@ struct FireVaultBreadcrumbReportView: View {
         isGeneratingImages = true
         defer { isGeneratingImages = false }
 
-        let pdfData: Data
-        if scope == .daily {
-            let mapImage = await FireVaultTripLogMapSnapshot.image(
-                routeSets: [report.routePoints],
-                stops: report.mapStops,
-                region: report.mapRegion,
-                size: .init(width: 480, height: 480)
-            )
-            pdfData = FireVaultTripLogPDFRenderer.daily(
-                report: report,
-                detail: detail,
-                mapImage: mapImage
-            )
-        } else {
-            let mapImage = await FireVaultTripLogMapSnapshot.image(
-                routeSets: weeklyReport.routeSets,
-                stops: detail == .detailed ? weeklyReport.mapStops : [],
-                region: weeklyReport.mapRegion,
-                size: .init(width: 480, height: 480)
-            )
-            pdfData = FireVaultTripLogPDFRenderer.weekly(
-                report: weeklyReport,
-                detail: detail,
-                mapImage: mapImage
-            )
-        }
+        let pdfData = await buildPDFData()
 
         let images = FireVaultTripLogImageRenderer.images(from: pdfData)
         guard !images.isEmpty else {
@@ -1318,7 +1423,7 @@ struct FireVaultBreadcrumbReportView: View {
     }
 }
 
-private enum FireVaultTripLogMapSnapshot {
+enum FireVaultTripLogMapSnapshot {
     static func image(
         routeSets: [[FireVaultTripLogRoutePoint]],
         stops: [FireVaultTripLogMapStop],
@@ -1383,10 +1488,24 @@ private enum FireVaultTripLogMapSnapshot {
                     withAttributes: attributes
                 )
             }
+            if let start = routeSets.first?.first {
+                drawBoundaryMarker(
+                    at: snapshot.point(for: start.coordinate),
+                    label: "S",
+                    color: UIColor(red: 0.18, green: 0.58, blue: 0.28, alpha: 1)
+                )
+            }
+            if let end = routeSets.last?.last {
+                drawBoundaryMarker(
+                    at: snapshot.point(for: end.coordinate),
+                    label: "E",
+                    color: UIColor(red: 0.82, green: 0.12, blue: 0.10, alpha: 1)
+                )
+            }
         }
     }
 
-    private static func fallbackImage(
+    static func fallbackImage(
         routeSets: [[FireVaultTripLogRoutePoint]],
         stops: [FireVaultTripLogMapStop],
         size: CGSize
@@ -1434,7 +1553,67 @@ private enum FireVaultTripLogMapSnapshot {
                 path.lineJoinStyle = .round
                 path.stroke()
             }
+            for stop in stops.prefix(99) {
+                let point = mapped(
+                    .init(
+                        latitude: stop.latitude,
+                        longitude: stop.longitude,
+                        altitudeFeet: nil
+                    )
+                )
+                let circle = CGRect(x: point.x - 11, y: point.y - 11, width: 22, height: 22)
+                UIColor(red: 0.05, green: 0.35, blue: 0.68, alpha: 1).setFill()
+                UIBezierPath(ovalIn: circle).fill()
+                UIColor.white.setStroke()
+                let outline = UIBezierPath(ovalIn: circle.insetBy(dx: 1, dy: 1))
+                outline.lineWidth = 1.5
+                outline.stroke()
+                let number = "\(stop.sequence)" as NSString
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: stop.sequence > 9 ? 7 : 9, weight: .bold),
+                    .foregroundColor: UIColor.white
+                ]
+                let textSize = number.size(withAttributes: attributes)
+                number.draw(
+                    at: .init(x: point.x - textSize.width / 2, y: point.y - textSize.height / 2),
+                    withAttributes: attributes
+                )
+            }
+            if let start = routeSets.first?.first {
+                drawBoundaryMarker(
+                    at: mapped(start),
+                    label: "S",
+                    color: UIColor(red: 0.18, green: 0.58, blue: 0.28, alpha: 1)
+                )
+            }
+            if let end = routeSets.last?.last {
+                drawBoundaryMarker(
+                    at: mapped(end),
+                    label: "E",
+                    color: UIColor(red: 0.82, green: 0.12, blue: 0.10, alpha: 1)
+                )
+            }
         }
+    }
+
+    private static func drawBoundaryMarker(at point: CGPoint, label: String, color: UIColor) {
+        let circle = CGRect(x: point.x - 12, y: point.y - 12, width: 24, height: 24)
+        color.setFill()
+        UIBezierPath(ovalIn: circle).fill()
+        UIColor.white.setStroke()
+        let outline = UIBezierPath(ovalIn: circle.insetBy(dx: 1, dy: 1))
+        outline.lineWidth = 2
+        outline.stroke()
+        let text = label as NSString
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 10, weight: .black),
+            .foregroundColor: UIColor.white
+        ]
+        let size = text.size(withAttributes: attributes)
+        text.draw(
+            at: CGPoint(x: point.x - size.width / 2, y: point.y - size.height / 2),
+            withAttributes: attributes
+        )
     }
 }
 
@@ -1489,35 +1668,47 @@ enum FireVaultTripLogPDFRenderer {
                 y: y
             )
             y += 12
+            y = drawJourneySummary(report: report, y: y)
+            y += 12
             y = drawMap(mapImage, y: y)
             y += 12
-            y = drawElevationProfile([report.elevationProfileFeet], y: y)
-            y += 12
+
+            if !report.visits.isEmpty {
+                let requiredStopTableHeight = 52 + report.visits.reduce(CGFloat.zero) { total, visit in
+                    total + stopRowHeight(
+                        visit: visit,
+                        note: detail == .detailed ? visit.technicianNote : "",
+                        includeCoordinates: detail == .detailed
+                    )
+                }
+                if y + requiredStopTableHeight > 748 {
+                    beginPage(continuation: true)
+                }
+            }
             y = drawSectionTitle("STOP DETAILS", y: y)
             y = drawStopTableHeader(y: y)
 
             if report.visits.isEmpty {
                 y += drawText("No stops were recorded for this workday.", font: .systemFont(ofSize: 10), color: .darkGray, x: 42, y: y + 12, width: 528)
             } else {
-                let visits = detail == .compact ? Array(report.visits.prefix(8)) : report.visits
-                for visit in visits {
+                for visit in report.visits {
                     let notes = detail == .detailed ? visit.technicianNote : ""
-                    let rowHeight = stopRowHeight(visit: visit, note: notes)
+                    let rowHeight = stopRowHeight(
+                        visit: visit,
+                        note: notes,
+                        includeCoordinates: detail == .detailed
+                    )
                     if y + rowHeight > 748 {
                         beginPage(continuation: true)
                         y = drawSectionTitle("STOP DETAILS - CONTINUED", y: y)
                         y = drawStopTableHeader(y: y)
                     }
-                    y = drawStopRow(visit, note: notes, y: y, height: rowHeight)
-                }
-                if detail == .compact, report.visits.count > visits.count {
-                    _ = drawText(
-                        "+ \(report.visits.count - visits.count) additional stops omitted from this compact PDF.",
-                        font: .italicSystemFont(ofSize: 9),
-                        color: .darkGray,
-                        x: 42,
-                        y: y + 10,
-                        width: 528
+                    y = drawStopRow(
+                        visit,
+                        note: notes,
+                        includeCoordinates: detail == .detailed,
+                        y: y,
+                        height: rowHeight
                     )
                 }
             }
@@ -1567,8 +1758,6 @@ enum FireVaultTripLogPDFRenderer {
             )
             y += 15
             y = drawMap(mapImage, y: y)
-            y += 12
-            y = drawElevationProfile(report.elevationSetsFeet, y: y)
             y += 14
             y = drawSectionTitle("WEEKLY SUMMARY", y: y)
             y = drawWeeklyHeader(y: y)
@@ -1594,25 +1783,37 @@ enum FireVaultTripLogPDFRenderer {
                         y: y
                     )
                     y = drawText(
-                        "\(day.distanceText)  •  \(day.elapsedText)  •  \(day.visits.count) stops",
+                        "\(day.distanceText)  |  \(day.elapsedText)  |  \(day.visits.count) stops",
                         font: .systemFont(ofSize: 10, weight: .semibold),
                         color: blue,
                         x: 42,
                         y: y,
                         width: 528
                     ) + y + 10
+                    y = drawJourneySummary(report: day, y: y)
+                    y += 10
                     y = drawStopTableHeader(y: y)
                     if day.visits.isEmpty {
                         y += drawText("No stops were recorded.", font: .systemFont(ofSize: 10), color: .darkGray, x: 42, y: y + 12, width: 528)
                     } else {
                         for visit in day.visits {
-                            let rowHeight = stopRowHeight(visit: visit, note: visit.technicianNote)
+                            let rowHeight = stopRowHeight(
+                                visit: visit,
+                                note: visit.technicianNote,
+                                includeCoordinates: true
+                            )
                             if y + rowHeight > 748 {
                                 beginPage(continuation: true)
                                 y = drawSectionTitle("DAILY STOP DETAILS - CONTINUED", y: y)
                                 y = drawStopTableHeader(y: y)
                             }
-                            y = drawStopRow(visit, note: visit.technicianNote, y: y, height: rowHeight)
+                            y = drawStopRow(
+                                visit,
+                                note: visit.technicianNote,
+                                includeCoordinates: true,
+                                y: y,
+                                height: rowHeight
+                            )
                         }
                     }
                 }
@@ -1699,22 +1900,80 @@ enum FireVaultTripLogPDFRenderer {
         return rect.maxY
     }
 
+    private static func drawJourneySummary(
+        report: FireVaultBreadcrumbReport,
+        y: CGFloat
+    ) -> CGFloat {
+        _ = drawSectionTitle("WORKDAY ROUTE", y: y)
+        let cardY = y + 20
+        let gap: CGFloat = 10
+        let cardWidth = (528 - gap) / 2
+        let startHeight = journeyCardHeight(location: report.startLocationText)
+        let endHeight = journeyCardHeight(location: report.endLocationText)
+        let height = max(60, max(startHeight, endHeight))
+
+        drawJourneyCard(
+            title: "START",
+            time: report.startTimeText,
+            location: report.startLocationText,
+            color: UIColor(red: 0.18, green: 0.58, blue: 0.28, alpha: 1),
+            rect: CGRect(x: 42, y: cardY, width: cardWidth, height: height)
+        )
+        drawJourneyCard(
+            title: "END",
+            time: report.endTimeText,
+            location: report.endLocationText,
+            color: red,
+            rect: CGRect(x: 42 + cardWidth + gap, y: cardY, width: cardWidth, height: height)
+        )
+        return cardY + height
+    }
+
+    private static func journeyCardHeight(location: String) -> CGFloat {
+        31 + textHeight(location, font: .systemFont(ofSize: 8), width: 211)
+    }
+
+    private static func drawJourneyCard(
+        title: String,
+        time: String,
+        location: String,
+        color: UIColor,
+        rect: CGRect
+    ) {
+        paleBlue.setFill()
+        UIBezierPath(roundedRect: rect, cornerRadius: 10).fill()
+        color.setFill()
+        UIBezierPath(roundedRect: CGRect(x: rect.minX + 10, y: rect.minY + 10, width: 7, height: 7), cornerRadius: 3.5).fill()
+        drawText(
+            "\(title)  \(time)",
+            font: .monospacedSystemFont(ofSize: 8, weight: .bold),
+            color: navy,
+            x: rect.minX + 23,
+            y: rect.minY + 8,
+            width: rect.width - 33
+        )
+        drawText(
+            location,
+            font: .systemFont(ofSize: 8),
+            color: .darkGray,
+            x: rect.minX + 23,
+            y: rect.minY + 26,
+            width: rect.width - 33
+        )
+    }
+
     private static func drawMap(_ image: UIImage?, y: CGFloat) -> CGFloat {
+        // A missing snapshot should not consume nearly a quarter of the first
+        // page with an empty placeholder. The start/end cards still explain
+        // the journey, while a real route snapshot receives the full map area.
+        guard let image else { return y }
         _ = drawSectionTitle("ROUTE MAP", y: y)
         let imageY = y + 19
-        let rect = image == nil
-            ? CGRect(x: 42, y: imageY, width: 528, height: 62)
-            : CGRect(x: 146, y: imageY, width: 320, height: 320)
-        if let image {
-            UIGraphicsGetCurrentContext()?.saveGState()
-            UIBezierPath(roundedRect: rect, cornerRadius: 12).addClip()
-            image.draw(in: rect)
-            UIGraphicsGetCurrentContext()?.restoreGState()
-        } else {
-            paleBlue.setFill()
-            UIBezierPath(roundedRect: rect, cornerRadius: 10).fill()
-            drawCenteredText("No GPS route points were recorded", font: .systemFont(ofSize: 10, weight: .medium), color: .darkGray, rect: rect)
-        }
+        let rect = CGRect(x: 166, y: imageY, width: 280, height: 280)
+        UIGraphicsGetCurrentContext()?.saveGState()
+        UIBezierPath(roundedRect: rect, cornerRadius: 12).addClip()
+        image.draw(in: rect)
+        UIGraphicsGetCurrentContext()?.restoreGState()
         lightLine.setStroke()
         let outline = UIBezierPath(roundedRect: rect, cornerRadius: 10)
         outline.lineWidth = 0.8
@@ -1819,17 +2078,29 @@ enum FireVaultTripLogPDFRenderer {
         line.addLine(to: .init(x: 570, y: 758))
         line.lineWidth = 0.7
         line.stroke()
-        drawText("FIREVAULT PRO FIELD OPERATIONS", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 42, y: 766, width: 250)
+        drawText("FIREVAULT PRO TRIP LOG REPORT", font: .systemFont(ofSize: 7, weight: .bold), color: navy, x: 42, y: 766, width: 250)
         drawText("PAGE \(page)", font: .monospacedSystemFont(ofSize: 7, weight: .semibold), color: .gray, x: 470, y: 766, width: 100, alignment: .right)
     }
 
     private static func drawFireVaultProWordmark(x: CGFloat, y: CGFloat, fontSize: CGFloat) {
-        let fireWidth = fontSize * 2.72
-        let vaultWidth = fontSize * 3.5
-        drawText("FIRE", font: .systemFont(ofSize: fontSize, weight: .black), color: red, x: x, y: y, width: fireWidth)
-        drawText("VAULT", font: .systemFont(ofSize: fontSize, weight: .black), color: .white, x: x + fireWidth, y: y, width: vaultWidth)
+        let font = UIFont.systemFont(ofSize: fontSize, weight: .black)
+        let wordmark = NSMutableAttributedString(
+            string: "FIREVAULT",
+            attributes: [
+                .font: font,
+                .foregroundColor: UIColor.white
+            ]
+        )
+        wordmark.addAttribute(
+            .foregroundColor,
+            value: red,
+            range: NSRange(location: 0, length: 4)
+        )
+        // Draw one attributed word so FIRE and VAULT use the font's natural
+        // E-to-V kerning instead of looking like two separate words.
+        wordmark.draw(at: CGPoint(x: x, y: y))
 
-        let wordmarkWidth = fireWidth + vaultWidth
+        let wordmarkWidth = ceil(wordmark.size().width)
         let proRect = CGRect(
             x: x + wordmarkWidth - fontSize * 1.35,
             y: y + fontSize * 0.92,
@@ -1846,17 +2117,38 @@ enum FireVaultTripLogPDFRenderer {
         drawCenteredText("PRO", font: .systemFont(ofSize: fontSize * 0.32, weight: .black), color: .white, rect: proRect)
     }
 
-    private static func stopRowHeight(visit: FireVaultBreadcrumbReport.Visit, note: String) -> CGFloat {
-        var height: CGFloat = 30
-        if !visit.addressText.isEmpty { height += 6 }
-        if !note.isEmpty { height += min(18, CGFloat(note.count / 70 + 1) * 7) }
-        if visit.coordinateText != nil { height += 6 }
-        return height
+    private static func stopRowHeight(
+        visit: FireVaultBreadcrumbReport.Visit,
+        note: String,
+        includeCoordinates: Bool
+    ) -> CGFloat {
+        let contentWidth: CGFloat = 305
+        var contentHeight = textHeight(visit.title, font: .systemFont(ofSize: 9, weight: .semibold), width: contentWidth) + 1
+        contentHeight += textHeight(visit.classification.rawValue, font: .systemFont(ofSize: 6.8, weight: .bold), width: contentWidth) + 1
+        if !visit.addressText.isEmpty {
+            contentHeight += textHeight(visit.addressText, font: .systemFont(ofSize: 7.3), width: contentWidth) + 1
+        }
+        if visit.classification == .account, !visit.accountID.isEmpty {
+            contentHeight += textHeight("Account ID: \(visit.accountID)", font: .systemFont(ofSize: 7), width: contentWidth) + 1
+        }
+        if !note.isEmpty {
+            contentHeight += textHeight("Note: \(note)", font: .italicSystemFont(ofSize: 7.2), width: contentWidth) + 1
+        }
+        if includeCoordinates, let coordinates = visit.coordinateText {
+            contentHeight += textHeight("GPS: \(coordinates)", font: .monospacedSystemFont(ofSize: 6.7, weight: .regular), width: contentWidth)
+        }
+        let timeHeight = textHeight(
+            visit.reportTimeText,
+            font: .monospacedSystemFont(ofSize: 7.2, weight: .regular),
+            width: 88
+        )
+        return max(38, max(contentHeight, timeHeight) + 14)
     }
 
     private static func drawStopRow(
         _ visit: FireVaultBreadcrumbReport.Visit,
         note: String,
+        includeCoordinates: Bool,
         y: CGFloat,
         height: CGFloat
     ) -> CGFloat {
@@ -1873,13 +2165,29 @@ enum FireVaultTripLogPDFRenderer {
         drawText(visit.reportTimeText, font: .monospacedSystemFont(ofSize: 7.2, weight: .regular), color: .darkGray, x: 76, y: y + 7, width: 88)
         var locationY = y + 7
         locationY += drawText(visit.title, font: .systemFont(ofSize: 9, weight: .semibold), color: navy, x: 170, y: locationY, width: 305) + 1
+        let classificationColor: UIColor = switch visit.classification {
+        case .account: blue
+        case .unassigned: .systemOrange
+        case .personal: .gray
+        }
+        locationY += drawText(
+            visit.classification.rawValue.uppercased(),
+            font: .systemFont(ofSize: 6.8, weight: .bold),
+            color: classificationColor,
+            x: 170,
+            y: locationY,
+            width: 305
+        ) + 1
         if !visit.addressText.isEmpty {
             locationY += drawText(visit.addressText, font: .systemFont(ofSize: 7.3), color: .darkGray, x: 170, y: locationY, width: 305) + 1
+        }
+        if visit.classification == .account, !visit.accountID.isEmpty {
+            locationY += drawText("Account ID: \(visit.accountID)", font: .systemFont(ofSize: 7), color: .darkGray, x: 170, y: locationY, width: 305) + 1
         }
         if !note.isEmpty {
             locationY += drawText("Note: \(note)", font: .italicSystemFont(ofSize: 7.2), color: .darkGray, x: 170, y: locationY, width: 305) + 1
         }
-        if let coordinates = visit.coordinateText {
+        if includeCoordinates, let coordinates = visit.coordinateText {
             _ = drawText("GPS: \(coordinates)", font: .monospacedSystemFont(ofSize: 6.7, weight: .regular), color: .gray, x: 170, y: locationY, width: 305)
         }
         let durationRect = CGRect(x: 492, y: y + 8, width: 68, height: 20)
@@ -1894,6 +2202,18 @@ enum FireVaultTripLogPDFRenderer {
         line.lineWidth = 0.6
         line.stroke()
         return y + height
+    }
+
+    private static func textHeight(_ text: String, font: UIFont, width: CGFloat) -> CGFloat {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 1.5
+        let bounds = NSString(string: text).boundingRect(
+            with: CGSize(width: width, height: 10_000),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font, .paragraphStyle: paragraph],
+            context: nil
+        )
+        return ceil(bounds.height)
     }
 
     private static func drawWeeklyHeader(y: CGFloat) -> CGFloat {
@@ -1996,6 +2316,12 @@ struct FireVaultImageSharePayload: Identifiable {
     let subject: String
     let body: String
     let images: [UIImage]
+}
+
+struct FireVaultPDFSharePayload: Identifiable {
+    let id = UUID()
+    let subject: String
+    let url: URL
 }
 
 enum FireVaultTripLogImageRenderer {

@@ -32,6 +32,7 @@ struct FireVaultTripLogActivityAttributes: ActivityAttributes {
         var showsMetrics: Bool
         var activeStopStartedAt: Date?
         var activeStopIsKnown: Bool
+        var activeAccountName: String?
 
         init(
             status: Status,
@@ -41,7 +42,8 @@ struct FireVaultTripLogActivityAttributes: ActivityAttributes {
             stopCount: Int,
             showsMetrics: Bool,
             activeStopStartedAt: Date? = nil,
-            activeStopIsKnown: Bool = false
+            activeStopIsKnown: Bool = false,
+            activeAccountName: String? = nil
         ) {
             self.status = status
             self.updatedAt = updatedAt
@@ -51,11 +53,12 @@ struct FireVaultTripLogActivityAttributes: ActivityAttributes {
             self.showsMetrics = showsMetrics
             self.activeStopStartedAt = activeStopStartedAt
             self.activeStopIsKnown = activeStopIsKnown
+            self.activeAccountName = activeAccountName
         }
 
         private enum CodingKeys: String, CodingKey {
             case status, updatedAt, elapsedSeconds, distanceMiles, stopCount, showsMetrics
-            case activeStopStartedAt, activeStopIsKnown
+            case activeStopStartedAt, activeStopIsKnown, activeAccountName
         }
 
         init(from decoder: Decoder) throws {
@@ -68,6 +71,7 @@ struct FireVaultTripLogActivityAttributes: ActivityAttributes {
             showsMetrics = try values.decodeIfPresent(Bool.self, forKey: .showsMetrics) ?? true
             activeStopStartedAt = try values.decodeIfPresent(Date.self, forKey: .activeStopStartedAt)
             activeStopIsKnown = try values.decodeIfPresent(Bool.self, forKey: .activeStopIsKnown) ?? false
+            activeAccountName = try values.decodeIfPresent(String.self, forKey: .activeAccountName)
         }
 
         var timerReferenceDate: Date {

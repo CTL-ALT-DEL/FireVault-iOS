@@ -61,8 +61,13 @@ struct FireVaultIPadBreadcrumbsView: View {
                             summary(day)
 
                             ScrollView {
-                                timeline(day)
-                                    .padding(.bottom, 24)
+                                VStack(spacing: 10) {
+                                    if let firstStop = day.stops.first(where: \.needsReview) {
+                                        reviewPrompt(day: day, firstStop: firstStop)
+                                    }
+                                    timeline(day)
+                                }
+                                .padding(.bottom, 24)
                             }
                             .scrollIndicators(.visible)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -77,11 +82,11 @@ struct FireVaultIPadBreadcrumbsView: View {
             .navigationTitle("Trip Log")
             .navigationBarTitleDisplayMode(.inline)
             .confirmationDialog(
-                "End Today’s Workday?",
+                "End Today’s Trip Log?",
                 isPresented: $confirmsEnd,
                 titleVisibility: .visible
             ) {
-                Button("End Workday", role: .destructive) {
+                Button("End Trip Log", role: .destructive) {
                     breadcrumbs.endWorkday()
                     selectedDayID = breadcrumbs.today?.id
                 }
@@ -243,35 +248,39 @@ struct FireVaultIPadBreadcrumbsView: View {
         .disabled(selectedDay == nil)
     }
 
+    @ViewBuilder
     private var recordingMenu: some View {
-        Menu {
+        HStack(spacing: 8) {
             if breadcrumbs.activeDay == nil {
-                Button("Start Trip Log", systemImage: "play.fill") {
+                Button("Start", systemImage: "play.fill") {
                     breadcrumbs.startWorkday(accounts: store.accounts)
                     selectedDayID = breadcrumbs.activeDay?.id
                 }
-            } else if breadcrumbs.isRecording {
-                Button("Pause Recording", systemImage: "pause.fill") {
-                    breadcrumbs.pauseWorkday()
-                }
-                Button("Stop Trip Log", systemImage: "stop.fill", role: .destructive) {
-                    confirmsEnd = true
-                }
+                .buttonStyle(.borderedProminent)
+                .tint(NativeShellPalette.green)
             } else {
-                Button("Resume Recording", systemImage: "play.fill") {
-                    breadcrumbs.resumeWorkday(accounts: store.accounts)
+                Button(
+                    breadcrumbs.isRecording ? "Pause" : "Resume",
+                    systemImage: breadcrumbs.isRecording ? "pause.fill" : "play.fill"
+                ) {
+                    if breadcrumbs.isRecording {
+                        breadcrumbs.pauseWorkday()
+                    } else {
+                        breadcrumbs.resumeWorkday(accounts: store.accounts)
+                    }
                 }
-                Button("Stop Trip Log", systemImage: "stop.fill", role: .destructive) {
+                .buttonStyle(.borderedProminent)
+                .tint(breadcrumbs.isRecording ? NativeShellPalette.amber : NativeShellPalette.green)
+
+                Button("End", systemImage: "stop.fill", role: .destructive) {
                     confirmsEnd = true
                 }
+                .buttonStyle(.bordered)
+                .tint(NativeShellPalette.red)
             }
-        } label: {
-            Label("Recording Controls", systemImage: "slider.horizontal.3")
-                .font(.caption.bold())
         }
-        .buttonStyle(.bordered)
+        .font(.caption.bold())
         .controlSize(.small)
-        .tint(indicatorTint)
     }
 
     @ViewBuilder
@@ -296,11 +305,13 @@ struct FireVaultIPadBreadcrumbsView: View {
             )
         } else {
             Map(initialPosition: .automatic, interactionModes: [.pan, .zoom, .rotate]) {
-                MapPolyline(coordinates: day.points.map(\.coordinate))
-                    .stroke(
-                        NativeShellPalette.red,
-                        style: .init(lineWidth: 5, lineCap: .round, lineJoin: .round)
-                    )
+                ForEach(Array(day.routeSegments.enumerated()), id: \.offset) { _, segment in
+                    MapPolyline(coordinates: segment.map(\.coordinate))
+                        .stroke(
+                            NativeShellPalette.red,
+                            style: .init(lineWidth: 5, lineCap: .round, lineJoin: .round)
+                        )
+                }
 
                 if let first = day.points.first {
                     Marker("Workday Start", systemImage: "play.fill", coordinate: first.coordinate)
@@ -358,15 +369,24 @@ struct FireVaultIPadBreadcrumbsView: View {
     }
 
     private func summary(_ day: FireVaultBreadcrumbDay) -> some View {
-        HStack(spacing: 1) {
-            metric(title: "MILES", value: miles(day.totalDistanceMeters), symbol: "road.lanes")
-            Divider().frame(height: 44)
-            metric(title: "STOPS", value: "\(day.stops.count)", symbol: "mappin.and.ellipse")
-            Divider().frame(height: 44)
-            metric(title: "ELAPSED", value: duration(day.elapsedTime), symbol: "clock")
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 1) {
+                metric(title: "MILES", value: miles(displayedDistance(day)), symbol: "road.lanes")
+                Divider().frame(height: 44)
+                metric(title: "STOPS", value: "\(day.stops.count)", symbol: "mappin.and.ellipse")
+                Divider().frame(height: 44)
+                metric(title: "ELAPSED", value: duration(day.elapsedTime(asOf: context.date)), symbol: "clock")
+            }
         }
         .padding(.vertical, 12)
         .background(NativeShellPalette.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func displayedDistance(_ day: FireVaultBreadcrumbDay) -> CLLocationDistance {
+        FireVaultLiveLocationPresentation.displayedDistanceMeters(
+            for: day,
+            liveLocation: day.isActive ? breadcrumbs.latestLocation : nil
+        )
     }
 
     private func metric(title: String, value: String, symbol: String) -> some View {
@@ -434,6 +454,40 @@ struct FireVaultIPadBreadcrumbsView: View {
                 }
             }
         }
+    }
+
+    private func reviewPrompt(
+        day: FireVaultBreadcrumbDay,
+        firstStop: FireVaultBreadcrumbStop
+    ) -> some View {
+        let count = day.stops.filter(\.needsReview).count
+        return Button {
+            selectedStop = .init(dayID: day.id, stopID: firstStop.id)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(NativeShellPalette.amber)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(count) \(count == 1 ? "stop needs" : "stops need") review")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.primary)
+                    Text("Confirm its account, location label, or privacy setting.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold())
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(12)
+            .background(NativeShellPalette.amber.opacity(0.10), in: RoundedRectangle(cornerRadius: 15))
+            .overlay {
+                RoundedRectangle(cornerRadius: 15)
+                    .stroke(NativeShellPalette.amber.opacity(0.35), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func timelineRow(

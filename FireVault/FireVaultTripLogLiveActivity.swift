@@ -6,6 +6,7 @@
 //
 
 import ActivityKit
+import CoreLocation
 import Foundation
 
 @MainActor
@@ -15,13 +16,15 @@ enum FireVaultTripLogLiveActivityController {
     static func synchronize(
         day: FireVaultBreadcrumbDay,
         status: Attributes.Status,
-        showsMetrics: Bool
+        showsMetrics: Bool,
+        liveLocation: CLLocation? = nil
     ) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         let content = activityContent(
             for: day,
             status: status,
-            showsMetrics: showsMetrics
+            showsMetrics: showsMetrics,
+            liveLocation: liveLocation
         )
         let attributes = Attributes(tripID: day.id, startedAt: day.startedAt)
 
@@ -54,7 +57,8 @@ enum FireVaultTripLogLiveActivityController {
         let content = activityContent(
             for: day,
             status: .complete,
-            showsMetrics: showsMetrics
+            showsMetrics: showsMetrics,
+            liveLocation: nil
         )
         Task {
             for activity in Activity<Attributes>.activities where activity.attributes.tripID == day.id {
@@ -77,7 +81,8 @@ enum FireVaultTripLogLiveActivityController {
     private static func activityContent(
         for day: FireVaultBreadcrumbDay,
         status: Attributes.Status,
-        showsMetrics: Bool
+        showsMetrics: Bool,
+        liveLocation: CLLocation?
     ) -> ActivityContent<Attributes.ContentState> {
         let activeStop = status == .recording
             ? day.stops.last(where: { $0.departure == nil })
@@ -87,11 +92,15 @@ enum FireVaultTripLogLiveActivityController {
                 status: status,
                 updatedAt: Date(),
                 elapsedSeconds: day.elapsedTime,
-                distanceMiles: day.totalDistanceMeters / 1_609.344,
+                distanceMiles: FireVaultLiveLocationPresentation.displayedDistanceMeters(
+                    for: day,
+                    liveLocation: liveLocation
+                ) / 1_609.344,
                 stopCount: day.stops.count,
                 showsMetrics: showsMetrics,
                 activeStopStartedAt: activeStop?.arrival,
-                activeStopIsKnown: activeStop?.accountID != nil
+                activeStopIsKnown: activeStop?.accountID != nil,
+                activeAccountName: activeStop?.accountName
             ),
             staleDate: Date().addingTimeInterval(status == .recording ? 10 * 60 : 60 * 60)
         )

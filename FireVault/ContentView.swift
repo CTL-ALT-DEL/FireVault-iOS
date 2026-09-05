@@ -322,8 +322,10 @@ struct ContentView: View {
 
     private func resumeNearbyLocationIfNeeded() {
         guard !store.demoMode,
-              store.selectedTab == .nearby,
-              !activeBreadcrumbs.isRecording else { return }
+              store.selectedTab == .nearby else { return }
+        // Returning from the background must restore the live presentation
+        // feed even while Trip Log is recording. The Trip Log archive manager
+        // has a separate, intentionally sparse persistence policy.
         locationService.startLiveNearbyUpdates(
             highAccuracy: settings.gps.highAccuracy,
             consumer: .handset

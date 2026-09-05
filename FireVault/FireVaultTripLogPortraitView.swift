@@ -47,8 +47,13 @@ struct FireVaultTripLogPortraitView: View {
                         summary(day)
 
                         ScrollView {
-                            timeline(day)
-                                .padding(.bottom, 24)
+                            VStack(spacing: 10) {
+                                if let firstStop = day.stops.first(where: \.needsReview) {
+                                    reviewPrompt(day: day, firstStop: firstStop)
+                                }
+                                timeline(day)
+                            }
+                            .padding(.bottom, 24)
                         }
                         .scrollIndicators(.visible)
                     } else {
@@ -158,11 +163,13 @@ struct FireVaultTripLogPortraitView: View {
                     }
                 } else {
                     Map(initialPosition: .automatic, interactionModes: []) {
-                        MapPolyline(coordinates: day.points.map(\.coordinate))
-                            .stroke(
-                                NativeShellPalette.red,
-                                style: .init(lineWidth: 5, lineCap: .round, lineJoin: .round)
-                            )
+                        ForEach(Array(day.routeSegments.enumerated()), id: \.offset) { _, segment in
+                            MapPolyline(coordinates: segment.map(\.coordinate))
+                                .stroke(
+                                    NativeShellPalette.red,
+                                    style: .init(lineWidth: 5, lineCap: .round, lineJoin: .round)
+                                )
+                        }
 
                         if let first = day.points.first {
                             Marker("Start", systemImage: "play.fill", coordinate: first.coordinate)
@@ -341,35 +348,40 @@ struct FireVaultTripLogPortraitView: View {
         .accessibilityHint("Previews and exports the selected Trip Log report")
     }
 
+    @ViewBuilder
     private var recordingMenu: some View {
-        Menu {
+        HStack(spacing: 7) {
             if breadcrumbs.activeDay == nil {
-                Button("Start Trip Log", systemImage: "play.fill") {
+                Button("Start", systemImage: "play.fill") {
                     breadcrumbs.startWorkday(accounts: store.accounts)
                     selectedDayID = breadcrumbs.activeDay?.id
                 }
-            } else if breadcrumbs.isRecording {
-                Button("Pause Recording", systemImage: "pause.fill") {
-                    breadcrumbs.pauseWorkday()
-                }
-                Button("Stop Trip Log", systemImage: "stop.fill", role: .destructive) {
-                    confirmsEnd = true
-                }
+                .buttonStyle(.borderedProminent)
+                .tint(NativeShellPalette.green)
             } else {
-                Button("Resume Recording", systemImage: "play.fill") {
-                    breadcrumbs.resumeWorkday(accounts: store.accounts)
+                Button(
+                    breadcrumbs.isRecording ? "Pause" : "Resume",
+                    systemImage: breadcrumbs.isRecording ? "pause.fill" : "play.fill"
+                ) {
+                    if breadcrumbs.isRecording {
+                        breadcrumbs.pauseWorkday()
+                    } else {
+                        breadcrumbs.resumeWorkday(accounts: store.accounts)
+                    }
                 }
-                Button("Stop Trip Log", systemImage: "stop.fill", role: .destructive) {
+                .buttonStyle(.borderedProminent)
+                .tint(breadcrumbs.isRecording ? NativeShellPalette.amber : NativeShellPalette.green)
+
+                Button("End", systemImage: "stop.fill", role: .destructive) {
                     confirmsEnd = true
                 }
+                .buttonStyle(.bordered)
+                .tint(NativeShellPalette.red)
             }
-        } label: {
-            Label("Recording", systemImage: "slider.horizontal.3")
-                .font(.caption.bold())
         }
-        .buttonStyle(.bordered)
+        .font(.caption.bold())
         .controlSize(.small)
-        .tint(indicatorTint)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Trip Log recording controls")
     }
 
@@ -425,15 +437,24 @@ struct FireVaultTripLogPortraitView: View {
     }
 
     private func summary(_ day: FireVaultBreadcrumbDay) -> some View {
-        HStack(spacing: 1) {
-            portraitMetric(title: "MILES", value: day.totalDistanceMeters.tripLogMiles, symbol: "road.lanes")
-            Divider().frame(height: 26)
-            portraitMetric(title: "STOPS", value: "\(day.stops.count)", symbol: "mappin.and.ellipse")
-            Divider().frame(height: 26)
-            portraitMetric(title: "TIME", value: day.elapsedTime.tripLogDuration, symbol: "clock")
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 1) {
+                portraitMetric(title: "MILES", value: displayedDistance(day).tripLogMiles, symbol: "road.lanes")
+                Divider().frame(height: 26)
+                portraitMetric(title: "STOPS", value: "\(day.stops.count)", symbol: "mappin.and.ellipse")
+                Divider().frame(height: 26)
+                portraitMetric(title: "TIME", value: day.elapsedTime(asOf: context.date).tripLogDuration, symbol: "clock")
+            }
         }
         .padding(.vertical, 4)
         .nativeSurfaceCard(cornerRadius: 14)
+    }
+
+    private func displayedDistance(_ day: FireVaultBreadcrumbDay) -> CLLocationDistance {
+        FireVaultLiveLocationPresentation.displayedDistanceMeters(
+            for: day,
+            liveLocation: day.isActive ? breadcrumbs.latestLocation : nil
+        )
     }
 
     private func portraitMetric(title: String, value: String, symbol: String) -> some View {
@@ -504,6 +525,42 @@ struct FireVaultTripLogPortraitView: View {
         }
     }
 
+    private func reviewPrompt(
+        day: FireVaultBreadcrumbDay,
+        firstStop: FireVaultBreadcrumbStop
+    ) -> some View {
+        let count = day.stops.filter(\.needsReview).count
+        return Button {
+            editingStop = .init(dayID: day.id, stopID: firstStop.id)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(NativeShellPalette.amber)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(count) \(count == 1 ? "stop needs" : "stops need") review")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.primary)
+                    Text("Confirm the account, label the location, or mark it personal before exporting.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold())
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(12)
+            .background(NativeShellPalette.amber.opacity(0.10), in: RoundedRectangle(cornerRadius: 15))
+            .overlay {
+                RoundedRectangle(cornerRadius: 15)
+                    .stroke(NativeShellPalette.amber.opacity(0.35), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens the first stop needing review")
+    }
+
     private func portraitTimelineRow(
         timeText: String,
         title: String,
@@ -529,7 +586,7 @@ struct FireVaultTripLogPortraitView: View {
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .minimumScaleFactor(0.78)
             }
 

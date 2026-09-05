@@ -192,7 +192,7 @@ private struct FireVaultTripLogLockScreenView: View {
     }
 
     private var carPlayView: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 7) {
                 Image(systemName: statusSymbol)
                     .foregroundStyle(statusColor)
@@ -200,6 +200,14 @@ private struct FireVaultTripLogLockScreenView: View {
                     .font(.caption.bold())
                     .foregroundStyle(.primary)
                 Spacer(minLength: 0)
+            }
+
+            if let accountName = context.state.activeAccountName,
+               context.state.isOnSite {
+                Text(accountName)
+                    .font(.caption.bold())
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
             }
 
             elapsed
@@ -223,48 +231,25 @@ private struct FireVaultTripLogLockScreenView: View {
     }
 
     private var lockScreenView: some View {
-        VStack(spacing: 13) {
+        VStack(spacing: 12) {
             HStack(spacing: 10) {
-                brand
-                Spacer()
                 statusCapsule
+                if let accountName = context.state.activeAccountName,
+                   context.state.isOnSite {
+                    Text(accountName)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .privacySensitive()
+                }
+                Spacer(minLength: 0)
             }
 
-            HStack(alignment: .lastTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("ELAPSED")
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .tracking(1.1)
-                        .foregroundStyle(.white.opacity(0.52))
-                    elapsed
-                }
-                Spacer()
-                if context.state.showsMetrics {
-                    if context.state.isOnSite,
-                       let activeStopStartedAt = context.state.activeStopStartedAt {
-                        VStack(alignment: .trailing, spacing: 1) {
-                            Text(activeStopStartedAt, style: .timer)
-                                .font(.title3.bold().monospacedDigit())
-                                .foregroundStyle(.white)
-                            Text(context.state.activeStopIsKnown ? "ON SITE" : "STOPPED")
-                                .font(.system(size: 8, weight: .bold, design: .rounded))
-                                .tracking(0.8)
-                                .foregroundStyle(.cyan)
-                        }
-                        .frame(minWidth: 70, alignment: .trailing)
-                    }
-                    lockMetric(
-                        value: String(format: "%.1f", context.state.distanceMiles),
-                        label: "MILES"
-                    )
-                    if !context.state.isOnSite {
-                        lockMetric(value: "\(context.state.stopCount)", label: "STOPS")
-                    }
-                } else {
-                    Label("Metrics hidden", systemImage: "eye.slash.fill")
-                        .font(.caption2.bold())
-                        .foregroundStyle(.white.opacity(0.52))
-                }
+            if context.state.isOnSite,
+               let activeStopStartedAt = context.state.activeStopStartedAt {
+                onSiteMetrics(activeStopStartedAt: activeStopStartedAt)
+            } else {
+                tripMetrics
             }
 
             FireVaultTripLogActivityControls(
@@ -276,30 +261,104 @@ private struct FireVaultTripLogLockScreenView: View {
         .padding(.vertical, 14)
     }
 
-    private var brand: some View {
-        HStack(spacing: 0) {
-            Text("FIRE").foregroundStyle(.red)
-            Text("VAULT").foregroundStyle(.white)
-            Text("  PRO")
-                .font(.system(size: 7, weight: .black, design: .rounded))
-                .foregroundStyle(.white.opacity(0.72))
-        }
-        .font(.system(size: 14, weight: .black, design: .rounded))
-        .tracking(1.0)
-    }
-
     private var statusCapsule: some View {
         Label(statusTitle, systemImage: statusSymbol)
-            .font(.caption2.bold())
+            .font(.caption.bold())
             .foregroundStyle(statusColor)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
             .background(statusColor.opacity(0.14), in: Capsule())
+    }
+
+    private func lockTimer<Content: View>(
+        label: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2.bold())
+                .tracking(0.65)
+                .foregroundStyle(.white.opacity(0.65))
+            content()
+        }
+    }
+
+    @ViewBuilder
+    private var tripElapsed: some View {
+        if context.state.status == .recording {
+            Text(context.state.timerReferenceDate, style: .timer)
+                .monospacedDigit()
+                .font(.system(size: 30, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        } else {
+            Text(context.state.formattedElapsedTime)
+                .monospacedDigit()
+                .font(.system(size: 30, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+    }
+
+    private func onSiteMetrics(activeStopStartedAt: Date) -> some View {
+        HStack(alignment: .bottom, spacing: 18) {
+            lockTimer(label: context.state.activeStopIsKnown ? "SITE TIME" : "STOP TIME") {
+                Text(activeStopStartedAt, style: .timer)
+                    .font(.system(size: 32, weight: .black, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+
+            if context.state.showsMetrics {
+                compactMetric(value: tripMinutesText, label: "TRIP")
+                compactMetric(
+                    value: String(format: "%.1f", context.state.distanceMiles),
+                    label: "MILES"
+                )
+                compactMetric(value: "\(context.state.stopCount)", label: "STOPS")
+            } else {
+                Label("Metrics hidden", systemImage: "eye.slash.fill")
+                    .font(.caption.bold())
+                    .foregroundStyle(.white.opacity(0.68))
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var tripMetrics: some View {
+        HStack(alignment: .bottom, spacing: 18) {
+            lockTimer(label: "TRIP TIME") {
+                tripElapsed
+            }
+
+            if context.state.showsMetrics {
+                lockMetric(
+                    value: String(format: "%.1f", context.state.distanceMiles),
+                    label: "MILES"
+                )
+                lockMetric(value: "\(context.state.stopCount)", label: "STOPS")
+            } else {
+                Label("Metrics hidden", systemImage: "eye.slash.fill")
+                    .font(.caption.bold())
+                    .foregroundStyle(.white.opacity(0.68))
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     @ViewBuilder
     private var elapsed: some View {
-        if context.state.status == .recording {
+        if context.state.isOnSite,
+           let activeStopStartedAt = context.state.activeStopStartedAt {
+            Text(activeStopStartedAt, style: .timer)
+                .monospacedDigit()
+                .font(.system(size: 28, weight: .black, design: .rounded))
+                .foregroundStyle(activityFamily == .small ? Color.primary : Color.white)
+        } else if context.state.status == .recording {
             Text(context.state.timerReferenceDate, style: .timer)
                 .monospacedDigit()
                 .font(.system(size: 28, weight: .black, design: .rounded))
@@ -313,17 +372,41 @@ private struct FireVaultTripLogLockScreenView: View {
     }
 
     private func lockMetric(value: String, label: String) -> some View {
-        VStack(alignment: .trailing, spacing: 1) {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2.bold())
+                .tracking(0.55)
+                .foregroundStyle(.white.opacity(0.65))
             Text(value)
                 .font(.title3.bold())
                 .monospacedDigit()
                 .foregroundStyle(.white)
-            Text(label)
-                .font(.system(size: 8, weight: .bold, design: .rounded))
-                .tracking(0.8)
-                .foregroundStyle(.white.opacity(0.5))
         }
-        .frame(minWidth: 55, alignment: .trailing)
+        .frame(minWidth: 48, alignment: .leading)
+    }
+
+    private func compactMetric(value: String, label: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2.bold())
+                .tracking(0.55)
+                .foregroundStyle(.white.opacity(0.65))
+            Text(value)
+                .font(.title3.bold())
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(minWidth: 42, alignment: .leading)
+    }
+
+    private var tripMinutesText: String {
+        let minutes = max(0, Int(context.state.elapsedSeconds.rounded()) / 60)
+        if minutes < 60 {
+            return "\(minutes)m"
+        }
+        return "\(minutes / 60)h \(minutes % 60)m"
     }
 
     private var statusSymbol: String {

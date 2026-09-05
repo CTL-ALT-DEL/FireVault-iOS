@@ -655,16 +655,17 @@ private struct NativeNearbyView: View {
 
     private func synchronizeNearbyLocationOwnership() {
         if breadcrumbs.isRecording {
-            locationService.stopLiveNearbyUpdates(consumer: .handset)
             if let location = breadcrumbs.latestLocation {
                 locationService.acceptTripLogLocation(location)
             }
-        } else {
-            locationService.startLiveNearbyUpdates(
-                highAccuracy: settings.gps.highAccuracy,
-                consumer: .handset
-            )
         }
+        // Visible Nearby statistics need a continuous feed. Trip Log keeps a
+        // deliberately sparse persisted route, so it cannot replace this live
+        // presentation manager while the screen is open.
+        locationService.startLiveNearbyUpdates(
+            highAccuracy: settings.gps.highAccuracy,
+            consumer: .handset
+        )
     }
 
     private var statusHeader: some View {
@@ -959,14 +960,13 @@ private struct NativeNearbyView: View {
         } else {
             switch displayedTripLogDetail {
             case .speed:
-                let speed = breadcrumbs.isRecording
-                    ? breadcrumbs.liveSpeedMetersPerSecond
-                    : locationService.liveSpeedMetersPerSecond
+                let speed = locationService.presentationSpeed()
+                    ?? breadcrumbs.presentationSpeed()
                 guard let speed else { return "— mph" }
                 return "\(Int((speed * 2.236_936).rounded())) mph"
             case .trip:
                 guard let day = breadcrumbs.today else { return "0.0 mi" }
-                return String(format: "%.1f mi", day.totalDistanceMeters / 1_609.344)
+                return String(format: "%.1f mi", liveTripDistanceMeters(day) / 1_609.344)
             case .direction:
                 guard let course = locationService.latestLocation?.course, course >= 0 else { return "—" }
                 return cardinalDirection(for: course)
@@ -1021,6 +1021,13 @@ private struct NativeNearbyView: View {
             return location.altitude
         }
         return breadcrumbs.today?.points.compactMap(\.altitude).last
+    }
+
+    private func liveTripDistanceMeters(_ day: FireVaultBreadcrumbDay) -> CLLocationDistance {
+        FireVaultLiveLocationPresentation.displayedDistanceMeters(
+            for: day,
+            liveLocation: locationService.latestLocation
+        )
     }
 
     private var elevationGainMeters: Double {
@@ -3724,15 +3731,15 @@ private struct FireVaultGPSDiagnosticsView: View {
     @State private var samples: [FireVaultGPSDiagnosticSample] = []
 
     private var location: CLLocation? {
-        breadcrumbs.isRecording
-            ? (breadcrumbs.latestLocation ?? locationService.latestLocation)
-            : locationService.latestLocation
+        FireVaultLiveLocationPresentation.freshest(
+            presentationLocation: locationService.latestLocation,
+            tripLogLocation: breadcrumbs.latestLocation
+        ).location
     }
 
     private var liveSpeed: CLLocationSpeed? {
-        breadcrumbs.isRecording
-            ? breadcrumbs.liveSpeedMetersPerSecond
-            : locationService.liveSpeedMetersPerSecond
+        locationService.presentationSpeed()
+            ?? breadcrumbs.presentationSpeed()
     }
 
     var body: some View {

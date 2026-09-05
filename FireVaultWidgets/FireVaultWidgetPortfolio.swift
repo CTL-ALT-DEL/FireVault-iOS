@@ -5,6 +5,7 @@
 //  Focused, state-aware widgets for Trip Log, account access, and cloud health.
 //
 
+import AppIntents
 import Foundation
 import SwiftUI
 import WidgetKit
@@ -18,7 +19,7 @@ struct FireVaultTripLogWidget: Widget {
             FireVaultTripLogWidgetView(entry: entry)
         }
         .configurationDisplayName("FireVault Trip Log")
-        .description("See recording status, elapsed time, mileage, stops, and GPS quality.")
+        .description("Control your active trip and see elapsed time, mileage, stops, and GPS quality.")
         .supportedFamilies([
             .systemSmall,
             .systemMedium,
@@ -40,8 +41,8 @@ struct FireVaultAccountWidget: Widget {
         ) { entry in
             FireVaultAccountWidgetView(entry: entry)
         }
-        .configurationDisplayName("FireVault Field Account")
-        .description("Return to the most recently selected account and its saved field locations.")
+        .configurationDisplayName("FireVault Account")
+        .description("Open a selected account and see its address and saved arrival locations.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
         .containerBackgroundRemovable(true)
     }
@@ -108,7 +109,7 @@ struct FireVaultCloudStatusWidget: Widget {
             FireVaultCloudStatusWidgetView(entry: entry)
         }
         .configurationDisplayName("FireVault Cloud Status")
-        .description("Monitor account coverage, pending cloud records, and the latest successful sync.")
+        .description("See whether your field records are synced and need attention.")
         .supportedFamilies([
             .systemSmall,
             .systemMedium,
@@ -117,62 +118,6 @@ struct FireVaultCloudStatusWidget: Widget {
             .accessoryRectangular
         ])
         .containerBackgroundRemovable(true)
-    }
-}
-
-private enum FireVaultPortfolioPalette {
-    static let background = LinearGradient(
-        colors: [
-            Color(red: 0.025, green: 0.045, blue: 0.065),
-            Color(red: 0.045, green: 0.12, blue: 0.16)
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
-    static let red = Color(red: 0.94, green: 0.12, blue: 0.14)
-    static let cyan = Color(red: 0.18, green: 0.78, blue: 0.9)
-}
-
-private struct FireVaultPortfolioBrand: View {
-    var body: some View {
-        HStack(spacing: 0) {
-            Text("FIRE").foregroundStyle(FireVaultPortfolioPalette.red)
-            Text("VAULT").foregroundStyle(.white)
-            Text("  PRO")
-                .font(.system(size: 7, weight: .black, design: .rounded))
-                .foregroundStyle(.white.opacity(0.68))
-        }
-        .font(.system(size: 12, weight: .black, design: .rounded))
-        .tracking(0.9)
-    }
-}
-
-private struct FireVaultCompactFact: View {
-    let value: String
-    let label: String
-    let symbol: String
-    var tint: Color = FireVaultPortfolioPalette.cyan
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Label(label, systemImage: symbol)
-                .font(.system(size: 7, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.48))
-            Text(value)
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.68)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 1)
-                .fill(tint)
-                .frame(width: 2)
-                .offset(x: -7)
-        }
-        .padding(.leading, 7)
     }
 }
 
@@ -186,26 +131,28 @@ private struct FireVaultTripLogWidgetView: View {
         Group {
             switch family {
             case .accessoryInline:
-                Label(
-                    "Trip Log \(stateTitle) • \(shortDuration) • \(milesText)",
-                    systemImage: stateSymbol
-                )
+                Label("Trip Log \(stateTitle) • \(milesText)", systemImage: stateSymbol)
             case .accessoryCircular:
-                VStack(spacing: 1) {
-                    Image(systemName: stateSymbol)
-                        .font(.headline)
-                    Text(entry.snapshot.tripState == .recording ? shortDuration : stateTitle.uppercased())
-                        .font(.system(size: 8, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.55)
-                }
+                AccessoryWidgetBackground()
+                    .overlay {
+                        VStack(spacing: 1) {
+                            Image(systemName: stateSymbol)
+                                .font(.headline)
+                            Text(entry.snapshot.tripState == .recording ? shortDuration : stateTitle)
+                                .font(.caption2.bold())
+                                .monospacedDigit()
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.68)
+                        }
+                    }
             case .accessoryRectangular:
                 HStack(spacing: 8) {
-                    Image(systemName: stateSymbol).font(.title3)
+                    Image(systemName: stateSymbol)
+                        .font(.title3)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Trip Log • \(stateTitle)").font(.headline)
-                        Text("\(milesText) • \(durationText) • \(entry.snapshot.stopCount) stops")
+                        Text("Trip Log • \(stateTitle)")
+                            .font(.headline)
+                        Text("\(durationText) • \(milesText) • \(entry.snapshot.stopCount) stops")
                             .font(.caption)
                             .monospacedDigit()
                     }
@@ -218,158 +165,209 @@ private struct FireVaultTripLogWidgetView: View {
                 large
             }
         }
-        .widgetURL(URL(string: tripDestination))
-        .containerBackground(for: .widget) { FireVaultPortfolioPalette.background }
+        .widgetURL(URL(string: tripURL))
+        .containerBackground(for: .widget) { FireVaultWidgetBackground() }
     }
 
     private var small: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            FireVaultPortfolioBrand()
-            Label(stateTitle.uppercased(), systemImage: stateSymbol)
-                .font(.caption2.bold())
-                .foregroundStyle(stateColor)
+        VStack(alignment: .leading, spacing: 8) {
+            FireVaultWidgetBrand(section: "Trip Log")
+            FireVaultWidgetStatusPill(title: stateTitle, symbol: stateSymbol, color: stateColor)
             Spacer(minLength: 0)
             Text(durationText)
-                .font(.system(size: 27, weight: .black, design: .rounded))
+                .font(.system(size: 28, weight: .heavy, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.62)
-            HStack(spacing: 8) {
+                .minimumScaleFactor(0.58)
+            HStack(spacing: 12) {
                 Label(milesText, systemImage: "road.lanes")
                 Label("\(entry.snapshot.stopCount)", systemImage: "mappin.and.ellipse")
             }
-            .font(.caption2.bold())
-            .foregroundStyle(.white.opacity(0.68))
-            Label(actionTitle, systemImage: actionSymbol)
-                .font(.caption2.bold())
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 26)
-                .background(stateColor.opacity(0.74), in: Capsule())
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+            compactControl
         }
     }
 
     private var medium: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: 9) {
             HStack {
-                FireVaultPortfolioBrand()
-                Spacer()
-                Label(stateTitle.uppercased(), systemImage: stateSymbol)
-                    .font(.caption2.bold())
-                    .foregroundStyle(stateColor)
+                FireVaultWidgetBrand(section: "Trip Log")
+                Spacer(minLength: 4)
+                FireVaultWidgetStatusPill(title: stateTitle, symbol: stateSymbol, color: stateColor)
             }
-            HStack(alignment: .center, spacing: 15) {
-                VStack(alignment: .leading, spacing: 0) {
+
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text("ELAPSED")
-                        .font(.system(size: 8, weight: .bold, design: .rounded))
-                        .tracking(1.0)
-                        .foregroundStyle(.white.opacity(0.48))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
                     Text(durationText)
-                        .font(.system(size: 27, weight: .black, design: .rounded))
+                        .font(.system(size: 28, weight: .heavy, design: .rounded))
                         .monospacedDigit()
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.65)
+                        .minimumScaleFactor(0.62)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                FireVaultCompactFact(value: milesText, label: "MILES", symbol: "road.lanes")
-                FireVaultCompactFact(
+
+                FireVaultWidgetMetric(value: milesText, title: "Miles", symbol: "road.lanes", compact: true)
+                FireVaultWidgetMetric(
                     value: "\(entry.snapshot.stopCount)",
-                    label: "STOPS",
-                    symbol: "mappin.and.ellipse"
+                    title: "Stops",
+                    symbol: "mappin.and.ellipse",
+                    compact: true
                 )
-                FireVaultCompactFact(
+                FireVaultWidgetMetric(
                     value: gpsText,
-                    label: "GPS",
+                    title: "GPS",
                     symbol: "scope",
-                    tint: gpsColor
+                    color: gpsColor,
+                    compact: true
                 )
             }
-            Divider().overlay(.white.opacity(0.12))
-            HStack {
-                Label(
-                    entry.snapshot.accountName ?? "No active account",
-                    systemImage: "building.2.fill"
-                )
-                .font(.caption.bold())
-                .foregroundStyle(.white.opacity(0.76))
-                .lineLimit(1)
-                .privacySensitive()
-                Spacer(minLength: 8)
-                Label(actionTitle, systemImage: actionSymbol)
-                    .font(.caption2.bold())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .frame(height: 27)
-                    .background(stateColor.opacity(0.78), in: Capsule())
+
+            HStack(spacing: 9) {
+                Label(accountName, systemImage: "building.2.fill")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .privacySensitive()
+                Spacer(minLength: 2)
+                compactControl
+                    .frame(maxWidth: 126)
             }
         }
     }
 
     private var large: some View {
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                FireVaultPortfolioBrand()
+                FireVaultWidgetBrand(section: "Trip Log")
                 Spacer()
-                Label(stateTitle.uppercased(), systemImage: stateSymbol)
-                    .font(.caption.bold())
-                    .foregroundStyle(stateColor)
+                FireVaultWidgetStatusPill(title: stateTitle, symbol: stateSymbol, color: stateColor)
             }
-            Text(durationText)
-                .font(.system(size: 42, weight: .black, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.white)
-            HStack(spacing: 12) {
-                largeFact(milesText, "MILES", "road.lanes")
-                largeFact("\(entry.snapshot.stopCount)", "STOPS", "mappin.and.ellipse")
-                largeFact(gpsText, "GPS", "scope")
-            }
-            VStack(alignment: .leading, spacing: 5) {
-                Text("CURRENT FIELD CONTEXT")
-                    .font(.system(size: 8, weight: .bold, design: .rounded))
-                    .tracking(1.2)
-                    .foregroundStyle(.white.opacity(0.48))
-                Label(entry.snapshot.accountName ?? "No account selected", systemImage: "building.2.fill")
-                    .font(.headline)
-                    .foregroundStyle(.white)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("ELAPSED TIME")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(durationText)
+                    .font(.system(size: 42, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
-                    .privacySensitive()
-                Text(entry.snapshot.accountAddress ?? "Open FireVault to select an account")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.58))
-                    .lineLimit(2)
-                    .privacySensitive()
+                    .minimumScaleFactor(0.7)
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 13))
+
+            HStack(spacing: 10) {
+                FireVaultWidgetMetric(value: milesText, title: "Miles", symbol: "road.lanes")
+                FireVaultWidgetMetric(
+                    value: "\(entry.snapshot.stopCount)",
+                    title: "Stops",
+                    symbol: "mappin.and.ellipse"
+                )
+                FireVaultWidgetMetric(value: gpsText, title: "GPS", symbol: "scope", color: gpsColor)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("CURRENT ACCOUNT")
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.7)
+                    .foregroundStyle(.secondary)
+                FireVaultWidgetAccountRow(name: accountName, detail: accountDetail)
+            }
+
             Spacer(minLength: 0)
-            Label(actionTitle, systemImage: actionSymbol)
-                .font(.headline.bold())
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 38)
-                .background(stateColor.opacity(0.78), in: RoundedRectangle(cornerRadius: 12))
+
+            HStack(spacing: 9) {
+                primaryControl
+                Link(destination: URL(string: "firevault://triplog")!) {
+                    FireVaultWidgetActionLabel(title: "Open Trip Log", symbol: "arrow.up.forward.app.fill")
+                }
+            }
         }
-        .padding(3)
     }
 
-    private func largeFact(_ value: String, _ label: String, _ symbol: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Label(label, systemImage: symbol)
-                .font(.caption2.bold())
-                .foregroundStyle(.white.opacity(0.5))
-            Text(value)
-                .font(.title3.bold())
-                .monospacedDigit()
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
+    @ViewBuilder
+    private var compactControl: some View {
+        switch entry.snapshot.tripState {
+        case .recording:
+            Button(intent: FireVaultPauseTripLogIntent()) {
+                FireVaultWidgetActionLabel(
+                    title: "Pause",
+                    symbol: "pause.fill",
+                    color: FireVaultWidgetDesign.amber,
+                    compact: true
+                )
+            }
+            .buttonStyle(.plain)
+        case .paused:
+            Button(intent: FireVaultResumeTripLogIntent()) {
+                FireVaultWidgetActionLabel(
+                    title: "Resume",
+                    symbol: "play.fill",
+                    color: FireVaultWidgetDesign.green,
+                    compact: true
+                )
+            }
+            .buttonStyle(.plain)
+        case .ready, .complete:
+            Link(destination: URL(string: "firevault://triplog/start")!) {
+                FireVaultWidgetActionLabel(
+                    title: "Start",
+                    symbol: "record.circle",
+                    color: FireVaultWidgetDesign.red,
+                    compact: true
+                )
+            }
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private var primaryControl: some View {
+        switch entry.snapshot.tripState {
+        case .recording:
+            Button(intent: FireVaultPauseTripLogIntent()) {
+                FireVaultWidgetActionLabel(
+                    title: "Pause Trip",
+                    symbol: "pause.fill",
+                    color: FireVaultWidgetDesign.amber
+                )
+            }
+            .buttonStyle(.plain)
+        case .paused:
+            Button(intent: FireVaultResumeTripLogIntent()) {
+                FireVaultWidgetActionLabel(
+                    title: "Resume Trip",
+                    symbol: "play.fill",
+                    color: FireVaultWidgetDesign.green
+                )
+            }
+            .buttonStyle(.plain)
+        case .ready, .complete:
+            Link(destination: URL(string: "firevault://triplog/start")!) {
+                FireVaultWidgetActionLabel(
+                    title: "Start Trip",
+                    symbol: "record.circle",
+                    color: FireVaultWidgetDesign.red
+                )
+            }
+        }
+    }
+
+    private var accountName: String {
+        entry.snapshot.accountName ?? "No active account"
+    }
+
+    private var accountDetail: String {
+        let values = [entry.snapshot.accountID, entry.snapshot.accountAddress]
+            .compactMap { value -> String? in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+        return values.isEmpty ? "Open FireVault to select an account" : values.joined(separator: " • ")
     }
 
     private var durationText: String {
@@ -399,33 +397,17 @@ private struct FireVaultTripLogWidgetView: View {
 
     private var stateColor: Color {
         switch entry.snapshot.tripState {
-        case .recording: .green
-        case .paused: .orange
-        case .complete: FireVaultPortfolioPalette.cyan
-        case .ready: FireVaultPortfolioPalette.cyan
+        case .recording: FireVaultWidgetDesign.green
+        case .paused: FireVaultWidgetDesign.amber
+        case .complete, .ready: FireVaultWidgetDesign.navy
         }
     }
 
-    private var actionTitle: String {
+    private var tripURL: String {
         switch entry.snapshot.tripState {
-        case .recording: "Open Trip Log"
-        case .paused: "Resume"
-        case .complete, .ready: "Start Trip Log"
+        case .ready, .complete: "firevault://triplog/start"
+        case .recording, .paused: "firevault://triplog"
         }
-    }
-
-    private var actionSymbol: String {
-        switch entry.snapshot.tripState {
-        case .recording: "arrow.right.circle.fill"
-        case .paused: "play.fill"
-        case .complete, .ready: "record.circle"
-        }
-    }
-
-    private var tripDestination: String {
-        entry.snapshot.tripState == .recording
-            ? "firevault://triplog"
-            : "firevault://triplog/start"
     }
 
     private var gpsText: String {
@@ -437,9 +419,9 @@ private struct FireVaultTripLogWidgetView: View {
 
     private var gpsColor: Color {
         switch entry.snapshot.gpsQuality {
-        case .excellent, .good: .green
-        case .fair: .orange
-        case .poor: .red
+        case .excellent, .good: FireVaultWidgetDesign.green
+        case .fair: FireVaultWidgetDesign.amber
+        case .poor: FireVaultWidgetDesign.red
         case .unavailable, .none: .gray
         }
     }
@@ -460,146 +442,135 @@ private struct FireVaultAccountWidgetView: View {
             }
         }
         .widgetURL(accountURL)
-        .containerBackground(for: .widget) { FireVaultPortfolioPalette.background }
+        .containerBackground(for: .widget) { FireVaultWidgetBackground() }
     }
 
     private var small: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                FireVaultPortfolioBrand()
-                Spacer()
-                Image(systemName: "building.2.crop.circle.fill")
-                    .foregroundStyle(FireVaultPortfolioPalette.cyan)
-            }
+            FireVaultWidgetBrand(section: "Account")
             Spacer(minLength: 0)
+            Image(systemName: "building.2.crop.circle.fill")
+                .font(.title2)
+                .foregroundStyle(FireVaultWidgetDesign.navy)
+                .widgetAccentable()
             Text(accountName)
-                .font(.system(size: 19, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .lineLimit(3)
-                .minimumScaleFactor(0.7)
+                .font(.headline.bold())
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.72)
                 .privacySensitive()
-            Text(accountDetail)
-                .font(.caption2.bold())
-                .foregroundStyle(.white.opacity(0.58))
-                .lineLimit(1)
+            Text(accountAddress)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
                 .privacySensitive()
-            Label("\(dropPinCount) drop pins", systemImage: "mappin.and.ellipse")
-                .font(.caption2.bold())
-                .foregroundStyle(FireVaultPortfolioPalette.cyan)
+            Label(locationText, systemImage: "mappin.and.ellipse")
+                .font(.caption.bold())
+                .foregroundStyle(FireVaultWidgetDesign.navy)
+                .widgetAccentable()
         }
     }
 
     private var medium: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 9) {
             HStack {
-                FireVaultPortfolioBrand()
+                FireVaultWidgetBrand(section: "Account")
                 Spacer()
-                Text("FIELD ACCOUNT")
-                    .font(.system(size: 8, weight: .bold, design: .rounded))
-                    .tracking(1.1)
-                    .foregroundStyle(.white.opacity(0.48))
+                Label(locationText, systemImage: "mappin.and.ellipse")
+                    .font(.caption.bold())
+                    .foregroundStyle(FireVaultWidgetDesign.navy)
+                    .widgetAccentable()
             }
-            HStack(alignment: .center, spacing: 14) {
+
+            HStack(spacing: 12) {
                 Image(systemName: "building.2.crop.circle.fill")
-                    .font(.system(size: 31))
-                    .foregroundStyle(FireVaultPortfolioPalette.cyan)
+                    .font(.system(size: 32))
+                    .foregroundStyle(FireVaultWidgetDesign.navy)
+                    .widgetAccentable()
                 VStack(alignment: .leading, spacing: 2) {
                     Text(accountName)
                         .font(.headline.bold())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                         .privacySensitive()
                     Text(accountAddress)
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.58))
+                        .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .privacySensitive()
                 }
                 Spacer(minLength: 0)
             }
-            Divider().overlay(.white.opacity(0.12))
-            HStack(spacing: 14) {
-                FireVaultCompactFact(value: accountNumber, label: "ACCOUNT", symbol: "number")
-                FireVaultCompactFact(value: accountCategory, label: "CATEGORY", symbol: "tag.fill")
-                FireVaultCompactFact(
+
+            HStack(spacing: 10) {
+                FireVaultWidgetMetric(value: accountNumber, title: "Account", symbol: "number", compact: true)
+                FireVaultWidgetMetric(
                     value: "\(dropPinCount)",
-                    label: "DROP PINS",
-                    symbol: "mappin.and.ellipse"
+                    title: "Locations",
+                    symbol: "mappin.and.ellipse",
+                    compact: true
                 )
-                Label("Open", systemImage: "arrow.right.circle.fill")
-                    .font(.caption2.bold())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .frame(height: 27)
-                    .background(FireVaultPortfolioPalette.cyan.opacity(0.62), in: Capsule())
+                FireVaultWidgetActionLabel(title: "Open", symbol: "arrow.right", compact: true)
+                    .frame(maxWidth: 100)
             }
         }
     }
 
     private var large: some View {
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                FireVaultPortfolioBrand()
+                FireVaultWidgetBrand(section: "Account")
                 Spacer()
-                Label("FIELD ACCOUNT", systemImage: "building.2.fill")
-                    .font(.caption.bold())
-                    .foregroundStyle(FireVaultPortfolioPalette.cyan)
+                FireVaultWidgetStatusPill(
+                    title: dropPinCount > 0 ? "Locations Saved" : "Add Locations",
+                    symbol: dropPinCount > 0 ? "checkmark.circle.fill" : "mappin.slash",
+                    color: dropPinCount > 0 ? FireVaultWidgetDesign.green : FireVaultWidgetDesign.amber
+                )
             }
+
             Text(accountName)
-                .font(.system(size: 27, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
+                .font(.system(size: 28, weight: .heavy, design: .rounded))
+                .foregroundStyle(.primary)
                 .lineLimit(2)
                 .minimumScaleFactor(0.7)
                 .privacySensitive()
             Text(accountAddress)
                 .font(.body)
-                .foregroundStyle(.white.opacity(0.65))
+                .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .privacySensitive()
-            HStack(spacing: 12) {
-                largeInfo(accountNumber, "ACCOUNT", "number")
-                largeInfo(accountCategory, "CATEGORY", "tag.fill")
-                largeInfo("\(dropPinCount)", "DROP PINS", "mappin.and.ellipse")
+
+            HStack(spacing: 10) {
+                FireVaultWidgetMetric(value: accountNumber, title: "Account", symbol: "number")
+                FireVaultWidgetMetric(
+                    value: "\(dropPinCount)",
+                    title: "Saved locations",
+                    symbol: "mappin.and.ellipse"
+                )
             }
-            VStack(alignment: .leading, spacing: 7) {
+
+            VStack(alignment: .leading, spacing: 5) {
                 Label(
-                    dropPinCount > 0 ? "Saved field locations are available" : "No drop pins saved yet",
-                    systemImage: dropPinCount > 0 ? "checkmark.circle.fill" : "mappin.slash"
+                    dropPinCount > 0 ? "Arrival details are ready" : "No arrival locations saved",
+                    systemImage: dropPinCount > 0 ? "map.fill" : "map"
                 )
                 .font(.headline)
-                .foregroundStyle(dropPinCount > 0 ? .green : .orange)
-                Text("Open this account to view notes, equipment, documents, and location details.")
+                .foregroundStyle(dropPinCount > 0 ? FireVaultWidgetDesign.green : FireVaultWidgetDesign.amber)
+                .widgetAccentable()
+                Text("Open this account for notes, equipment, files, photos, and arrival information.")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.56))
+                    .foregroundStyle(.secondary)
             }
-            .padding(12)
-            .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 13))
-            Spacer(minLength: 0)
-            Label("Open Account", systemImage: "arrow.right.circle.fill")
-                .font(.headline.bold())
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 38)
-                .background(FireVaultPortfolioPalette.cyan.opacity(0.62), in: RoundedRectangle(cornerRadius: 12))
-        }
-        .padding(3)
-    }
+            .padding(11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                FireVaultWidgetDesign.paper.opacity(0.72),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
 
-    private func largeInfo(_ value: String, _ label: String, _ symbol: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Label(label, systemImage: symbol)
-                .font(.caption2.bold())
-                .foregroundStyle(.white.opacity(0.5))
-            Text(value)
-                .font(.headline.bold())
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
-                .privacySensitive()
+            Spacer(minLength: 0)
+            FireVaultWidgetActionLabel(title: "Open Account", symbol: "arrow.right.circle.fill")
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var accountName: String {
@@ -608,10 +579,6 @@ private struct FireVaultAccountWidgetView: View {
 
     private var accountNumber: String {
         entry.account?.accountID ?? entry.snapshot.accountID ?? "—"
-    }
-
-    private var accountCategory: String {
-        entry.account?.category ?? entry.snapshot.accountCategory ?? "Unassigned"
     }
 
     private var accountAddress: String {
@@ -624,10 +591,8 @@ private struct FireVaultAccountWidgetView: View {
         entry.account?.dropPinCount ?? entry.snapshot.accountDropPinCount ?? 0
     }
 
-    private var accountDetail: String {
-        [accountNumber, accountCategory]
-            .filter { !$0.isEmpty }
-            .joined(separator: " • ")
+    private var locationText: String {
+        "\(dropPinCount) location\(dropPinCount == 1 ? "" : "s")"
     }
 
     private var accountURL: URL {
@@ -655,17 +620,23 @@ private struct FireVaultCloudStatusWidgetView: View {
             case .accessoryInline:
                 Label("FireVault Cloud • \(cloudTitle)", systemImage: cloudSymbol)
             case .accessoryCircular:
-                VStack(spacing: 1) {
-                    Image(systemName: cloudSymbol).font(.headline)
-                    Text(pendingCount == 0 ? "OK" : "\(pendingCount)")
-                        .font(.caption2.bold())
-                }
+                AccessoryWidgetBackground()
+                    .overlay {
+                        VStack(spacing: 1) {
+                            Image(systemName: cloudSymbol)
+                                .font(.headline)
+                            Text(pendingCount == 0 ? "OK" : "\(pendingCount)")
+                                .font(.caption2.bold())
+                        }
+                    }
             case .accessoryRectangular:
                 HStack(spacing: 8) {
-                    Image(systemName: cloudSymbol).font(.title3)
+                    Image(systemName: cloudSymbol)
+                        .font(.title3)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("FireVault Cloud • \(cloudTitle)").font(.headline)
-                        Text("\(accountCount) accounts • \(pendingCount) pending")
+                        Text("FireVault Cloud")
+                            .font(.headline)
+                        Text("\(cloudTitle) • \(lastSyncText)")
                             .font(.caption)
                     }
                 }
@@ -676,78 +647,67 @@ private struct FireVaultCloudStatusWidgetView: View {
             }
         }
         .widgetURL(URL(string: "firevault://sync"))
-        .containerBackground(for: .widget) { FireVaultPortfolioPalette.background }
+        .containerBackground(for: .widget) { FireVaultWidgetBackground() }
     }
 
     private var small: some View {
         VStack(alignment: .leading, spacing: 8) {
-            FireVaultPortfolioBrand()
+            FireVaultWidgetBrand(section: "Cloud")
             Spacer(minLength: 0)
             Image(systemName: cloudSymbol)
-                .font(.system(size: 28, weight: .semibold))
+                .font(.system(size: 30, weight: .semibold))
                 .foregroundStyle(cloudColor)
+                .widgetAccentable()
             Text(cloudTitle)
                 .font(.headline.bold())
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .lineLimit(2)
             Text(lastSyncText)
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.55))
-            HStack {
-                Label("\(accountCount)", systemImage: "building.2.fill")
-                Spacer()
-                Label("\(pendingCount)", systemImage: "arrow.triangle.2.circlepath")
-            }
-            .font(.caption2.bold())
-            .foregroundStyle(.white.opacity(0.7))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(cloudSummary)
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
     }
 
     private var medium: some View {
-        VStack(spacing: 8) {
-            HStack {
-                FireVaultPortfolioBrand()
-                Spacer()
-                Label(cloudTitle.uppercased(), systemImage: cloudSymbol)
-                    .font(.caption2.bold())
-                    .foregroundStyle(cloudColor)
-            }
-            HStack(alignment: .center, spacing: 15) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("LAST SUCCESSFUL SYNC")
-                        .font(.system(size: 8, weight: .bold, design: .rounded))
-                        .tracking(1.0)
-                        .foregroundStyle(.white.opacity(0.48))
-                    Text(lastSyncText)
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.65)
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                FireVaultWidgetBrand(section: "Cloud")
+                Spacer(minLength: 0)
+                HStack(spacing: 9) {
+                    Image(systemName: cloudSymbol)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(cloudColor)
+                        .widgetAccentable()
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(cloudTitle)
+                            .font(.headline.bold())
+                            .foregroundStyle(.primary)
+                        Text(lastSyncText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                FireVaultCompactFact(value: "\(accountCount)", label: "ACCOUNTS", symbol: "building.2.fill")
-                FireVaultCompactFact(value: "\(mappedCount)", label: "MAPPED", symbol: "map.fill")
-                FireVaultCompactFact(
-                    value: "\(pendingCount)",
-                    label: "PENDING",
-                    symbol: "arrow.triangle.2.circlepath",
-                    tint: pendingCount == 0 ? .green : .orange
-                )
-            }
-            Divider().overlay(.white.opacity(0.12))
-            HStack {
                 Text(cloudDetail)
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.62))
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Label("Sync", systemImage: "arrow.clockwise")
-                    .font(.caption2.bold())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .frame(height: 27)
-                    .background(cloudColor.opacity(0.7), in: Capsule())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(spacing: 9) {
+                FireVaultWidgetMetric(value: "\(accountCount)", title: "Accounts", symbol: "building.2.fill")
+                FireVaultWidgetMetric(
+                    value: "\(pendingCount)",
+                    title: "Pending",
+                    symbol: "arrow.triangle.2.circlepath",
+                    color: pendingCount == 0 ? FireVaultWidgetDesign.green : FireVaultWidgetDesign.amber
+                )
+            }
+            .frame(maxWidth: 126)
         }
     }
 
@@ -757,7 +717,6 @@ private struct FireVaultCloudStatusWidgetView: View {
 
     private var cloudTitle: String { cloudState.title }
     private var accountCount: Int { entry.snapshot.accountCount ?? 0 }
-    private var mappedCount: Int { entry.snapshot.mappedAccountCount ?? 0 }
     private var pendingCount: Int { entry.snapshot.pendingCloudAccountCount ?? 0 }
 
     private var cloudSymbol: String {
@@ -772,28 +731,44 @@ private struct FireVaultCloudStatusWidgetView: View {
     private var cloudColor: Color {
         switch cloudState {
         case .notSynced: .gray
-        case .syncing: FireVaultPortfolioPalette.cyan
-        case .upToDate: .green
-        case .needsAttention: .orange
+        case .syncing: FireVaultWidgetDesign.navy
+        case .upToDate: FireVaultWidgetDesign.green
+        case .needsAttention: FireVaultWidgetDesign.amber
         }
     }
 
     private var lastSyncText: String {
         guard let date = entry.snapshot.cloudLastSyncedAt else { return "Not yet synced" }
-        return date.formatted(date: .abbreviated, time: .shortened)
+        return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: entry.date)
+    }
+
+    private var cloudSummary: String {
+        pendingCount == 0 ? "\(accountCount) accounts protected" : "\(pendingCount) records pending"
     }
 
     private var cloudDetail: String {
         switch cloudState {
-        case .notSynced: "Open FireVault to complete the first cloud sync."
-        case .syncing: "FireVault is checking and updating account records."
-        case .upToDate: pendingCount == 0 ? "All known account records are linked." : "Some records still need upload."
-        case .needsAttention: "Open Sync settings to review the latest error."
+        case .notSynced: "Open FireVault to complete your first cloud sync."
+        case .syncing: "Checking and updating your field records."
+        case .upToDate: pendingCount == 0 ? "All field records are protected." : "Finishing the last pending records."
+        case .needsAttention: "Open FireVault to review pending records."
         }
     }
 }
 
+#Preview("Trip Log Small", as: .systemSmall) {
+    FireVaultTripLogWidget()
+} timeline: {
+    FireVaultWidgetEntry(date: Date(), snapshot: .placeholder)
+}
+
 #Preview("Trip Log Medium", as: .systemMedium) {
+    FireVaultTripLogWidget()
+} timeline: {
+    FireVaultWidgetEntry(date: Date(), snapshot: .placeholder)
+}
+
+#Preview("Trip Log Large", as: .systemLarge) {
     FireVaultTripLogWidget()
 } timeline: {
     FireVaultWidgetEntry(date: Date(), snapshot: .placeholder)
@@ -807,6 +782,12 @@ private struct FireVaultCloudStatusWidgetView: View {
         snapshot: .placeholder,
         account: FireVaultWidgetSnapshot.placeholder.accountChoices?.first
     )
+}
+
+#Preview("Cloud Small", as: .systemSmall) {
+    FireVaultCloudStatusWidget()
+} timeline: {
+    FireVaultWidgetEntry(date: Date(), snapshot: .placeholder)
 }
 
 #Preview("Cloud Medium", as: .systemMedium) {

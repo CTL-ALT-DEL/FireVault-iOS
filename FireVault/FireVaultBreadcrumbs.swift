@@ -19,6 +19,9 @@ struct FireVaultBreadcrumbPoint: Codable, Identifiable, Equatable {
     var horizontalAccuracy: Double
     var altitude: Double? = nil
     var speedMetersPerSecond: Double? = nil
+    /// True when this waypoint begins a new recording segment, such as after
+    /// pausing and resuming. Distance and route lines must not bridge segments.
+    var startsNewSegment: Bool? = nil
 
     var coordinate: CLLocationCoordinate2D {
         .init(latitude: latitude, longitude: longitude)
@@ -44,6 +47,14 @@ struct FireVaultBreadcrumbStop: Codable, Identifiable, Equatable {
     var accountID: String?
     var accountName: String?
     var accountAddress: String?
+    /// The technician-facing account number. `accountID` remains the internal
+    /// record key used to open the account inside FireVault.
+    var accountReference: String? = nil
+    /// Automatically reverse-geocoded, privacy-friendly location text such as
+    /// "500 block of Main Street, Casper, Wyoming." It is intentionally kept
+    /// separate from a user-entered or account address so the stop still
+    /// appears in the review queue.
+    var isApproximateLocation: Bool? = nil
     var customTitle: String?
     var technicianNote: String?
     var isPersonal: Bool?
@@ -78,7 +89,8 @@ struct FireVaultBreadcrumbStop: Codable, Identifiable, Equatable {
 
     var needsReview: Bool {
         let hasIdentifyingDetails = normalizedCustomTitle != nil
-            || accountAddress?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            || (accountAddress?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                && isApproximateLocation != true)
         return accountID == nil
             && !isPersonalStop
             && reviewedAt == nil
@@ -90,6 +102,8 @@ struct FireVaultBreadcrumbStop: Codable, Identifiable, Equatable {
         accountID = account?.id
         accountName = account?.name
         accountAddress = account?.address
+        accountReference = account?.accountId
+        isApproximateLocation = false
         if account != nil {
             customTitle = nil
         }
@@ -101,6 +115,8 @@ struct FireVaultBreadcrumbStop: Codable, Identifiable, Equatable {
         accountID = nil
         accountName = nil
         accountAddress = nil
+        accountReference = nil
+        isApproximateLocation = false
         customTitle = nil
         reviewedAt = Date()
     }
@@ -140,6 +156,8 @@ struct FireVaultBreadcrumbDay: Codable, Identifiable, Equatable {
     var startedAt: Date
     var endedAt: Date?
     var isPaused = false
+    var pausedAt: Date? = nil
+    var accumulatedPausedDuration: TimeInterval? = nil
     var points: [FireVaultBreadcrumbPoint] = []
     var stops: [FireVaultBreadcrumbStop] = []
     var startedAddress: String? = nil
@@ -151,14 +169,39 @@ struct FireVaultBreadcrumbDay: Codable, Identifiable, Equatable {
 
     var isActive: Bool { endedAt == nil }
 
+    var routeSegments: [[FireVaultBreadcrumbPoint]] {
+        var segments: [[FireVaultBreadcrumbPoint]] = []
+        for point in points.sorted(by: { $0.timestamp < $1.timestamp }) {
+            let previous = segments.last?.last
+            let legacyGapRequiresBreak = previous.map {
+                point.timestamp.timeIntervalSince($0.timestamp) > 10 * 60
+            } ?? false
+            if segments.isEmpty || point.startsNewSegment == true || legacyGapRequiresBreak {
+                segments.append([point])
+            } else {
+                segments[segments.count - 1].append(point)
+            }
+        }
+        return segments
+    }
+
     var totalDistanceMeters: Double {
-        zip(points, points.dropFirst()).reduce(0) { result, pair in
-            result + pair.0.location.distance(from: pair.1.location)
+        routeSegments.reduce(0) { total, segment in
+            total + zip(segment, segment.dropFirst()).reduce(0) { result, pair in
+                result + pair.0.location.distance(from: pair.1.location)
+            }
         }
     }
 
     var elapsedTime: TimeInterval {
-        max(0, (endedAt ?? Date()).timeIntervalSince(startedAt))
+        elapsedTime(asOf: Date())
+    }
+
+    func elapsedTime(asOf referenceDate: Date) -> TimeInterval {
+        let boundary = endedAt ?? referenceDate
+        let completedPause = max(0, accumulatedPausedDuration ?? 0)
+        let activePause = pausedAt.map { max(0, boundary.timeIntervalSince($0)) } ?? 0
+        return max(0, boundary.timeIntervalSince(startedAt) - completedPause - activePause)
     }
 
     func effectiveDeparture(
@@ -197,6 +240,68 @@ struct FireVaultBreadcrumbDay: Codable, Identifiable, Equatable {
     }
 }
 
+/// Formats reverse-geocoded locations for Trip Log without storing or showing
+/// a precise street number for automatically detected, non-account places.
+private enum FireVaultTripLogLocationLabel {
+    nonisolated static func approximateAddress(
+        streetAddress: String?,
+        cityWithContext: String?
+    ) -> String {
+        let streetLine = streetAddress?
+            .split(whereSeparator: { $0 == "\n" || $0 == "," })
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let streetParts = streetLine.split(whereSeparator: \.isWhitespace)
+        let houseNumber = streetParts.first.flatMap { blockNumber(String($0)) }
+        let street = houseNumber == nil
+            ? streetLine
+            : streetParts.dropFirst().joined(separator: " ")
+
+        let cityParts = cityWithContext?
+            .split(separator: ",", maxSplits: 1)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? []
+        let locality = cityParts.first ?? ""
+        let region = cityParts.count > 1 ? expandedRegionName(cityParts[1]) : ""
+
+        var parts: [String] = []
+        if !street.isEmpty {
+            if let houseNumber {
+                parts.append("\(houseNumber) block of \(street)")
+            } else {
+                parts.append(street)
+            }
+        }
+        if !locality.isEmpty { parts.append(locality) }
+        if !region.isEmpty { parts.append(region) }
+        return parts.joined(separator: ", ")
+    }
+
+    nonisolated private static func blockNumber(_ value: String) -> Int? {
+        let digits = value.prefix { $0.isNumber }
+        guard let number = Int(digits), number >= 0 else { return nil }
+        return (number / 100) * 100
+    }
+
+    nonisolated private static func expandedRegionName(_ value: String) -> String {
+        let names = [
+            "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+            "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+            "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+            "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+            "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+            "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+            "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+            "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+            "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+            "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+            "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+            "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+            "WI": "Wisconsin", "WY": "Wyoming", "DC": "District of Columbia"
+        ]
+        return names[value.uppercased()] ?? value
+    }
+}
+
 enum FireVaultTripLogIntegrity {
     nonisolated static func normalized(_ source: [FireVaultBreadcrumbDay]) -> [FireVaultBreadcrumbDay] {
         var seenDayIDs = Set<UUID>()
@@ -216,6 +321,12 @@ enum FireVaultTripLogIntegrity {
                     ?? days[index].startedAt
                 days[index].endedAt = max(days[index].startedAt, lastTimestamp)
                 days[index].isPaused = false
+                if let pausedAt = days[index].pausedAt {
+                    days[index].accumulatedPausedDuration =
+                        (days[index].accumulatedPausedDuration ?? 0)
+                        + max(0, lastTimestamp.timeIntervalSince(pausedAt))
+                    days[index].pausedAt = nil
+                }
                 days[index].stops = days[index].stops.map { stop in
                     var closed = stop
                     if closed.departure == nil { closed.departure = max(closed.arrival, lastTimestamp) }
@@ -229,6 +340,12 @@ enum FireVaultTripLogIntegrity {
     nonisolated private static func normalizeDay(_ source: FireVaultBreadcrumbDay) -> FireVaultBreadcrumbDay {
         var day = source
         if let endedAt = day.endedAt, endedAt < day.startedAt { day.endedAt = day.startedAt }
+        if let endedAt = day.endedAt, let pausedAt = day.pausedAt {
+            day.accumulatedPausedDuration = (day.accumulatedPausedDuration ?? 0)
+                + max(0, endedAt.timeIntervalSince(pausedAt))
+            day.pausedAt = nil
+            day.isPaused = false
+        }
 
         var seenPointIDs = Set<UUID>()
         day.points = day.points
@@ -274,6 +391,63 @@ enum FireVaultTripLogTelemetry {
     }
 }
 
+enum FireVaultLiveLocationSource: Equatable {
+    case presentation
+    case tripLog
+
+    var description: String {
+        switch self {
+        case .presentation: "Navigation GPS"
+        case .tripLog: "Trip Log GPS"
+        }
+    }
+}
+
+struct FireVaultLiveLocationSnapshot {
+    let location: CLLocation?
+    let source: FireVaultLiveLocationSource?
+}
+
+/// Keeps visible driving telemetry independent from the intentionally sparse
+/// set of route points persisted by Trip Log.
+enum FireVaultLiveLocationPresentation {
+    static func freshest(
+        presentationLocation: CLLocation?,
+        tripLogLocation: CLLocation?
+    ) -> FireVaultLiveLocationSnapshot {
+        switch (presentationLocation, tripLogLocation) {
+        case let (presentation?, tripLog?):
+            if presentation.timestamp >= tripLog.timestamp {
+                return .init(location: presentation, source: .presentation)
+            }
+            return .init(location: tripLog, source: .tripLog)
+        case let (presentation?, nil):
+            return .init(location: presentation, source: .presentation)
+        case let (nil, tripLog?):
+            return .init(location: tripLog, source: .tripLog)
+        case (nil, nil):
+            return .init(location: nil, source: nil)
+        }
+    }
+
+    static func displayedDistanceMeters(
+        for day: FireVaultBreadcrumbDay,
+        liveLocation: CLLocation?
+    ) -> CLLocationDistance {
+        var meters = day.totalDistanceMeters
+        guard day.isActive,
+              let lastRecorded = day.points.last?.location,
+              let liveLocation,
+              liveLocation.horizontalAccuracy >= 0,
+              liveLocation.horizontalAccuracy <= FireVaultBreadcrumbRules.maximumHorizontalAccuracy,
+              liveLocation.timestamp >= lastRecorded.timestamp else {
+            return meters
+        }
+        meters += lastRecorded.distance(from: liveLocation)
+        return meters
+    }
+}
+
 enum FireVaultBreadcrumbRules {
     static let maximumHorizontalAccuracy: CLLocationAccuracy = 100
     // Route geometry is persisted at a practical field-work density while
@@ -298,12 +472,28 @@ enum FireVaultBreadcrumbRules {
     static let accountMatchRadius: CLLocationDistance = 175
     static let maximumLiveSpeedAge: TimeInterval = 8
     static let maximumDerivedStationarySpeed: CLLocationSpeed = 1.5
-    // Live CarPlay telemetry must not inherit the much wider route-archive
-    // spacing. Core Location is configured to deliver roughly 12 m updates
-    // while driving, so 8 m confirms motion without treating ordinary GPS
-    // drift as vehicle speed.
+    // Live UI telemetry must not inherit the much wider route-archive spacing.
+    // Eight metres confirms motion without treating ordinary GPS drift as
+    // vehicle speed; the presentation manager itself has no distance filter.
     static let minimumLiveMovementDistance: CLLocationDistance = 8
     static let minimumLiveMovementSpeed: CLLocationSpeed = 0.75
+    static let maximumPlausibleTravelSpeed: CLLocationSpeed = 70
+
+    /// Validates every location before it can influence arrival/departure
+    /// detection. Route-point sampling is intentionally sparser, but stop
+    /// detection must still reject stale, out-of-order, and teleport samples.
+    static func acceptsForDetection(_ location: CLLocation, after previous: CLLocation?) -> Bool {
+        guard CLLocationCoordinate2DIsValid(location.coordinate),
+              location.horizontalAccuracy >= 0,
+              location.horizontalAccuracy <= maximumHorizontalAccuracy,
+              abs(location.timestamp.timeIntervalSinceNow) <= 60 else {
+            return false
+        }
+        guard let previous else { return true }
+        let interval = location.timestamp.timeIntervalSince(previous.timestamp)
+        guard interval > 0 else { return false }
+        return location.distance(from: previous) / interval <= maximumPlausibleTravelSpeed
+    }
 
     static func normalizedVisit(
         arrival: Date,
@@ -314,14 +504,11 @@ enum FireVaultBreadcrumbRules {
     }
 
     static func accepts(_ location: CLLocation, after previous: CLLocation?) -> Bool {
-        guard location.horizontalAccuracy >= 0,
-              location.horizontalAccuracy <= maximumHorizontalAccuracy,
-              abs(location.timestamp.timeIntervalSinceNow) <= 60 else {
-            return false
-        }
+        guard acceptsForDetection(location, after: previous) else { return false }
         guard let previous else { return true }
-        return location.distance(from: previous) >= minimumPointDistance
-            || location.timestamp.timeIntervalSince(previous.timestamp) >= maximumPointInterval
+        let interval = location.timestamp.timeIntervalSince(previous.timestamp)
+        let distance = location.distance(from: previous)
+        return distance >= minimumPointDistance || interval >= maximumPointInterval
     }
 
     /// Core Location can briefly retain the vehicle's last driving speed after
@@ -661,6 +848,8 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     private var activeStopID: UUID?
     private var previousDetectionLocation: CLLocation?
     private var liveSpeedTracker = FireVaultLiveSpeedTracker()
+    private var nextRecordedPointStartsNewSegment = true
+    private var lastLiveActivityPresentationSyncAt = Date.distantPast
     private var sessionIsPrepared = false
     private var liveActivityControlObservation: AnyCancellable?
     private var gpsPreferences: FireVaultGPSPreferences
@@ -680,6 +869,14 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         .init(
             authorizationStatus: authorizationStatus,
             accuracyAuthorization: accuracyAuthorization
+        )
+    }
+
+    func presentationSpeed(now: Date = Date()) -> CLLocationSpeed? {
+        FireVaultBreadcrumbRules.resolvedLiveSpeed(
+            location: latestLocation,
+            lastMeaningfulMovementAt: liveSpeedTracker.lastMeaningfulMovementAt,
+            now: now
         )
     }
 
@@ -753,26 +950,35 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         self.accounts = accounts
         refreshRuntimePreferences()
         sessionIsPrepared = true
+        nextRecordedPointStartsNewSegment = true
+        lastLiveActivityPresentationSyncAt = .distantPast
         if activeDay == nil {
             days.insert(.init(startedAt: Date()), at: 0)
             persist(immediate: true)
         } else {
-            updateActiveDay { $0.isPaused = false }
+            updateActiveDay { day in
+                Self.resumeTiming(for: &day, at: Date())
+            }
         }
         beginLocationUpdates()
         FireVaultNotificationService.shared.tripLogStarted(preferences: notificationPreferences)
     }
 
     func pauseWorkday() {
-        guard let index = activeDayIndex else { return }
-        finalizeStopIfNeeded(in: index, at: Date())
+        guard let index = activeDayIndex, !days[index].isPaused else { return }
+        let pauseDate = Date()
+        finalizeStopIfNeeded(in: index, at: pauseDate)
         stopLocationUpdates()
         candidateLocations.removeAll()
         departureCandidateLocations.removeAll()
         activeStopID = nil
         previousDetectionLocation = nil
+        nextRecordedPointStartsNewSegment = true
         sessionIsPrepared = false
-        updateActiveDay(immediate: true) { $0.isPaused = true }
+        updateActiveDay(immediate: true) { day in
+            day.isPaused = true
+            day.pausedAt = pauseDate
+        }
         statusText = "Trip Log paused"
         FireVaultNotificationService.shared.tripLogPaused(preferences: notificationPreferences)
         synchronizeLiveActivity(status: .paused)
@@ -787,7 +993,11 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         self.accounts = accounts
         refreshRuntimePreferences()
         sessionIsPrepared = true
-        updateActiveDay(immediate: true) { $0.isPaused = false }
+        nextRecordedPointStartsNewSegment = true
+        lastLiveActivityPresentationSyncAt = .distantPast
+        updateActiveDay(immediate: true) { day in
+            Self.resumeTiming(for: &day, at: Date())
+        }
         beginLocationUpdates()
         FireVaultNotificationService.shared.tripLogStarted(preferences: notificationPreferences)
     }
@@ -822,6 +1032,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         }
         guard !isRecording else { return }
         sessionIsPrepared = true
+        nextRecordedPointStartsNewSegment = true
         restoreTrackingContext()
         beginLocationUpdates()
     }
@@ -830,6 +1041,12 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         guard let index = activeDayIndex else { return }
         let end = Date()
         finalizeStopIfNeeded(in: index, at: end)
+        if let pausedAt = days[index].pausedAt {
+            days[index].accumulatedPausedDuration =
+                (days[index].accumulatedPausedDuration ?? 0)
+                + max(0, end.timeIntervalSince(pausedAt))
+            days[index].pausedAt = nil
+        }
         days[index].endedAt = end
         let boundaryLocation = latestLocation ?? days[index].points.last?.location
         if let boundaryLocation {
@@ -849,6 +1066,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         disregardedDepartureLocations.removeAll()
         activeStopID = nil
         previousDetectionLocation = nil
+        nextRecordedPointStartsNewSegment = true
         sessionIsPrepared = false
         statusText = "Workday complete"
         FireVaultNotificationService.shared.tripLogEnded()
@@ -902,6 +1120,19 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
                 dayID: dayID,
                 boundary: .ended,
                 location: last.location
+            )
+        }
+
+        // Older unassigned stops did not retain a useful location label. Fill
+        // those in lazily when their workday is opened, without treating the
+        // approximate address as a reviewed account assignment.
+        for stop in days[index].stops where stop.accountID == nil
+            && !stop.isPersonalStop
+            && (stop.accountAddress?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false) {
+            resolveStopAddress(
+                dayID: dayID,
+                stopID: stop.id,
+                location: CLLocation(latitude: stop.latitude, longitude: stop.longitude)
             )
         }
 
@@ -972,6 +1203,7 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
                 stop.rename(customTitle)
                 let address = customAddress.trimmingCharacters(in: .whitespacesAndNewlines)
                 stop.accountAddress = address.isEmpty ? nil : address
+                stop.isApproximateLocation = false
             }
             stop.markReviewed()
         }
@@ -1084,10 +1316,14 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard allowsRecordChanges else { return }
         for location in locations.sorted(by: { $0.timestamp < $1.timestamp }) {
-            guard location.horizontalAccuracy >= 0 else { continue }
+            guard FireVaultBreadcrumbRules.acceptsForDetection(location, after: latestLocation) else {
+                rejectedLocationCount += 1
+                continue
+            }
             latestLocation = location
             liveSpeedMetersPerSecond = liveSpeedTracker.ingest(location)
             record(location)
+            synchronizeLiveActivityPresentationIfNeeded(location: location)
         }
     }
 
@@ -1178,6 +1414,10 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
     private func record(_ location: CLLocation) {
         guard let index = activeDayIndex, !days[index].isPaused else { return }
         let detectionPrevious = previousDetectionLocation
+        guard FireVaultBreadcrumbRules.acceptsForDetection(location, after: detectionPrevious) else {
+            rejectedLocationCount += 1
+            return
+        }
         previousDetectionLocation = location
         updateStopDetection(with: location, previous: detectionPrevious, dayIndex: index)
         let previous = days[index].points.last?.location
@@ -1204,9 +1444,11 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
                 longitude: location.coordinate.longitude,
                 horizontalAccuracy: location.horizontalAccuracy,
                 altitude: location.verticalAccuracy >= 0 ? location.altitude : nil,
-                speedMetersPerSecond: location.speed >= 0 ? location.speed : nil
+                speedMetersPerSecond: location.speed >= 0 ? location.speed : nil,
+                startsNewSegment: nextRecordedPointStartsNewSegment
             )
         )
+        nextRecordedPointStartsNewSegment = false
         if let stop = days[index].stops.last(where: { $0.departure == nil }) {
             let state = stop.accountID == nil ? "Stop detected" : "On site"
             statusText = "\(state) • \(days[index].stopDuration(for: stop).fireVaultDuration)"
@@ -1216,7 +1458,6 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
                 : "Recording approximate location • \(days[index].points.count) points"
         }
         persist()
-        synchronizeLiveActivity(status: .recording)
     }
 
     private enum BoundaryAddress {
@@ -1239,16 +1480,53 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
 
         Task { [weak self] in
             guard let request = MKReverseGeocodingRequest(location: location),
-                  let mapItems = try? await request.mapItems,
-                  let mapItem = mapItems.first else { return }
-            let rawAddress = mapItem.addressRepresentations?.fullAddress(
-                includingRegion: false,
-                singleLine: true
-            ) ?? mapItem.address?.fullAddress
-            let address = rawAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                  let mapItem = try? await request.mapItems.first else {
+                return
+            }
+            let address = FireVaultTripLogLocationLabel.approximateAddress(
+                streetAddress: mapItem.address?.fullAddress,
+                cityWithContext: mapItem.addressRepresentations?.cityWithContext
+            )
             guard !address.isEmpty else { return }
             self?.applyBoundaryAddress(address, to: dayID, boundary: boundary)
         }
+    }
+
+    private func resolveStopAddress(
+        dayID: UUID,
+        stopID: UUID,
+        location: CLLocation
+    ) {
+        Task { [weak self] in
+            guard let request = MKReverseGeocodingRequest(location: location),
+                  let mapItem = try? await request.mapItems.first else {
+                return
+            }
+            let address = FireVaultTripLogLocationLabel.approximateAddress(
+                streetAddress: mapItem.address?.fullAddress,
+                cityWithContext: mapItem.addressRepresentations?.cityWithContext
+            )
+            guard !address.isEmpty else { return }
+            self?.applyApproximateStopAddress(address, dayID: dayID, stopID: stopID)
+        }
+    }
+
+    private func applyApproximateStopAddress(
+        _ address: String,
+        dayID: UUID,
+        stopID: UUID
+    ) {
+        guard let dayIndex = days.firstIndex(where: { $0.id == dayID }),
+              let stopIndex = days[dayIndex].stops.firstIndex(where: { $0.id == stopID }),
+              days[dayIndex].stops[stopIndex].accountID == nil,
+              !days[dayIndex].stops[stopIndex].isPersonalStop,
+              days[dayIndex].stops[stopIndex].reviewedAt == nil,
+              days[dayIndex].stops[stopIndex].isApproximateLocation != false else {
+            return
+        }
+        days[dayIndex].stops[stopIndex].accountAddress = address
+        days[dayIndex].stops[stopIndex].isApproximateLocation = true
+        persist(immediate: true)
     }
 
     private func applyBoundaryAddress(
@@ -1582,10 +1860,18 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             longitude: coordinate.longitude,
             accountID: account?.id,
             accountName: account?.name,
-            accountAddress: account?.address
+            accountAddress: account?.address,
+            accountReference: account?.accountId
         )
         activeStopID = stop.id
         days[dayIndex].stops.append(stop)
+        if account == nil {
+            resolveStopAddress(
+                dayID: days[dayIndex].id,
+                stopID: stop.id,
+                location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            )
+        }
         applyOnSiteEnergyProfile()
         notifyConfirmedStop(stop)
     }
@@ -1684,6 +1970,15 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
         persist(immediate: immediate)
     }
 
+    private static func resumeTiming(for day: inout FireVaultBreadcrumbDay, at date: Date) {
+        if let pausedAt = day.pausedAt {
+            day.accumulatedPausedDuration = (day.accumulatedPausedDuration ?? 0)
+                + max(0, date.timeIntervalSince(pausedAt))
+        }
+        day.pausedAt = nil
+        day.isPaused = false
+    }
+
     private func synchronizeLiveActivity(
         status: FireVaultTripLogActivityAttributes.Status
     ) {
@@ -1697,6 +1992,24 @@ final class FireVaultBreadcrumbStore: NSObject, ObservableObject, CLLocationMana
             day: day,
             status: status,
             showsMetrics: preferences.showsLiveActivityMetrics
+        )
+    }
+
+    private func synchronizeLiveActivityPresentationIfNeeded(location: CLLocation) {
+        guard liveActivitiesEnabled,
+              isRecording,
+              let day = activeDay,
+              location.timestamp.timeIntervalSince(lastLiveActivityPresentationSyncAt) >= 5 else {
+            return
+        }
+        let preferences = liveActivityPreferences
+        guard preferences.liveActivitiesAreEnabled else { return }
+        lastLiveActivityPresentationSyncAt = location.timestamp
+        FireVaultTripLogLiveActivityController.synchronize(
+            day: day,
+            status: .recording,
+            showsMetrics: preferences.showsLiveActivityMetrics,
+            liveLocation: location
         )
     }
 
@@ -1839,11 +2152,11 @@ struct FireVaultBreadcrumbsView: View {
                 }
             }
             .confirmationDialog(
-                "End Today’s Workday?",
+                "End Today’s Trip Log?",
                 isPresented: $confirmsEnd,
                 titleVisibility: .visible
             ) {
-                Button("End Workday", role: .destructive) {
+                Button("End Trip Log", role: .destructive) {
                     breadcrumbs.endWorkday()
                     selectedDayID = breadcrumbs.today?.id
                 }
@@ -1925,7 +2238,7 @@ struct FireVaultBreadcrumbsView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
                         Label(
-                            breadcrumbs.isRecording ? "Workday Recording" : "Workday Tracking",
+                            breadcrumbs.isRecording ? "Trip Log Recording" : "Trip Log Tracking",
                             systemImage: breadcrumbs.isRecording ? "location.fill" : "location"
                         )
                         .font(.headline)
@@ -1975,7 +2288,7 @@ struct FireVaultBreadcrumbsView: View {
                 if breadcrumbs.activeDay == nil {
                     if breadcrumbs.authorizationStatus != .denied,
                        breadcrumbs.authorizationStatus != .restricted {
-                        Button("Start Workday", systemImage: "play.fill") {
+                        Button("Start Trip Log", systemImage: "play.fill") {
                             breadcrumbs.startWorkday(accounts: store.accounts)
                             selectedDayID = breadcrumbs.activeDay?.id
                         }
@@ -1996,14 +2309,14 @@ struct FireVaultBreadcrumbsView: View {
                             .buttonStyle(.borderedProminent)
                         }
                         Spacer()
-                        Button("End Day", systemImage: "stop.fill", role: .destructive) {
+                        Button("End Trip Log", systemImage: "stop.fill", role: .destructive) {
                             confirmsEnd = true
                         }
                         .buttonStyle(.bordered)
                     }
                 }
 
-                Text("Trip Log starts only when you choose Start Workday. Route history stays in FireVault Pro on this device unless you explicitly export a report.")
+                Text("Recording starts only when you choose Start Trip Log. Route history stays in FireVault Pro on this device unless you explicitly export a report.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -2028,8 +2341,10 @@ struct FireVaultBreadcrumbsView: View {
             }
         } else {
             Map(initialPosition: .automatic, interactionModes: [.pan, .zoom, .rotate]) {
-                MapPolyline(coordinates: day.points.map(\.coordinate))
-                    .stroke(NativeShellPalette.red, style: .init(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                ForEach(Array(day.routeSegments.enumerated()), id: \.offset) { _, segment in
+                    MapPolyline(coordinates: segment.map(\.coordinate))
+                        .stroke(NativeShellPalette.red, style: .init(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                }
 
                 if let first = day.points.first {
                     Marker("Workday Start", systemImage: "play.fill", coordinate: first.coordinate)

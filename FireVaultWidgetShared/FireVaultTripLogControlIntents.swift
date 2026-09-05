@@ -46,8 +46,15 @@ struct FireVaultPauseTripLogIntent: LiveActivityIntent {
     static let description = IntentDescription("Pause the active FireVault Trip Log.")
     static let isDiscoverable = false
 
+    @MainActor
     func perform() async throws -> some IntentResult {
         FireVaultTripLogControlMailbox.send(.pause)
+        var snapshot = FireVaultWidgetSharedStore.load()
+        let now = Date()
+        snapshot.elapsedSeconds = snapshot.elapsedTime(at: now)
+        snapshot.updatedAt = now
+        snapshot.tripState = .paused
+        FireVaultWidgetSharedStore.save(snapshot)
         return .result()
     }
 }
@@ -57,8 +64,13 @@ struct FireVaultResumeTripLogIntent: LiveActivityIntent {
     static let description = IntentDescription("Resume the paused FireVault Trip Log.")
     static let isDiscoverable = false
 
+    @MainActor
     func perform() async throws -> some IntentResult {
         FireVaultTripLogControlMailbox.send(.resume)
+        var snapshot = FireVaultWidgetSharedStore.load()
+        snapshot.updatedAt = Date()
+        snapshot.tripState = .recording
+        FireVaultWidgetSharedStore.save(snapshot)
         return .result()
     }
 }

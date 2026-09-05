@@ -268,6 +268,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         var count: Int { requests.count }
         var wantsTracking: Bool { !requests.isEmpty }
         var wantsHighAccuracy: Bool { requests.values.contains(true) }
+        var wantsCarPlayTracking: Bool { requests[.carPlay] != nil }
 
         mutating func request(_ consumer: LiveConsumer, highAccuracy: Bool) {
             requests[consumer] = highAccuracy
@@ -279,7 +280,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
     }
 
     static let shared = FireVaultLocationService()
-    static let liveNearbyDistanceFilter: CLLocationDistance = 12
+    static let liveNearbyDistanceFilter: CLLocationDistance = kCLDistanceFilterNone
 
     @Published private(set) var coordinate: CLLocationCoordinate2D?
     @Published private(set) var latestLocation: CLLocation?
@@ -302,6 +303,10 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
 
     private var wantsHighAccuracyNearby: Bool {
         liveNearbyRequests.wantsHighAccuracy
+    }
+
+    private var wantsCarPlayTracking: Bool {
+        liveNearbyRequests.wantsCarPlayTracking
     }
 
     override init() {
@@ -343,8 +348,16 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         requestCurrentLocation(highAccuracy: highAccuracy)
     }
 
-    /// Reuses a location produced by the active Trip Log recorder so Nearby
-    /// does not keep a second CLLocationManager running at the same time.
+    func presentationSpeed(now: Date = Date()) -> CLLocationSpeed? {
+        FireVaultBreadcrumbRules.resolvedLiveSpeed(
+            location: latestLocation,
+            lastMeaningfulMovementAt: liveSpeedTracker.lastMeaningfulMovementAt,
+            now: now
+        )
+    }
+
+    /// Seeds live presentation state from Trip Log without replacing a newer
+    /// navigation fix delivered by this service's dedicated location manager.
     func acceptTripLogLocation(_ location: CLLocation) {
         guard location.horizontalAccuracy >= 0 else { return }
         if let latestLocation, latestLocation.timestamp > location.timestamp { return }
@@ -388,12 +401,13 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         manager.activityType = .automotiveNavigation
         manager.distanceFilter = Self.liveNearbyDistanceFilter
         manager.desiredAccuracy = wantsHighAccuracyNearby
-            ? kCLLocationAccuracyNearestTenMeters
-            : kCLLocationAccuracyHundredMeters
+            ? kCLLocationAccuracyBestForNavigation
+            : kCLLocationAccuracyNearestTenMeters
         // Nearby tracking only runs while a handset or CarPlay consumer is
         // visible. Keep it responsive during that window; automatic pausing
         // can otherwise leave distance and drive details stale for minutes.
         manager.pausesLocationUpdatesAutomatically = false
+        manager.allowsBackgroundLocationUpdates = wantsCarPlayTracking
     }
 
     func stopLiveNearbyUpdates(consumer: LiveConsumer = .handset) {
@@ -406,6 +420,7 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         }
         guard isLiveNearbyTracking, !wantsDiagnosticsTracking else { return }
         manager.stopUpdatingLocation()
+        manager.allowsBackgroundLocationUpdates = false
         isLiveNearbyTracking = false
         isLocating = false
         liveSpeedTracker.reset()
@@ -439,14 +454,19 @@ final class FireVaultLocationService: NSObject, ObservableObject, CLLocationMana
         }
     }
 
-    func stopDiagnosticsUpdates(resumeNearby: Bool = true) {
+    func stopDiagnosticsUpdates(resumeNearby _: Bool = true) {
         wantsDiagnosticsTracking = false
         isDiagnosticsTracking = false
-        if resumeNearby, wantsLiveNearbyTracking {
+        // A diagnostics screen must never stop a feed still owned by Nearby or
+        // CarPlay. Resume every registered consumer regardless of Trip Log's
+        // recording state.
+        if wantsLiveNearbyTracking {
             configureLiveNearbyManager()
             beginLiveNearbyUpdates()
         } else {
             manager.stopUpdatingLocation()
+            manager.allowsBackgroundLocationUpdates = false
+            isLiveNearbyTracking = false
             isLocating = false
             liveSpeedTracker.reset()
             liveSpeedMetersPerSecond = nil
