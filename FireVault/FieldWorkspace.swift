@@ -48,6 +48,17 @@ struct FireVaultWorkspaceAccount: Codable, Identifiable, Equatable {
               CLLocationCoordinate2DIsValid(.init(latitude: latitude, longitude: longitude)) else { return nil }
         return .init(latitude: latitude, longitude: longitude)
     }
+
+    /// One definition shared by the status UI, progress count, and uploader.
+    /// Keeping these aligned prevents older linked records from remaining
+    /// permanently pending when they predate revision-based sync.
+    var needsCloudAccountSync: Bool {
+        cloudID == nil
+            || cloudSyncedAt == nil
+            || cloudSyncVersion == nil
+            || locallyModifiedAt != nil
+            || cloudSyncError != nil
+    }
 }
 
 struct FireVaultWorkspaceNote: Codable, Identifiable, Equatable {

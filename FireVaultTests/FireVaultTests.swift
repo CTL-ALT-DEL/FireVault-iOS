@@ -4227,6 +4227,23 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(failed.title, "Sync needs attention")
     }
 
+    func testCloudSyncCandidateSelectionIncludesLegacyRevisionAndRetryStates() {
+        var account = makeWorkspaceAccount(cloudID: UUID(), name: "Legacy linked account")
+        account.cloudSyncedAt = Date()
+
+        XCTAssertTrue(account.needsCloudAccountSync, "A linked account without a server revision must be repaired")
+
+        account.cloudSyncVersion = 3
+        XCTAssertFalse(account.needsCloudAccountSync)
+
+        account.locallyModifiedAt = Date()
+        XCTAssertTrue(account.needsCloudAccountSync)
+
+        account.locallyModifiedAt = nil
+        account.cloudSyncError = "Retry"
+        XCTAssertTrue(account.needsCloudAccountSync)
+    }
+
     func testUnifiedSyncFingerprintDetectsFieldDataChanges() throws {
         let suite = "FireVaultTests.UnifiedSyncFingerprint.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

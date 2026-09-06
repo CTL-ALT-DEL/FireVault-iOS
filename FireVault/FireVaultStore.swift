@@ -240,12 +240,7 @@ final class FireVaultStore: ObservableObject {
 
     var pendingCloudAccountCount: Int {
         guard !demoMode else { return 0 }
-        return accounts.lazy.filter {
-            $0.cloudID == nil
-                || $0.cloudSyncVersion == nil
-                || $0.locallyModifiedAt != nil
-                || $0.cloudSyncError != nil
-        }.count
+        return accounts.lazy.filter(\.needsCloudAccountSync).count
     }
 
     func updateRecordChangeAccess(_ isAllowed: Bool) {
@@ -1591,9 +1586,7 @@ final class FireVaultStore: ObservableObject {
         isCloudSyncing = true
         cloudSyncErrorMessage = nil
         cloudSyncCompleted = 0
-        cloudSyncTotal = accounts.filter {
-            $0.cloudID == nil || $0.cloudSyncVersion == nil || $0.locallyModifiedAt != nil
-        }.count
+        cloudSyncTotal = accounts.filter(\.needsCloudAccountSync).count
         defer { isCloudSyncing = false }
         do {
             let session = try await SupabaseManager.client.auth.session
