@@ -120,4 +120,10 @@ if env PATH="$mock_bin:$PATH" "$script_under_test" > "$test_root/missing-env.log
 fi
 grep -F 'Required environment variable SUPABASE_DB_URL is missing' "$test_root/missing-env.log" >/dev/null
 
+if run_backup env R2_ENDPOINT='https://account.example.invalid/firevault-backups' > "$test_root/endpoint.log" 2>&1; then
+  printf 'Expected a bucket path in R2_ENDPOINT to fail.\n' >&2
+  exit 1
+fi
+grep -F 'R2_ENDPOINT must be the account-level HTTPS endpoint' "$test_root/endpoint.log" >/dev/null
+
 printf 'Nightly disaster-backup script tests passed.\n'
