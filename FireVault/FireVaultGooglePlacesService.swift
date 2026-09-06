@@ -70,6 +70,8 @@ final class FireVaultGooglePlacesService: FireVaultGooglePlacesProviding, @unche
     }
 
     func matches(latitude: Double, longitude: Double) async throws -> [FireVaultGooglePlaceMatch] {
+        try FireVaultPaidFeatureAccess.requireCached(.aiGeneration)
+
         do {
             _ = try await client.auth.session
         } catch {
@@ -92,6 +94,8 @@ final class FireVaultGooglePlacesService: FireVaultGooglePlacesProviding, @unche
             }
             return response.matches
         } catch let error as FireVaultGooglePlacesError {
+            throw error
+        } catch let error as FireVaultPaidFeatureError {
             throw error
         } catch {
             throw FireVaultGooglePlacesError.unavailable

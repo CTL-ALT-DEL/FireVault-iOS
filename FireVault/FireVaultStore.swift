@@ -257,11 +257,27 @@ final class FireVaultStore: ObservableObject {
         presentsSubscriptionRequired = true
     }
 
+    func requestSubscriptionForPaidFeature() {
+        guard !demoMode else { return }
+        presentsSubscriptionRequired = true
+    }
+
     /// Checks access before presenting an editor so a read-only user sees the
     /// plan prompt instead of an editable form whose save will be rejected.
     @discardableResult
     func beginRecordChange() -> Bool {
         authorizeRecordChange()
+    }
+
+    private func hasCloudStorageAccess() -> Bool {
+        do {
+            try FireVaultPaidFeatureAccess.requireCached(.cloudStorage)
+            return true
+        } catch {
+            cloudSyncErrorMessage = error.localizedDescription
+            if !demoMode { presentsSubscriptionRequired = true }
+            return false
+        }
     }
 
     private func authorizeRecordChange() -> Bool {
@@ -1583,6 +1599,7 @@ final class FireVaultStore: ObservableObject {
     func syncAccountsNow() async {
         guard authorizeRecordChange() else { return }
         guard !demoMode, !isCloudSyncing else { return }
+        guard hasCloudStorageAccess() else { return }
         isCloudSyncing = true
         cloudSyncErrorMessage = nil
         cloudSyncCompleted = 0
@@ -1638,6 +1655,7 @@ final class FireVaultStore: ObservableObject {
     func refreshAccountsFromCloud() async {
         guard authorizeRecordChange() else { return }
         guard !demoMode, !isCloudSyncing else { return }
+        guard hasCloudStorageAccess() else { return }
         isCloudSyncing = true
         cloudSyncErrorMessage = nil
         defer { isCloudSyncing = false }
@@ -1674,6 +1692,7 @@ final class FireVaultStore: ObservableObject {
         }
         let localResult = applyCSVImport(analysis)
         guard !demoMode else { return localResult }
+        guard hasCloudStorageAccess() else { return localResult }
 
         isCloudSyncing = true
         cloudSyncErrorMessage = nil
@@ -1841,6 +1860,7 @@ final class FireVaultStore: ObservableObject {
         guard !demoMode, !isCloudSyncing,
               let conflict = accountSyncConflicts.first(where: { $0.id == id }),
               let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+        guard hasCloudStorageAccess() else { return }
 
         isCloudSyncing = true
         cloudSyncErrorMessage = nil

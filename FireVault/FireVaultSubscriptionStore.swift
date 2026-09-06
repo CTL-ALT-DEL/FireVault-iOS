@@ -44,12 +44,16 @@ enum FireVaultSubscriptionAccess: Equatable {
         }
     }
 
-    var preservesReadOnlyAccess: Bool {
+    /// Account records and on-device field tools remain available on the free
+    /// tier. Paid network services use `grantsFullAccess` instead.
+    var grantsLocalAccess: Bool { true }
+
+    var isResolvedWithoutPaidAccess: Bool {
         switch self {
-        case .billingRetry, .expired, .notSubscribed, .unavailable:
-            true
         case .checking, .trial, .active, .billingGracePeriod, .offlineGracePeriod:
             false
+        case .billingRetry, .expired, .notSubscribed, .unavailable:
+            true
         }
     }
 
@@ -68,6 +72,56 @@ enum FireVaultSubscriptionAccess: Equatable {
             return "Reconnect by \(expiration.formatted(date: .abbreviated, time: .omitted))"
         case .checking, .billingRetry, .expired, .notSubscribed, .unavailable:
             return nil
+        }
+    }
+}
+
+enum FireVaultPaidFeature: String, CaseIterable {
+    case cloudStorage
+    case aiGeneration
+    case tripReportEmail
+
+    var title: String {
+        switch self {
+        case .cloudStorage: "Cloud storage"
+        case .aiGeneration: "AI generation"
+        case .tripReportEmail: "Trip Report email"
+        }
+    }
+}
+
+enum FireVaultPaidFeatureError: LocalizedError, Equatable {
+    case subscriptionRequired(FireVaultPaidFeature)
+
+    var errorDescription: String? {
+        switch self {
+        case .subscriptionRequired(let feature):
+            "Subscription Required: \(feature.title) is included with a FireVault Technician plan."
+        }
+    }
+}
+
+enum FireVaultPaidFeatureAccess {
+    static func isAllowed(_ access: FireVaultSubscriptionAccess) -> Bool {
+        access.grantsFullAccess
+    }
+
+    static func require(
+        _ feature: FireVaultPaidFeature,
+        access: FireVaultSubscriptionAccess
+    ) throws {
+        guard isAllowed(access) else {
+            throw FireVaultPaidFeatureError.subscriptionRequired(feature)
+        }
+    }
+
+    static func requireCached(
+        _ feature: FireVaultPaidFeature,
+        defaults: UserDefaults = .standard,
+        now: Date = Date()
+    ) throws {
+        guard FireVaultSubscriptionStore.cachedRecordChangesAreAllowed(defaults: defaults, now: now) else {
+            throw FireVaultPaidFeatureError.subscriptionRequired(feature)
         }
     }
 }

@@ -1279,6 +1279,7 @@ private struct MapArrivalView: View {
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
+    @EnvironmentObject private var subscriptions: FireVaultSubscriptionStore
     @State private var editingLocation: FireVaultWorkspaceLocation?
     @State private var isShowingEditor = false
     @State private var isImportingCSV = false
@@ -1617,14 +1618,20 @@ private struct MapArrivalView: View {
     }
 
     private var accountBriefAction: some View {
-        Button(action: generateAccountBrief) {
+        Button {
+            if subscriptions.access.grantsFullAccess {
+                generateAccountBrief()
+            } else {
+                store.requestSubscriptionForPaidFeature()
+            }
+        } label: {
             HStack(spacing: 10) {
                 Image(systemName: "sparkles")
                     .font(.headline.bold())
-                    .foregroundStyle(FieldWorkspacePalette.blue)
-                Text("Generate Account Brief")
+                    .foregroundStyle(subscriptions.access.grantsFullAccess ? FieldWorkspacePalette.blue : .secondary)
+                Text(subscriptions.access.grantsFullAccess ? "Generate Account Brief" : "Subscription Required")
                     .font(.subheadline.bold())
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(subscriptions.access.grantsFullAccess ? .primary : .secondary)
                 Spacer()
                 Image(systemName: "chevron.right")
                     .foregroundStyle(.secondary)
@@ -1641,10 +1648,15 @@ private struct MapArrivalView: View {
         }
         .buttonStyle(.plain)
         .disabled(isLoadingAccountBrief)
+        .opacity(subscriptions.access.grantsFullAccess ? 1 : 0.72)
         .accessibilityIdentifier("generate-account-brief")
     }
 
     private func generateAccountBrief() {
+        guard subscriptions.access.grantsFullAccess else {
+            store.requestSubscriptionForPaidFeature()
+            return
+        }
         guard !isLoadingAccountBrief else { return }
         accountBrief = nil
         accountBriefError = nil

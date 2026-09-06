@@ -425,6 +425,7 @@ final class FireVaultSupabaseFieldMediaUploader: FireVaultFieldMediaUploader, @u
     }
 
     func upload(_ item: FireVaultFieldMediaBackupItem) async throws -> FireVaultFieldMediaUploadReceipt {
+        try FireVaultPaidFeatureAccess.requireCached(.cloudStorage)
         guard let userID = item.userID else {
             throw FireVaultFieldMediaUploadError.signedInUserMismatch
         }
@@ -726,6 +727,7 @@ final class FireVaultFieldMediaBackupService: ObservableObject {
     private let coordinator: FireVaultFieldMediaBackupCoordinator?
     private var storagePreferences = FireVaultStoragePreferences()
     private var isDemoMode = true
+    private var hasSubscriptionAccess = false
     private var networkAvailable = false
     private var usingWiFi = false
     private var retryTask: Task<Void, Never>?
@@ -761,7 +763,7 @@ final class FireVaultFieldMediaBackupService: ObservableObject {
     }
 
     var isEnabled: Bool {
-        !isDemoMode && (storagePreferences.automaticFieldMediaBackup ?? false)
+        !isDemoMode && hasSubscriptionAccess && (storagePreferences.automaticFieldMediaBackup ?? false)
     }
 
     var waitingCount: Int { items.filter { $0.state == .waiting }.count }
@@ -771,6 +773,7 @@ final class FireVaultFieldMediaBackupService: ObservableObject {
     var summaryText: String {
         if let initializationError { return "Backup queue unavailable: \(initializationError)" }
         if isDemoMode { return "Demo media stays on this iPhone" }
+        if !hasSubscriptionAccess { return "Subscription Required" }
         if !isEnabled { return "Automatic cloud backup is off" }
         if isProcessing { return "Uploading field media" }
         if failedCount > 0 { return "\(failedCount) backup\(failedCount == 1 ? "" : "s") need attention" }
@@ -784,10 +787,16 @@ final class FireVaultFieldMediaBackupService: ObservableObject {
     func configure(
         storagePreferences: FireVaultStoragePreferences,
         accounts: [FireVaultWorkspaceAccount],
-        isDemoMode: Bool
+        isDemoMode: Bool,
+        hasSubscriptionAccess: Bool
     ) async {
         self.storagePreferences = storagePreferences
         self.isDemoMode = isDemoMode
+        self.hasSubscriptionAccess = hasSubscriptionAccess
+        if !hasSubscriptionAccess {
+            retryTask?.cancel()
+            processingTask?.cancel()
+        }
         if let store {
             try? await store.removeUnavailableLocalFiles()
         }

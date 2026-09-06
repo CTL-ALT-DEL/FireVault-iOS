@@ -28,6 +28,7 @@ enum FireVaultUnifiedSyncPhase: Equatable {
 }
 
 struct FireVaultUnifiedSyncStatus: Equatable {
+    let hasSubscriptionAccess: Bool
     let isDemoMode: Bool
     let isSyncing: Bool
     let phase: FireVaultUnifiedSyncPhase
@@ -41,7 +42,7 @@ struct FireVaultUnifiedSyncStatus: Equatable {
     let lastCompletedAt: Date?
 
     var needsAction: Bool {
-        guard !isDemoMode else { return false }
+        guard !isDemoMode, hasSubscriptionAccess else { return false }
         return pendingAccountCount > 0
             || fieldDataNeedsSync
             || waitingFileCount > 0
@@ -56,6 +57,7 @@ struct FireVaultUnifiedSyncStatus: Equatable {
 
     var title: String {
         if isDemoMode { return "Demo data stays on this iPhone" }
+        if !hasSubscriptionAccess { return "Subscription Required" }
         if isSyncing { return phase.statusText }
         if needsAttention { return "Sync needs attention" }
         if needsAction { return "Changes are waiting to sync" }
@@ -64,6 +66,9 @@ struct FireVaultUnifiedSyncStatus: Equatable {
 
     var detail: String {
         if isDemoMode { return "Cloud sync is available outside Demo Mode." }
+        if !hasSubscriptionAccess {
+            return "Your records stay on this iPhone. Subscribe to sync data, files, photos, and documents."
+        }
         if isSyncing { return "Accounts, notes, files, photos, and documents are handled together." }
 
         var parts: [String] = []
@@ -133,9 +138,13 @@ final class FireVaultUnifiedSyncService: ObservableObject {
 
     func status(
         store: FireVaultStore,
-        mediaBackup: FireVaultFieldMediaBackupService
+        mediaBackup: FireVaultFieldMediaBackupService,
+        hasSubscriptionAccess: Bool? = nil
     ) -> FireVaultUnifiedSyncStatus {
-        .init(
+        let hasSubscriptionAccess = hasSubscriptionAccess
+            ?? FireVaultSubscriptionStore.cachedRecordChangesAreAllowed()
+        return .init(
+            hasSubscriptionAccess: hasSubscriptionAccess,
             isDemoMode: store.demoMode,
             isSyncing: isSyncing || store.isCloudSyncing || mediaBackup.isProcessing,
             phase: resolvedPhase(store: store, mediaBackup: mediaBackup),
@@ -157,6 +166,13 @@ final class FireVaultUnifiedSyncService: ObservableObject {
         mediaBackup: FireVaultFieldMediaBackupService
     ) async {
         guard !isSyncing, !store.demoMode, store.beginRecordChange() else { return }
+        do {
+            try FireVaultPaidFeatureAccess.requireCached(.cloudStorage)
+        } catch {
+            errorMessage = error.localizedDescription
+            store.requestSubscriptionForPaidFeature()
+            return
+        }
         isSyncing = true
         errorMessage = nil
         var failures: [String] = []
@@ -255,18 +271,25 @@ struct FireVaultUnifiedSyncCard: View {
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @ObservedObject var unifiedSync: FireVaultUnifiedSyncService
     @ObservedObject private var mediaBackup = FireVaultFieldMediaBackupService.shared
+    @EnvironmentObject private var subscriptions: FireVaultSubscriptionStore
 
     private var status: FireVaultUnifiedSyncStatus {
-        unifiedSync.status(store: store, mediaBackup: mediaBackup)
+        unifiedSync.status(
+            store: store,
+            mediaBackup: mediaBackup,
+            hasSubscriptionAccess: subscriptions.access.grantsFullAccess
+        )
     }
 
     private var tint: Color {
+        if !status.hasSubscriptionAccess { return .secondary }
         if status.needsAttention { return .orange }
         if status.isSyncing || status.needsAction { return NativeShellPalette.blue }
         return NativeShellPalette.green
     }
 
     private var symbol: String {
+        if !status.hasSubscriptionAccess { return "lock.fill" }
         if status.needsAttention { return "exclamationmark.arrow.triangle.2.circlepath" }
         if status.isSyncing { return "arrow.triangle.2.circlepath" }
         if status.needsAction { return "arrow.triangle.2.circlepath.circle.fill" }
@@ -296,20 +319,24 @@ struct FireVaultUnifiedSyncCard: View {
                 Spacer(minLength: 4)
 
                 Button {
-                    Task {
-                        await unifiedSync.syncNow(
-                            store: store,
-                            settings: settings,
-                            breadcrumbs: breadcrumbs,
-                            mediaBackup: mediaBackup
-                        )
+                    if status.hasSubscriptionAccess {
+                        Task {
+                            await unifiedSync.syncNow(
+                                store: store,
+                                settings: settings,
+                                breadcrumbs: breadcrumbs,
+                                mediaBackup: mediaBackup
+                            )
+                        }
+                    } else {
+                        store.requestSubscriptionForPaidFeature()
                     }
                 } label: {
                     if status.isSyncing {
                         ProgressView()
                             .frame(minWidth: 58)
                     } else {
-                        Text("Sync All")
+                        Text(status.hasSubscriptionAccess ? "Sync All" : "View Plans")
                             .font(.system(.caption, design: .rounded, weight: .bold))
                     }
                 }

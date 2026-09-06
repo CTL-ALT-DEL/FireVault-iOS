@@ -49,6 +49,7 @@ struct FireVaultWidgetSnapshot: Codable, Equatable {
         case syncing
         case upToDate
         case needsAttention
+        case subscriptionRequired
 
         var title: String {
             switch self {
@@ -56,6 +57,7 @@ struct FireVaultWidgetSnapshot: Codable, Equatable {
             case .syncing: "Syncing"
             case .upToDate: "Up to Date"
             case .needsAttention: "Needs Attention"
+            case .subscriptionRequired: "Subscription Required"
             }
         }
     }

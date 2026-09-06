@@ -86,12 +86,12 @@ enum FireVaultHelpCatalog {
             visual: .quickStart,
             steps: [
                 .init("quick-login", "Log in", "Open FireVault Pro and use Log In. If the main tabs are already visible, you are signed in."),
-                .init("quick-sync", "Check the vault", "Open Accounts, then tap Sync All in Data & File Sync. Wait for the status to read Everything is up to date."),
+                .init("quick-sync", "Check the vault", "During a trial or subscription, open Accounts, tap Sync All in Data & File Sync, and wait for Everything is up to date. Free-tier records remain available locally on this iPhone."),
                 .init("quick-accounts", "Find an account", "Open Accounts and search by name, address, or account ID. Tap a result to open its field workspace."),
                 .init("quick-trip", "Start the workday", "Open Trip Log, tap Recording, then Start Trip Log. The status changes from READY to RECORDING.")
             ],
             successTitle: "Ready for the road",
-            successDetail: "Your accounts are visible, cloud status is current, and Trip Log clearly says RECORDING.",
+            successDetail: "Your accounts are visible, any included cloud sync is current, and Trip Log clearly says RECORDING.",
             notes: [
                 "Trip Log does not begin automatically. You stay in control of when route recording starts and stops.",
                 "Demo Mode uses a separate fictional vault and never changes your live customer records."
@@ -140,7 +140,8 @@ enum FireVaultHelpCatalog {
             notes: [
                 "File backup must remain enabled under Settings → File Storage for Sync All to upload media. Turning it off is respected.",
                 "Notes, equipment, saved locations, settings, and Trip Log history use compact Cloud Vault recovery points. Photos, scans, reports, and documents use the file queue.",
-                "Videos remain on this device to protect the free cloud-storage allowance."
+                "Cloud sync and backup require an active trial or subscription. The free tier keeps local accounts and field records usable on this iPhone.",
+                "Videos remain on this device in this release."
             ],
             resources: []
         ),
@@ -220,6 +221,7 @@ enum FireVaultHelpCatalog {
             notes: [
                 "Use Wi-Fi only when cellular uploads are undesirable. Failed uploads remain queued and can be retried from File Storage.",
                 "Open Settings → File Storage → Backed-Up Media to preview or download a checksum-verified cloud copy and restore a missing original. FireVault reconnects the restored media record after a clean install when needed.",
+                "Cloud media backup and recovery require an active trial or subscription. Local capture remains available on the free tier.",
                 "Stamped photo copies are optional; the unstamped source remains the primary backup. Videos remain local in this release."
             ],
             resources: []
@@ -271,6 +273,7 @@ enum FireVaultHelpCatalog {
             notes: [
                 "Signing out is not deletion. It disconnects the device while keeping local information on the iPhone.",
                 "Cloud Vault keeps the three latest metadata-only recovery points and does not duplicate photos, scans, or videos.",
+                "Cloud Vault requires an active trial or subscription. Complete Vault export and restore remain local options on the free tier.",
                 "If full cloud-account deletion fails, FireVault leaves local data on the iPhone."
             ],
             resources: []
@@ -288,12 +291,13 @@ enum FireVaultHelpCatalog {
                 .init("fix-gps", "Trip Log is waiting for GPS", "Keep the workday active, move into open sky if possible, and confirm Precise Location is on. Open Settings → GPS & Maps → GPS Diagnostics for live accuracy."),
                 .init("fix-carplay", "CarPlay shows no nearby accounts", "Open the customer on iPhone and add valid coordinates or adjust its map pin. Reopen FireVault in CarPlay after the account is mapped."),
                 .init("fix-widget", "A widget looks stale", "Open FireVault once, confirm the desired account or Trip Log state, then return to the Home Screen. iOS refreshes widgets on its own schedule."),
-                .init("fix-missing", "A feature seems missing", "Check whether Demo Mode is active and search Settings by the feature name. Connected storage tools remain unavailable until configured.")
+                .init("fix-missing", "A feature seems missing", "Check whether Demo Mode is active and search Settings by the feature name. Cloud storage, generated API features, and Trip Report emailing show Subscription Required when the trial or plan is inactive.")
             ],
             successTitle: "Still stuck?",
             successDetail: "Include what you tapped, the exact message, and a screenshot when contacting support. That usually identifies the problem fastest.",
             notes: [
                 "Do not delete and reinstall the app as a first troubleshooting step; local-only records may be removed with the app.",
+                "The free tier keeps local accounts, notes, files, photos, documents, and Trip Log tools available on the iPhone.",
                 "A timestamp or exact error message is more useful than a general description such as “sync is broken.”"
             ],
             resources: []
