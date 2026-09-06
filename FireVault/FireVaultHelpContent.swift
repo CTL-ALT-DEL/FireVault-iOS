@@ -132,12 +132,14 @@ enum FireVaultHelpCatalog {
                 .init("sync-open", "Open cloud status", "Go to Settings → Technician Profile and find Cloud Sync below your contact information."),
                 .init("sync-run", "Run a manual check", "Tap Sync Now. Keep FireVault open while the progress indicator is visible."),
                 .init("sync-read", "Read the result", "Up to date means the account-record sync finished. Last checked is the latest attempt; Last successful sync is the latest completed sync."),
+                .init("sync-conflict", "Review simultaneous changes", "If Review needed appears, open Review Sync Conflicts. Compare the iPhone and portal details, then choose the version to keep for each account."),
                 .init("sync-retry", "Retry safely", "If Status says Needs attention, check the connection and sign-in, then tap Sync Now again. FireVault keeps local records when a sync fails.")
             ],
             successTitle: "What is actually synced",
             successDetail: "Sync Now exchanges customer account records with your private FireVault Cloud vault and resolves older records that predate cloud sync.",
             notes: [
                 "Field Media backup is managed separately under Settings → File Storage; the account-record Sync Now button does not upload photos or scans.",
+                "Choosing an account version changes only cloud-shared account details. Notes, equipment, files, favorites, categories, and other device-only field data remain on this iPhone.",
                 "A Last checked time without a newer Last successful sync usually means the most recent attempt did not finish."
             ],
             resources: []
