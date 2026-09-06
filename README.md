@@ -42,6 +42,7 @@ require the physical-device checks recorded in the active build checklist.
 - Full backups use the `.firevaultbackup` format; legacy account-only JSON files
   remain importable.
 - The backend disaster-recovery procedure is documented in
-  `docs/NIGHTLY_DISASTER_BACKUP.md`.
+  `docs/NIGHTLY_DISASTER_BACKUP.md`, with the guarded restore drill in
+  `docs/DISASTER_RECOVERY_RUNBOOK.md`.
 
 See `CURRENT_BUILD.md` for the official baseline and active candidate.
