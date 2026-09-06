@@ -19,6 +19,9 @@ private enum FireVaultIPadAccountSortV2: String, CaseIterable, Identifiable {
 struct FireVaultIPadAccountsWorkspaceV2: View {
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
+    @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+    @ObservedObject var unifiedSync: FireVaultUnifiedSyncService
 
     @State private var searchText = ""
     @State private var sort: FireVaultIPadAccountSortV2 = .alphabetic
@@ -115,6 +118,15 @@ struct FireVaultIPadAccountsWorkspaceV2: View {
             .padding(.horizontal, 22)
             .padding(.top, 20)
             .padding(.bottom, 16)
+
+            FireVaultUnifiedSyncCard(
+                store: store,
+                settings: settings,
+                breadcrumbs: breadcrumbs,
+                unifiedSync: unifiedSync
+            )
+            .padding(.horizontal, 22)
+            .padding(.bottom, 14)
 
             HStack(spacing: 9) {
                 Image(systemName: "magnifyingglass")

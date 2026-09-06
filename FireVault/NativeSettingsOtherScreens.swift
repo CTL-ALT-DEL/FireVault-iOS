@@ -764,8 +764,14 @@ struct NativeCategoriesSettingsView: View {
             .navigationTitle("Edit Category")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingOriginalCategory = nil } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { saveCategoryEdit() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { editingOriginalCategory = nil }
+                        .fireVaultNavigationActionStyle()
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { saveCategoryEdit() }
+                        .fireVaultNavigationActionStyle()
+                }
             }
         }
     }
@@ -888,6 +894,7 @@ struct NativeBackupRestoreView: View {
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+    @ObservedObject private var unifiedSync = FireVaultUnifiedSyncService.shared
     @State private var exportDocument = FireVaultVaultBackupDocument()
     @State private var isExporting = false
     @State private var isImporting = false
@@ -1113,6 +1120,7 @@ struct NativeBackupRestoreView: View {
                     payload: payload,
                     deviceLabel: UIDevice.current.name
                 )
+                unifiedSync.acknowledgeFieldData(payload)
                 cloudSnapshots = try await FireVaultCloudVaultBackupService.listSnapshots()
                 switch result {
                 case .created:
@@ -1141,6 +1149,14 @@ struct NativeBackupRestoreView: View {
                     store: store,
                     settings: settings,
                     breadcrumbs: breadcrumbs
+                )
+                unifiedSync.refreshPendingFieldData(
+                    FireVaultCloudVaultBackupCoordinator.payload(
+                        store: store,
+                        settings: settings,
+                        breadcrumbs: breadcrumbs
+                    ),
+                    isDemoMode: store.demoMode
                 )
                 statusMessage = "Restored \(restored.accountsAdded) accounts and \(restored.tripLogDaysAdded) Trip Log days; missing field records were merged safely."
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -1501,6 +1517,7 @@ private struct NativeCSVImportReviewView: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }
+                    .fireVaultNavigationActionStyle()
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Import") {
@@ -1519,6 +1536,7 @@ private struct NativeCSVImportReviewView: View {
                         onImport(result)
                     }
                 }
+                .fireVaultNavigationActionStyle()
                 .disabled(mapping[.accountName] == nil || analysis.preview.rows.isEmpty || isImporting)
             }
         }

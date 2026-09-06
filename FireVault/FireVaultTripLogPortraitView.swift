@@ -72,6 +72,7 @@ struct FireVaultTripLogPortraitView: View {
                 if showsCloseButton {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Close", systemImage: "xmark") { dismiss() }
+                            .fireVaultNavigationActionStyle()
                     }
                 }
             }

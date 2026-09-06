@@ -38,6 +38,8 @@ struct FireVaultIPadWorkspaceV2: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+    @ObservedObject var unifiedSync: FireVaultUnifiedSyncService
+    @ObservedObject private var mediaBackup = FireVaultFieldMediaBackupService.shared
 
     private let sidebarWidth: CGFloat = 216
 
@@ -134,7 +136,10 @@ struct FireVaultIPadWorkspaceV2: View {
                         .symbolEffect(
                             .pulse,
                             options: .repeating,
-                            isActive: tab == .trip && breadcrumbs.isRecording
+                            isActive: (tab == .trip && breadcrumbs.isRecording)
+                                || (tab == .accounts
+                                    && unifiedSync.status(store: store, mediaBackup: mediaBackup).needsAction
+                                    && !unifiedSync.status(store: store, mediaBackup: mediaBackup).isSyncing)
                         )
                         .foregroundStyle(
                             tab == .trip && breadcrumbs.isRecording
@@ -219,7 +224,13 @@ struct FireVaultIPadWorkspaceV2: View {
                     returnTitle: "Account List"
                 )
             } else {
-                FireVaultIPadAccountsWorkspaceV2(payload: payload, store: store)
+                FireVaultIPadAccountsWorkspaceV2(
+                    payload: payload,
+                    store: store,
+                    settings: settings,
+                    breadcrumbs: breadcrumbs,
+                    unifiedSync: unifiedSync
+                )
             }
 
         case .trip:

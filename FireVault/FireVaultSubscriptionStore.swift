@@ -52,6 +52,24 @@ enum FireVaultSubscriptionAccess: Equatable {
             false
         }
     }
+
+    func planCardDetail(now: Date = Date()) -> String? {
+        switch self {
+        case .trial(_, let expiration):
+            guard let expiration else { return "Free trial active" }
+            let remaining = max(0, Int(ceil(expiration.timeIntervalSince(now) / 86_400)))
+            if remaining == 0 { return "Free trial ends today" }
+            return "\(remaining) free-trial day\(remaining == 1 ? "" : "s") remaining"
+        case .active(_, let expiration):
+            return expiration.map { "Renews \($0.formatted(date: .abbreviated, time: .omitted))" }
+        case .billingGracePeriod(_, let expiration):
+            return expiration.map { "Access through \($0.formatted(date: .abbreviated, time: .omitted))" }
+        case .offlineGracePeriod(_, let expiration):
+            return "Reconnect by \(expiration.formatted(date: .abbreviated, time: .omitted))"
+        case .checking, .billingRetry, .expired, .notSubscribed, .unavailable:
+            return nil
+        }
+    }
 }
 
 enum FireVaultPurchaseOutcome: Equatable {

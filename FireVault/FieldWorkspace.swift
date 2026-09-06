@@ -328,6 +328,8 @@ struct FieldWorkspaceView: View {
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
+    @ObservedObject var unifiedSync: FireVaultUnifiedSyncService
+    @ObservedObject private var mediaBackup = FireVaultFieldMediaBackupService.shared
 
     @State private var isShowingAccountEditor = false
     @State private var isShowingNoteEditor = false
@@ -351,6 +353,11 @@ struct FieldWorkspaceView: View {
     private var recentActivityItems: [FireVaultWorkspaceRecent] {
         let currentAccount = store.accounts.first(where: { $0.id == account.id }) ?? account
         return Array(currentAccount.recent.prefix(recentActivityDisplayLimit))
+    }
+
+    private var accountSyncNeedsAction: Bool {
+        let status = unifiedSync.status(store: store, mediaBackup: mediaBackup)
+        return status.needsAction && !status.isSyncing
     }
 
     private var classificationTags: [String] {
@@ -391,7 +398,7 @@ struct FieldWorkspaceView: View {
                     } label: {
                         Label("Accounts", systemImage: "chevron.left")
                     }
-                    .buttonStyle(.glass)
+                    .fireVaultNavigationActionStyle()
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -849,7 +856,11 @@ struct FieldWorkspaceView: View {
                 WorkspaceNavButton(title: "Nearby", symbol: "location.fill") { store.closeAccount(to: .nearby) }
             }
             if settings.isFeatureVisible("tab.accounts") {
-                WorkspaceNavButton(title: "Accounts", symbol: "magnifyingglass") { store.closeAccount(to: .accounts) }
+                WorkspaceNavButton(
+                    title: "Accounts",
+                    symbol: "magnifyingglass",
+                    pulses: accountSyncNeedsAction
+                ) { store.closeAccount(to: .accounts) }
             }
             if settings.isFeatureVisible("tab.trip") {
                 WorkspaceNavButton(title: "Trip Log", symbol: "truck.box.fill") { store.closeAccount(to: .trip) }
@@ -3104,6 +3115,7 @@ private struct PhotoVideoLibraryView: View {
                             if !isSelectingPhotos { selectedPhotoIDs.removeAll() }
                         }
                     }
+                    .fireVaultNavigationActionStyle()
                 }
             }
         }
@@ -4508,6 +4520,7 @@ private struct WorkspaceQuickAction: View {
 private struct WorkspaceNavButton: View {
     let title: String
     let symbol: String
+    var pulses = false
     let action: () -> Void
 
     var body: some View {
@@ -4516,6 +4529,7 @@ private struct WorkspaceNavButton: View {
                 Image(systemName: symbol)
                     .font(.system(size: 20, weight: .semibold))
                     .frame(width: 34, height: 26)
+                    .symbolEffect(.pulse, options: .repeating, isActive: pulses)
                     .shadow(color: .black.opacity(0.18), radius: 1.5, x: 0, y: 2)
                 Text(title).font(.caption2.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
             }
@@ -4548,7 +4562,7 @@ private struct WorkspaceEditorToolbarButton: View {
     var body: some View {
         Button(action: action) {
             Label(kind.title, systemImage: kind.symbol)
-                .font(.caption.weight(.bold))
+                .font(.system(.subheadline, design: .rounded, weight: .bold))
                 .foregroundStyle(kind == .save ? Color.white : Color.primary)
                 .padding(.horizontal, 12)
                 .frame(height: 34)
@@ -4625,7 +4639,8 @@ private struct FieldWorkspaceView_Previews: PreviewProvider {
             ),
             store: FireVaultStore(),
             settings: FireVaultNativeSettingsStore(),
-            locationService: FireVaultLocationService()
+            locationService: FireVaultLocationService(),
+            unifiedSync: .shared
         )
     }
 }

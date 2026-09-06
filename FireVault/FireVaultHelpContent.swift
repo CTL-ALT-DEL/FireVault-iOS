@@ -86,7 +86,7 @@ enum FireVaultHelpCatalog {
             visual: .quickStart,
             steps: [
                 .init("quick-login", "Log in", "Open FireVault Pro and use Log In. If the main tabs are already visible, you are signed in."),
-                .init("quick-sync", "Check the vault", "Open Settings → Technician Profile, then tap Sync Now. Wait for account-record status to read Up to date."),
+                .init("quick-sync", "Check the vault", "Open Accounts, then tap Sync All in Data & File Sync. Wait for the status to read Everything is up to date."),
                 .init("quick-accounts", "Find an account", "Open Accounts and search by name, address, or account ID. Tap a result to open its field workspace."),
                 .init("quick-trip", "Start the workday", "Open Trip Log, tap Recording, then Start Trip Log. The status changes from READY to RECORDING.")
             ],
@@ -123,24 +123,24 @@ enum FireVaultHelpCatalog {
         .init(
             id: .cloudSync,
             eyebrow: "FIREVAULT CLOUD",
-            title: "Sync account records",
-            summary: "Understand what Sync Now does, what the timestamps mean, and how to recover from an error.",
+            title: "Sync data and files",
+            summary: "Use one status and one Sync All action for account records, field data, photos, scans, and documents.",
             symbol: "arrow.triangle.2.circlepath",
             tint: "purple",
             visual: .cloudSync,
             steps: [
-                .init("sync-open", "Open cloud status", "Go to Settings → Technician Profile and find Cloud Sync below your contact information."),
-                .init("sync-run", "Run a manual check", "Tap Sync Now. Keep FireVault open while the progress indicator is visible."),
-                .init("sync-read", "Read the result", "Up to date means the account-record sync finished. Last checked is the latest attempt; Last successful sync is the latest completed sync."),
-                .init("sync-conflict", "Review simultaneous changes", "If Review needed appears, open Review Sync Conflicts. Compare the iPhone and portal details, then choose the version to keep for each account."),
-                .init("sync-retry", "Retry safely", "If Status says Needs attention, check the connection and sign-in, then tap Sync Now again. FireVault keeps local records when a sync fails.")
+                .init("sync-open", "Open sync status", "Go to Accounts and find Data & File Sync at the top of the page."),
+                .init("sync-run", "Synchronize everything", "Tap Sync All. Keep FireVault open while it synchronizes account data, protects notes and field data, then uploads queued photos and documents."),
+                .init("sync-read", "Read the result", "Everything is up to date means every enabled sync stage finished. A pulsing Accounts icon means changes are waiting."),
+                .init("sync-conflict", "Review simultaneous changes", "If Sync needs attention appears, open Review Conflicts. Compare the iPhone and portal details, then choose the version to keep for each account."),
+                .init("sync-retry", "Retry safely", "If sync needs attention, check the connection and sign-in, then tap Sync All again. FireVault keeps local records and failed files for a safe retry.")
             ],
             successTitle: "What is actually synced",
-            successDetail: "Sync Now exchanges customer account records with your private FireVault Cloud vault and resolves older records that predate cloud sync.",
+            successDetail: "Sync All coordinates cloud account records, checksum-protected field-data recovery, and the automatic media queue behind one progress state.",
             notes: [
-                "Field Media backup is managed separately under Settings → File Storage; the account-record Sync Now button does not upload photos or scans.",
-                "Choosing an account version changes only cloud-shared account details. Notes, equipment, files, favorites, categories, and other device-only field data remain on this iPhone.",
-                "A Last checked time without a newer Last successful sync usually means the most recent attempt did not finish."
+                "File backup must remain enabled under Settings → File Storage for Sync All to upload media. Turning it off is respected.",
+                "Notes, equipment, saved locations, settings, and Trip Log history use compact Cloud Vault recovery points. Photos, scans, reports, and documents use the file queue.",
+                "Videos remain on this device to protect the free cloud-storage allowance."
             ],
             resources: []
         ),
@@ -284,7 +284,7 @@ enum FireVaultHelpCatalog {
             tint: "red",
             visual: .troubleshooting,
             steps: [
-                .init("fix-sync", "Sync says Needs attention", "Confirm the iPhone is online and you are signed in. Open Settings → Technician Profile, read the Cloud Sync error, then tap Sync Now again."),
+                .init("fix-sync", "Sync says Needs attention", "Confirm the iPhone is online and signed in. Open Accounts, read Data & File Sync, then tap Sync All again."),
                 .init("fix-gps", "Trip Log is waiting for GPS", "Keep the workday active, move into open sky if possible, and confirm Precise Location is on. Open Settings → GPS & Maps → GPS Diagnostics for live accuracy."),
                 .init("fix-carplay", "CarPlay shows no nearby accounts", "Open the customer on iPhone and add valid coordinates or adjust its map pin. Reopen FireVault in CarPlay after the account is mapped."),
                 .init("fix-widget", "A widget looks stale", "Open FireVault once, confirm the desired account or Trip Log state, then return to the Home Screen. iOS refreshes widgets on its own schedule."),

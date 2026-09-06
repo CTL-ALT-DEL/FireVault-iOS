@@ -805,7 +805,8 @@ final class FireVaultFieldMediaBackupService: ObservableObject {
         localFileURL: URL,
         category: FireVaultFieldMediaCategory,
         variant: String,
-        mimeType: String? = nil
+        mimeType: String? = nil,
+        processImmediately: Bool = true
     ) async -> UUID? {
         guard isEnabled, let store else { return nil }
         if variant == "overlay", storagePreferences.backupOverlayCopies != true { return nil }
@@ -836,7 +837,7 @@ final class FireVaultFieldMediaBackupService: ObservableObject {
         do {
             let id = try await store.enqueueIfNeeded(item)
             await refreshItems()
-            if networkAllowsUploads { await processPending() }
+            if processImmediately, networkAllowsUploads { await processPending() }
             return id
         } catch {
             initializationError = error.localizedDescription

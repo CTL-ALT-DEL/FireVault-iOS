@@ -417,14 +417,14 @@ struct FireVaultTechnicianStorefrontView: View {
         switch subscriptions.access {
         case .checking:
             ("Checking subscription…", nil, "hourglass", .secondary)
-        case .trial(_, let expiration):
-            ("Free trial active", dateDetail("Trial ends", expiration), "sparkles", NativeShellPalette.green)
-        case .active(_, let expiration):
-            ("Technician plan active", dateDetail("Renews", expiration), "checkmark.seal.fill", NativeShellPalette.green)
-        case .billingGracePeriod(_, let expiration):
-            ("Billing grace period", dateDetail("Access through", expiration), "clock.badge.checkmark", .orange)
-        case .offlineGracePeriod(_, let expiration):
-            ("Temporary offline access", dateDetail("Reconnect by", expiration), "wifi.slash", .orange)
+        case .trial:
+            ("Free trial active", subscriptions.access.planCardDetail(), "sparkles", NativeShellPalette.green)
+        case .active:
+            ("Technician plan active", subscriptions.access.planCardDetail(), "checkmark.seal.fill", NativeShellPalette.green)
+        case .billingGracePeriod:
+            ("Billing grace period", subscriptions.access.planCardDetail(), "clock.badge.checkmark", .orange)
+        case .offlineGracePeriod:
+            ("Temporary offline access", subscriptions.access.planCardDetail(), "wifi.slash", .orange)
         case .billingRetry:
             ("Payment needs attention", "Existing records remain available.", "creditcard.trianglebadge.exclamationmark", .orange)
         case .expired:
@@ -441,8 +441,4 @@ struct FireVaultTechnicianStorefrontView: View {
         }
     }
 
-    private func dateDetail(_ prefix: String, _ date: Date?) -> String? {
-        guard let date else { return nil }
-        return "\(prefix) \(date.formatted(date: .abbreviated, time: .omitted))"
-    }
 }

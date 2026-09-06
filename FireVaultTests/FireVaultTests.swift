@@ -4186,16 +4186,98 @@ final class FireVaultTests: XCTestCase {
         }
     }
 
+    func testUnifiedSyncStatusSummarizesPendingWorkAndAttention() {
+        let pending = FireVaultUnifiedSyncStatus(
+            isDemoMode: false,
+            isSyncing: false,
+            phase: .idle,
+            pendingAccountCount: 2,
+            fieldDataNeedsSync: true,
+            waitingFileCount: 1,
+            failedFileCount: 0,
+            conflictCount: 0,
+            hasAccountError: false,
+            fileBackupEnabled: true,
+            lastCompletedAt: nil
+        )
+
+        XCTAssertTrue(pending.needsAction)
+        XCTAssertFalse(pending.needsAttention)
+        XCTAssertEqual(pending.title, "Changes are waiting to sync")
+        XCTAssertTrue(pending.detail.contains("2 account changes"))
+        XCTAssertTrue(pending.detail.contains("notes and field data"))
+        XCTAssertTrue(pending.detail.contains("1 file"))
+
+        let failed = FireVaultUnifiedSyncStatus(
+            isDemoMode: false,
+            isSyncing: false,
+            phase: .idle,
+            pendingAccountCount: 0,
+            fieldDataNeedsSync: false,
+            waitingFileCount: 0,
+            failedFileCount: 1,
+            conflictCount: 1,
+            hasAccountError: false,
+            fileBackupEnabled: true,
+            lastCompletedAt: nil
+        )
+
+        XCTAssertTrue(failed.needsAction)
+        XCTAssertTrue(failed.needsAttention)
+        XCTAssertEqual(failed.title, "Sync needs attention")
+    }
+
+    func testUnifiedSyncFingerprintDetectsFieldDataChanges() throws {
+        let suite = "FireVaultTests.UnifiedSyncFingerprint.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = FireVaultUnifiedSyncService(defaults: defaults)
+        var payload = FireVaultCloudVaultPayload(
+            accounts: [],
+            preferences: FireVaultNativePreferences(),
+            settingsView: FireVaultSettingsViewPreferences(),
+            appearance: .system,
+            tripLogDays: []
+        )
+
+        service.refreshPendingFieldData(payload, isDemoMode: false)
+        XCTAssertTrue(service.fieldDataNeedsSync)
+
+        service.acknowledgeFieldData(payload)
+        service.refreshPendingFieldData(payload, isDemoMode: false)
+        XCTAssertFalse(service.fieldDataNeedsSync)
+
+        payload.preferences.technician.name = "Changed Technician"
+        service.refreshPendingFieldData(payload, isDemoMode: false)
+        XCTAssertTrue(service.fieldDataNeedsSync)
+    }
+
+    func testPlanCardShowsTrialDaysAndSubscriptionRenewalDate() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let trial = FireVaultSubscriptionAccess.trial(
+            productID: FireVaultSubscriptionCatalog.monthlyProductID,
+            expiresAt: now.addingTimeInterval(2.25 * 86_400)
+        )
+        let active = FireVaultSubscriptionAccess.active(
+            productID: FireVaultSubscriptionCatalog.annualProductID,
+            expiresAt: now.addingTimeInterval(30 * 86_400)
+        )
+
+        XCTAssertEqual(trial.planCardDetail(now: now), "3 free-trial days remaining")
+        XCTAssertTrue(active.planCardDetail(now: now)?.hasPrefix("Renews ") == true)
+    }
+
     func testHelpCatalogUsesCurrentInAppControlNames() throws {
         let sync = try XCTUnwrap(FireVaultHelpCatalog.topic(.cloudSync))
         let trip = try XCTUnwrap(FireVaultHelpCatalog.topic(.tripLog))
         let accounts = try XCTUnwrap(FireVaultHelpCatalog.topic(.accounts))
         let privacy = try XCTUnwrap(FireVaultHelpCatalog.topic(.privacy))
 
-        XCTAssertTrue(sync.searchableText.contains("settings → technician profile"))
-        XCTAssertTrue(sync.searchableText.contains("sync now"))
-        XCTAssertTrue(sync.searchableText.contains("last checked"))
-        XCTAssertTrue(sync.searchableText.contains("last successful sync"))
+        XCTAssertTrue(sync.searchableText.contains("accounts"))
+        XCTAssertTrue(sync.searchableText.contains("data & file sync"))
+        XCTAssertTrue(sync.searchableText.contains("sync all"))
+        XCTAssertTrue(sync.searchableText.contains("everything is up to date"))
+        XCTAssertTrue(sync.searchableText.contains("pulsing accounts icon"))
         XCTAssertTrue(trip.searchableText.contains("recording → start trip log"))
         XCTAssertTrue(trip.searchableText.contains("stop trip log"))
         XCTAssertTrue(accounts.searchableText.contains("delete customer account"))
