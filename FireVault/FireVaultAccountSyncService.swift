@@ -98,7 +98,7 @@ struct FireVaultCloudAccountRow: Decodable, Equatable, Identifiable {
             locations: [],
             recent: [],
             cloudID: id.uuidString,
-            cloudSyncedAt: Date(),
+            cloudSyncedAt: updatedAt,
             cloudSyncVersion: syncVersion
         )
     }
@@ -391,10 +391,11 @@ enum FireVaultAccountSyncService {
 
     static func backfillLegacyAccounts(
         _ accounts: [FireVaultWorkspaceAccount],
+        remoteRows: [FireVaultCloudAccountRow]? = nil,
         progress: @escaping (Int, Int) async -> Void
     ) async throws -> FireVaultLegacyBackfillResult {
         let session = try await SupabaseManager.client.auth.session
-        let remote = try await fetchAccounts()
+        let remote = if let remoteRows { remoteRows } else { try await fetchAccounts() }
         var byNumber: [String: FireVaultCloudAccountRow] = [:]
         var byIdentity: [String: FireVaultCloudAccountRow] = [:]
         for row in remote {
@@ -453,6 +454,27 @@ enum FireVaultAccountSyncService {
             await progress(offset + 1, candidates.count)
         }
         return .init(uploaded: uploaded, matched: matched, mappings: mappings)
+    }
+
+    static func isTransientNetworkError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            let code = URLError.Code(rawValue: nsError.code)
+            return [
+                .timedOut,
+                .networkConnectionLost,
+                .notConnectedToInternet,
+                .cannotConnectToHost,
+                .cannotFindHost,
+                .dnsLookupFailed
+            ].contains(code)
+        }
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error,
+           isTransientNetworkError(underlying) {
+            return true
+        }
+        let message = error.localizedDescription.lowercased()
+        return message.contains("timed out") || message.contains("network connection was lost")
     }
 
     private static func withRetry(_ operation: () async throws -> Void) async throws {

@@ -1605,31 +1605,42 @@ final class FireVaultStore: ObservableObject {
         cloudSyncCompleted = 0
         cloudSyncTotal = accounts.filter(\.needsCloudAccountSync).count
         defer { isCloudSyncing = false }
-        do {
-            let session = try await SupabaseManager.client.auth.session
-            let visibleCloudRows = try await FireVaultAccountSyncService.fetchAccounts()
-            try validateCloudVaultOwnership(userID: session.user.id, cloudRows: visibleCloudRows)
-            let result = try await FireVaultAccountSyncService.backfillLegacyAccounts(accounts) { [weak self] completed, total in
-                await MainActor.run {
-                    self?.cloudSyncCompleted = completed
-                    self?.cloudSyncTotal = total
+        for attempt in 0..<2 {
+            do {
+                let session = try await SupabaseManager.client.auth.session
+                let visibleCloudRows = try await FireVaultAccountSyncService.fetchAccounts()
+                try validateCloudVaultOwnership(userID: session.user.id, cloudRows: visibleCloudRows)
+                let result = try await FireVaultAccountSyncService.backfillLegacyAccounts(
+                    accounts,
+                    remoteRows: visibleCloudRows
+                ) { [weak self] completed, total in
+                    await MainActor.run {
+                        self?.cloudSyncCompleted = completed
+                        self?.cloudSyncTotal = total
+                    }
                 }
+                for index in accounts.indices {
+                    guard let remoteID = result.mappings[accounts[index].id] else { continue }
+                    accounts[index].cloudID = remoteID.uuidString
+                    accounts[index].cloudSyncError = nil
+                }
+                persist()
+                let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
+                try await reconcileCloudAccounts(cloudRows, userID: session.user.id)
+                recordCloudCheck()
+                recordSuccessfulCloudSync()
+                return
+            } catch {
+                if attempt == 0, FireVaultAccountSyncService.isTransientNetworkError(error) {
+                    try? await Task.sleep(for: .milliseconds(750))
+                    continue
+                }
+                recordCloudCheck()
+                cloudSyncErrorMessage = error.localizedDescription.isEmpty
+                    ? "Cloud sync failed. Your accounts remain saved on this iPhone."
+                    : error.localizedDescription
+                return
             }
-            for index in accounts.indices {
-                guard let remoteID = result.mappings[accounts[index].id] else { continue }
-                accounts[index].cloudID = remoteID.uuidString
-                accounts[index].cloudSyncError = nil
-            }
-            persist()
-            let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
-            try await reconcileCloudAccounts(cloudRows, userID: session.user.id)
-            recordCloudCheck()
-            recordSuccessfulCloudSync()
-        } catch {
-            recordCloudCheck()
-            cloudSyncErrorMessage = error.localizedDescription.isEmpty
-                ? "Cloud sync failed. Your accounts remain saved on this iPhone."
-                : error.localizedDescription
         }
     }
 
@@ -1934,7 +1945,9 @@ final class FireVaultStore: ObservableObject {
             accounts[index].tags.append("Cloud Sync")
         }
         accounts[index].cloudID = row.id.uuidString
-        accounts[index].cloudSyncedAt = Date()
+        // Use the stable server revision time so reading an unchanged account
+        // does not force a new Cloud Vault snapshot on every sync.
+        accounts[index].cloudSyncedAt = row.updatedAt
         accounts[index].cloudSyncVersion = row.syncVersion
         accounts[index].locallyModifiedAt = nil
         accounts[index].cloudSyncError = nil

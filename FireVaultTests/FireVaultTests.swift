@@ -4356,6 +4356,53 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(service.fieldDataNeedsSync)
     }
 
+    func testCloudVaultArchiveCodecCompressesAndRoundTripsLargeSnapshot() throws {
+        let original = Data(repeating: 0x41, count: 5 * 1_024 * 1_024)
+
+        let envelope = try FireVaultCloudVaultArchiveCodec.encode(original)
+        let restored = try FireVaultCloudVaultArchiveCodec.decode(envelope)
+
+        XCTAssertEqual(envelope.compression, "lzfse")
+        XCTAssertEqual(envelope.uncompressedSize, original.count)
+        XCTAssertLessThan(envelope.archive.count, original.base64EncodedString().count / 10)
+        XCTAssertEqual(restored, original)
+    }
+
+    func testCloudVaultArchiveCodecStillReadsExistingUncompressedSnapshot() throws {
+        let original = Data("existing FireVault cloud recovery point".utf8)
+        let legacyEnvelope = CloudVaultSnapshotEnvelope(archive: original.base64EncodedString())
+
+        XCTAssertEqual(
+            try FireVaultCloudVaultArchiveCodec.decode(legacyEnvelope),
+            original
+        )
+    }
+
+    func testCloudVaultArchiveCodecRejectsDamagedCompressedSnapshot() {
+        let damaged = CloudVaultSnapshotEnvelope(
+            archive: Data([0x00, 0x01, 0x02]).base64EncodedString(),
+            compression: "lzfse",
+            uncompressedSize: 1_024
+        )
+
+        XCTAssertThrowsError(try FireVaultCloudVaultArchiveCodec.decode(damaged))
+    }
+
+    func testCloudAccountWorkspaceUsesStableServerRevisionDate() {
+        let remote = makeCloudAccountRow(id: UUID(), name: "Stable Account", syncVersion: 3)
+
+        XCTAssertEqual(remote.workspaceAccount.cloudSyncedAt, remote.updatedAt)
+    }
+
+    func testAccountSyncRecognizesTimeoutAsTransientNetworkFailure() {
+        XCTAssertTrue(FireVaultAccountSyncService.isTransientNetworkError(URLError(.timedOut)))
+        XCTAssertFalse(
+            FireVaultAccountSyncService.isTransientNetworkError(
+                FireVaultAccountSyncError.concurrentModification
+            )
+        )
+    }
+
     func testPlanCardShowsTrialDaysAndSubscriptionRenewalDate() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let trial = FireVaultSubscriptionAccess.trial(
