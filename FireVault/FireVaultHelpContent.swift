@@ -217,6 +217,7 @@ enum FireVaultHelpCatalog {
             successDetail: "Turn on Back up Field Media to FireVault Cloud under Settings → File Storage. FireVault saves the local original before adding it to the private retry queue.",
             notes: [
                 "Use Wi-Fi only when cellular uploads are undesirable. Failed uploads remain queued and can be retried from File Storage.",
+                "Open Settings → File Storage → Backed-Up Media to preview or download a checksum-verified cloud copy and restore a missing original. FireVault reconnects the restored media record after a clean install when needed.",
                 "Stamped photo copies are optional; the unstamped source remains the primary backup. Videos remain local in this release."
             ],
             resources: []

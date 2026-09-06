@@ -277,6 +277,13 @@ struct NativeStorageSettingsView: View {
 
             Section {
                 NavigationLink {
+                    FireVaultBackedUpMediaRecoveryView(store: store)
+                } label: {
+                    Label("Backed-Up Media", systemImage: "icloud.and.arrow.down")
+                }
+                .disabled(store.demoMode)
+
+                NavigationLink {
                     NativeBackupRestoreView(
                         store: store,
                         settings: settings,
@@ -286,7 +293,9 @@ struct NativeStorageSettingsView: View {
                     Label("Manage Storage & Backups", systemImage: "externaldrive.badge.timemachine")
                 }
             } footer: {
-                Text("Export a complete backup or safely remove files that are no longer attached to an account.")
+                Text(store.demoMode
+                     ? "Cloud-backed media is unavailable in Demo Mode."
+                     : "Preview, download, or restore verified cloud copies, export a complete backup, or safely remove files that are no longer attached to an account.")
             }
         }
         .fireVaultThemedCollection()

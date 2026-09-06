@@ -669,6 +669,10 @@ private struct FireVaultAccountFileInsert: Encodable {
 }
 
 enum FireVaultFieldMediaHash {
+    static func sha256Hex(of data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
     static func sha256Hex(of fileURL: URL, chunkSize: Int = 1_048_576) throws -> String {
         let handle = try FileHandle(forReadingFrom: fileURL)
         defer { try? handle.close() }

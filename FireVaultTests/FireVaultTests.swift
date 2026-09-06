@@ -243,6 +243,168 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(FireVaultFieldMediaMIME.detect(for: fixture.mediaURL), "application/pdf")
     }
 
+    func testBackedUpMediaCatalogGroupsBySyncedAccountAndFindsMissingOriginal() throws {
+        let cloudAccountID = UUID()
+        let document = FireVaultWorkspaceDocument(
+            id: "document-1",
+            title: "Panel photo",
+            subtitle: "Original evidence",
+            kind: "photo",
+            date: "Today",
+            mediaFileName: "photo-overlay.jpg",
+            originalMediaFileName: "photo-original.jpg"
+        )
+        let account = FireVaultWorkspaceAccount(
+            id: "local-account",
+            name: "Boise Fire Station 1",
+            address: "707 Reserve Street",
+            category: "Municipal",
+            accountId: "FV-1001",
+            phone: "",
+            favorite: false,
+            latitude: nil,
+            longitude: nil,
+            tags: [],
+            notes: [],
+            documents: [document],
+            equipment: [],
+            locations: [],
+            recent: [],
+            cloudID: cloudAccountID.uuidString
+        )
+        let original = makeBackedUpMediaFile(
+            accountID: cloudAccountID,
+            fileName: "photo-original.jpg",
+            variant: "original"
+        )
+        let overlay = makeBackedUpMediaFile(
+            accountID: cloudAccountID,
+            fileName: "photo-overlay.jpg",
+            variant: "overlay"
+        )
+
+        let groups = FireVaultBackedUpMediaCatalog.groups(files: [overlay, original], accounts: [account])
+
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups.first?.title, "Boise Fire Station 1")
+        XCTAssertEqual(groups.first?.subtitle, "FV-1001")
+        XCTAssertEqual(groups.first?.files.count, 2)
+        XCTAssertEqual(
+            FireVaultBackedUpMediaCatalog.restoreTarget(for: original, accounts: [account]),
+            .init(localAccountID: account.id, documentID: document.id, fileName: "photo-original.jpg")
+        )
+        XCTAssertNil(FireVaultBackedUpMediaCatalog.restoreTarget(for: overlay, accounts: [account]))
+    }
+
+    func testBackedUpMediaCacheRejectsChecksumMismatchWithoutSavingFile() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultRecoveryCache-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = try FireVaultFieldMediaRecoveryCache(directory: directory)
+        let file = makeBackedUpMediaFile(
+            accountID: UUID(),
+            fileName: "evidence.pdf",
+            sha256: String(repeating: "0", count: 64)
+        )
+
+        XCTAssertThrowsError(try cache.storeVerified(Data("tampered".utf8), for: file)) { error in
+            XCTAssertEqual(error as? FireVaultFieldMediaRecoveryError, .checksumMismatch)
+        }
+        let contents = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        XCTAssertTrue(contents.isEmpty)
+    }
+
+    func testRestoreBackedUpOriginalVerifiesBeforeAndAfterAtomicInstall() throws {
+        let suite = "FireVaultTests.CloudMediaRestore.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let account = store.addAccount()
+        let document = try store.attachCapturedPhoto(
+            solidImage(color: .blue),
+            originalImage: solidImage(color: .red),
+            to: account.id
+        )
+        let cloudAccountID = UUID()
+        let accountIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        store.accounts[accountIndex].cloudID = cloudAccountID.uuidString
+        let originalURL = try XCTUnwrap(store.originalMediaURL(accountID: account.id, documentID: document.id))
+        let originalData = try Data(contentsOf: originalURL)
+        let sha256 = FireVaultFieldMediaHash.sha256Hex(of: originalData)
+        let file = makeBackedUpMediaFile(
+            accountID: cloudAccountID,
+            fileName: originalURL.lastPathComponent,
+            sha256: sha256
+        )
+        defer { _ = store.deleteDocument(accountID: account.id, documentID: document.id) }
+        try FileManager.default.removeItem(at: originalURL)
+
+        XCTAssertEqual(store.backedUpMediaLocalStatus(file), .missingOriginal)
+        XCTAssertThrowsError(try store.restoreBackedUpOriginal(file, data: Data("wrong".utf8))) { error in
+            XCTAssertEqual(error as? FireVaultFieldMediaRecoveryError, .checksumMismatch)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: originalURL.path))
+
+        let restoredURL = try store.restoreBackedUpOriginal(file, data: originalData)
+
+        XCTAssertEqual(restoredURL, originalURL)
+        XCTAssertEqual(store.backedUpMediaLocalStatus(file), .available)
+        XCTAssertEqual(try FireVaultFieldMediaHash.sha256Hex(of: restoredURL), sha256)
+        XCTAssertThrowsError(try store.restoreBackedUpOriginal(file, data: originalData)) { error in
+            XCTAssertEqual(error as? FireVaultFieldMediaRecoveryError, .originalAlreadyAvailable)
+        }
+    }
+
+    func testRestoreBackedUpOriginalReconnectsMissingRecordAfterCleanInstall() throws {
+        let suite = "FireVaultTests.CloudMediaReconnect.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let account = store.addAccount()
+        let cloudAccountID = UUID()
+        let accountIndex = try XCTUnwrap(store.accounts.firstIndex(where: { $0.id == account.id }))
+        store.accounts[accountIndex].cloudID = cloudAccountID.uuidString
+        XCTAssertTrue(store.accounts[accountIndex].documents.isEmpty)
+
+        let originalData = Data("restored scan evidence".utf8)
+        let fileName = "recovered-scan-\(UUID().uuidString).pdf"
+        let file = makeBackedUpMediaFile(
+            accountID: cloudAccountID,
+            fileName: fileName,
+            sha256: FireVaultFieldMediaHash.sha256Hex(of: originalData),
+            category: .scans,
+            mimeType: "application/pdf"
+        )
+
+        XCTAssertNil(FireVaultBackedUpMediaCatalog.restoreTarget(for: file, accounts: store.accounts))
+        XCTAssertEqual(store.backedUpMediaLocalStatus(file), .missingOriginal)
+
+        let destination = try store.mediaURL(accountID: account.id, fileName: fileName)
+        let conflictingData = Data("different local file".utf8)
+        try conflictingData.write(to: destination, options: .atomic)
+        XCTAssertThrowsError(try store.restoreBackedUpOriginal(file, data: originalData)) { error in
+            XCTAssertEqual(error as? FireVaultFieldMediaRecoveryError, .localFileConflict)
+        }
+        XCTAssertEqual(try Data(contentsOf: destination), conflictingData)
+        try FileManager.default.removeItem(at: destination)
+
+        let restoredURL = try store.restoreBackedUpOriginal(file, data: originalData)
+        let restoredAccount = try XCTUnwrap(store.accounts.first(where: { $0.id == account.id }))
+        let recoveredDocument = try XCTUnwrap(
+            restoredAccount.documents.first(where: { $0.mediaFileName == fileName })
+        )
+        defer { _ = store.deleteDocument(accountID: account.id, documentID: recoveredDocument.id) }
+
+        XCTAssertEqual(recoveredDocument.title, "Recovered scan")
+        XCTAssertEqual(recoveredDocument.kind, "scan")
+        XCTAssertTrue(recoveredDocument.subtitle.contains("SHA-256 verified"))
+        XCTAssertEqual(try Data(contentsOf: restoredURL), originalData)
+        XCTAssertEqual(store.backedUpMediaLocalStatus(file), .available)
+        XCTAssertNotNil(FireVaultBackedUpMediaCatalog.restoreTarget(for: file, accounts: store.accounts))
+    }
+
     func testExpiredPlanKeepsProductionRecordsReadOnly() throws {
         let suite = "FireVaultTests.Subscription.ReadOnly.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -4015,6 +4177,32 @@ final class FireVaultTests: XCTestCase {
             directory,
             directory.appendingPathComponent("queue.json"),
             mediaURL
+        )
+    }
+
+    private func makeBackedUpMediaFile(
+        accountID: UUID,
+        fileName: String,
+        variant: String = "original",
+        sha256: String = FireVaultFieldMediaHash.sha256Hex(of: Data("field evidence".utf8)),
+        category: FireVaultFieldMediaCategory = .photos,
+        mimeType: String = "image/jpeg"
+    ) -> FireVaultBackedUpMediaFile {
+        let userID = UUID()
+        return .init(
+            id: UUID(),
+            userID: userID,
+            accountID: accountID,
+            bucketID: FireVaultSupabaseFieldMediaUploader.bucketID,
+            storagePath: "\(userID.uuidString.lowercased())/accounts/\(accountID.uuidString.lowercased())/\(category.rawValue)/evidence",
+            originalFilename: fileName,
+            category: category.rawValue,
+            mimeType: mimeType,
+            fileSizeBytes: 14,
+            fileModifiedAt: "2026-09-05T20:00:00.000Z",
+            sha256: sha256,
+            metadata: ["variant": variant, "account_number": "FV-1001"],
+            createdAt: "2026-09-05T20:01:00.000Z"
         )
     }
 }

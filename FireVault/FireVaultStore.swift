@@ -1243,7 +1243,7 @@ final class FireVaultStore: ObservableObject {
         return true
     }
 
-    private func mediaURL(accountID: String, fileName: String) throws -> URL {
+    func mediaURL(accountID: String, fileName: String) throws -> URL {
         let safeAccountID = accountID.replacingOccurrences(
             of: "[^A-Za-z0-9_-]",
             with: "_",
@@ -1938,6 +1938,88 @@ final class FireVaultStore: ObservableObject {
             restored += 1
         }
         return restored
+    }
+
+    /// Restores a verified cloud original into its synced account. If account
+    /// sync has recreated the customer but not its device-only document record,
+    /// this method reconnects the restored file as a recovered document.
+    @discardableResult
+    func restoreBackedUpOriginal(
+        _ file: FireVaultBackedUpMediaFile,
+        data: Data
+    ) throws -> URL {
+        try requireRecordChangeAccess()
+        guard let account = FireVaultBackedUpMediaCatalog.localAccount(for: file, accounts: accounts),
+              let accountIndex = accounts.firstIndex(where: { $0.id == account.id }) else {
+            throw FireVaultFieldMediaRecoveryError.originalNotReferenced
+        }
+
+        let existingTarget = FireVaultBackedUpMediaCatalog.restoreTarget(for: file, accounts: accounts)
+        let destination = try mediaURL(accountID: account.id, fileName: file.originalFilename)
+        try FireVaultFieldMediaRecoveryVerifier.verify(data, expectedSHA256: file.sha256)
+
+        if FileManager.default.fileExists(atPath: destination.path) {
+            if existingTarget != nil {
+                throw FireVaultFieldMediaRecoveryError.originalAlreadyAvailable
+            }
+            do {
+                try FireVaultFieldMediaRecoveryVerifier.verify(destination, expectedSHA256: file.sha256)
+            } catch {
+                throw FireVaultFieldMediaRecoveryError.localFileConflict
+            }
+        } else {
+            try data.write(
+                to: destination,
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            )
+            do {
+                try FireVaultFieldMediaRecoveryVerifier.verify(destination, expectedSHA256: file.sha256)
+            } catch {
+                try? FileManager.default.removeItem(at: destination)
+                throw error
+            }
+        }
+
+        if let modifiedAt = file.modifiedDate {
+            try? FileManager.default.setAttributes([.modificationDate: modifiedAt], ofItemAtPath: destination.path)
+        }
+        guard existingTarget == nil else { return destination }
+
+        let recoveredAt = file.uploadedDate ?? Date()
+        let presentation: (title: String, kind: String)
+        switch file.category.lowercased() {
+        case FireVaultFieldMediaCategory.photos.rawValue:
+            presentation = ("Recovered photo", "photo")
+        case FireVaultFieldMediaCategory.scans.rawValue:
+            presentation = ("Recovered scan", "scan")
+        case FireVaultFieldMediaCategory.reports.rawValue:
+            presentation = ("Recovered report", "report")
+        default:
+            presentation = ("Recovered file", "file")
+        }
+        let document = FireVaultWorkspaceDocument(
+            id: UUID().uuidString,
+            title: presentation.title,
+            subtitle: "Recovered from FireVault Cloud • SHA-256 verified",
+            kind: presentation.kind,
+            date: recoveredAt.formatted(date: .abbreviated, time: .shortened),
+            mediaFileName: file.originalFilename,
+            updatedAt: Date()
+        )
+        accounts[accountIndex].documents.insert(document, at: 0)
+        accounts[accountIndex].recent.insert(
+            .init(
+                id: UUID().uuidString,
+                title: presentation.title,
+                subtitle: "Restored from verified cloud backup",
+                kind: presentation.kind,
+                date: "Now",
+                updatedAt: Date()
+            ),
+            at: 0
+        )
+        persist()
+        return destination
     }
 
     @discardableResult
