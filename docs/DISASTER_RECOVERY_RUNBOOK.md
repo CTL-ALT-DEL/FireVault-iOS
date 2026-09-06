@@ -19,7 +19,9 @@ post-restore checks in this document pass.
 
 The **Verify latest disaster backup** GitHub Actions workflow runs every Sunday
 and can also be started manually. Its decrypted working files remain only on the
-ephemeral runner and are not uploaded as workflow artifacts.
+ephemeral runner and are not uploaded as workflow artifacts. It uses a
+bucket-scoped Cloudflare R2 **Object Read only** credential, so verification
+cannot change or delete backup objects.
 
 For a manual check:
 
@@ -44,8 +46,9 @@ Supabase.
    pair.
 5. On a trusted computer, install current `rclone`, `jq`, `gzip`, and PostgreSQL
    `psql`.
-6. Obtain an R2 Object Read credential for the disaster-backup bucket and the
-   backup encryption password and salt from the offline password manager.
+6. Obtain an R2 Object Read only credential scoped to the disaster-backup bucket
+   and the backup encryption password and salt from the offline password
+   manager.
 
 The target project must be blank: no `public` tables, Auth users, or Storage
 objects. The script checks this immediately before starting the database
