@@ -900,9 +900,49 @@ struct NativeBackupRestoreView: View {
         totalBytes: 0
     )
     @State private var confirmsMediaCleanup = false
+    @State private var cloudSnapshots: [FireVaultCloudVaultSnapshot] = []
+    @State private var selectedCloudSnapshot: FireVaultCloudVaultSnapshot?
+    @State private var isCloudVaultWorking = false
 
     var body: some View {
         List {
+            Section {
+                Button {
+                    createCloudSnapshot()
+                } label: {
+                    HStack {
+                        Label("Back Up Field Data Now", systemImage: "icloud.and.arrow.up")
+                        Spacer()
+                        if isCloudVaultWorking { ProgressView() }
+                    }
+                }
+                .disabled(isCloudVaultWorking || store.demoMode)
+
+                if cloudSnapshots.isEmpty {
+                    Text("No cloud recovery points yet")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(cloudSnapshots) { snapshot in
+                        Button {
+                            selectedCloudSnapshot = snapshot
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(snapshot.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                    .foregroundStyle(.primary)
+                                Text("\(snapshot.accountCount) accounts • \(snapshot.tripLogDayCount) Trip Log days • \(snapshot.deviceLabel)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .disabled(isCloudVaultWorking)
+                    }
+                }
+            } header: {
+                Text("Cloud Vault")
+            } footer: {
+                Text("Keeps the three latest field-data recovery points. Notes, equipment, saved locations, settings, and Trip Log history are included. Photos and scans are not duplicated; recover them from Backed-Up Media.")
+            }
+
             Section {
                 Label(
                     "\(store.accounts.count) accounts and \(breadcrumbs.days.count) Trip Log days ready",
@@ -962,6 +1002,24 @@ struct NativeBackupRestoreView: View {
         .navigationTitle("Backup & Restore")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { storageReport = store.mediaStorageReport() }
+        .task { await refreshCloudSnapshots() }
+        .confirmationDialog(
+            "Restore this cloud recovery point?",
+            isPresented: Binding(
+                get: { selectedCloudSnapshot != nil },
+                set: { if !$0 { selectedCloudSnapshot = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Restore Missing Field Data") {
+                guard let snapshot = selectedCloudSnapshot else { return }
+                selectedCloudSnapshot = nil
+                restoreCloudSnapshot(snapshot)
+            }
+            Button("Cancel", role: .cancel) { selectedCloudSnapshot = nil }
+        } message: {
+            Text("Existing accounts and workdays are preserved. FireVault adds missing notes, equipment, locations, documents, and Trip Log days, then restores the saved app settings after verifying the snapshot.")
+        }
         .confirmationDialog(
             "Remove orphaned media?",
             isPresented: $confirmsMediaCleanup,
@@ -1022,6 +1080,69 @@ struct NativeBackupRestoreView: View {
                     )
                     statusMessage = "Restored \(restored.accountsAdded) accounts, \(restored.tripLogDaysAdded) Trip Log days, and \(restored.mediaFilesRestored) media files."
                 }
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            } catch {
+                errorMessage = error.localizedDescription
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
+        }
+    }
+
+    private func refreshCloudSnapshots() async {
+        guard !store.demoMode else { return }
+        do {
+            cloudSnapshots = try await FireVaultCloudVaultBackupService.listSnapshots()
+        } catch {
+            // The signed-out state is already represented elsewhere in Settings.
+        }
+    }
+
+    private func createCloudSnapshot() {
+        guard !isCloudVaultWorking else { return }
+        isCloudVaultWorking = true
+        errorMessage = ""
+        Task {
+            defer { isCloudVaultWorking = false }
+            do {
+                let payload = FireVaultCloudVaultBackupCoordinator.payload(
+                    store: store,
+                    settings: settings,
+                    breadcrumbs: breadcrumbs
+                )
+                let result = try await FireVaultCloudVaultBackupService.createSnapshot(
+                    payload: payload,
+                    deviceLabel: UIDevice.current.name
+                )
+                cloudSnapshots = try await FireVaultCloudVaultBackupService.listSnapshots()
+                switch result {
+                case .created:
+                    statusMessage = "Field-data recovery point created and SHA-256 protected."
+                case .unchanged:
+                    statusMessage = "A matching cloud recovery point already protects this field data."
+                }
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            } catch {
+                errorMessage = error.localizedDescription
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
+        }
+    }
+
+    private func restoreCloudSnapshot(_ snapshot: FireVaultCloudVaultSnapshot) {
+        guard !isCloudVaultWorking else { return }
+        isCloudVaultWorking = true
+        errorMessage = ""
+        Task {
+            defer { isCloudVaultWorking = false }
+            do {
+                let payload = try await FireVaultCloudVaultBackupService.downloadSnapshot(id: snapshot.id)
+                let restored = try FireVaultCloudVaultBackupCoordinator.restore(
+                    payload,
+                    store: store,
+                    settings: settings,
+                    breadcrumbs: breadcrumbs
+                )
+                statusMessage = "Restored \(restored.accountsAdded) accounts and \(restored.tripLogDaysAdded) Trip Log days; missing field records were merged safely."
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             } catch {
                 errorMessage = error.localizedDescription

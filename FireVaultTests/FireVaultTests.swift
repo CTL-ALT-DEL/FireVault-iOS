@@ -4083,6 +4083,60 @@ final class FireVaultTests: XCTestCase {
         XCTAssertThrowsError(try FireVaultVaultBackupPayload.decode(payload.encoded()))
     }
 
+    func testCloudVaultPayloadRoundTripsWithoutMediaBytes() throws {
+        var preferences = FireVaultNativePreferences()
+        preferences.technician.name = "Cloud Backup Technician"
+        let day = FireVaultBreadcrumbDay(
+            startedAt: Date(timeIntervalSince1970: 1_786_100_000),
+            endedAt: Date(timeIntervalSince1970: 1_786_103_600)
+        )
+        let payload = FireVaultCloudVaultPayload(
+            accounts: [],
+            preferences: preferences,
+            settingsView: .init(mode: .advanced),
+            appearance: .light,
+            tripLogDays: [day]
+        )
+
+        let encoded = try payload.encoded()
+        let decoded = try FireVaultCloudVaultPayload.decode(encoded)
+
+        XCTAssertEqual(decoded, payload)
+        XCTAssertEqual(FireVaultCloudVaultBackupService.sha256(encoded).count, 64)
+        XCTAssertLessThan(encoded.count, FireVaultCloudVaultBackupService.maximumSnapshotBytes)
+    }
+
+    func testCloudVaultRestoreMergesMissingFieldRecordsWithoutReplacingAccount() throws {
+        let suite = "FireVaultTests.CloudVaultMerge.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = FireVaultStore(defaults: defaults)
+        let existing = try XCTUnwrap(store.accounts.first)
+        var recovered = existing
+        recovered.name = "Older Cloud Name"
+        recovered.notes.append(.init(
+            id: "recovered-note",
+            title: "Panel access",
+            text: "Key is in the lockbox",
+            date: "Today",
+            updatedAt: Date()
+        ))
+        recovered.equipment.append(.init(
+            id: "recovered-equipment",
+            title: "FACP",
+            subtitle: "Electrical room",
+            status: "Normal"
+        ))
+
+        let result = try store.mergeCloudVaultAccounts([recovered])
+        let merged = try XCTUnwrap(store.accounts.first(where: { $0.id == existing.id }))
+
+        XCTAssertEqual(result, .init(added: 0, preserved: 1))
+        XCTAssertEqual(merged.name, existing.name)
+        XCTAssertTrue(merged.notes.contains(where: { $0.id == "recovered-note" }))
+        XCTAssertTrue(merged.equipment.contains(where: { $0.id == "recovered-equipment" }))
+    }
+
     func testProductionAccountArchiveMigratesAndReloadsOutsideUserDefaults() async throws {
         let suite = "FireVaultTests.AccountArchive.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

@@ -262,7 +262,7 @@ enum FireVaultHelpCatalog {
             visual: .privacy,
             steps: [
                 .init("privacy-lock", "Lock private screens", "Open Settings → Security to require device authentication and optionally hide content in the app switcher."),
-                .init("privacy-backup", "Create a protected backup", "Open Settings → Backup & Restore, create the backup, and save the exported file somewhere you control."),
+                .init("privacy-backup", "Create a protected backup", "Open Settings → Backup & Restore. Use Back Up Field Data Now for a small cloud recovery point, or export a Complete Vault file that also contains local media."),
                 .init("privacy-customer", "Delete one customer", "Open that customer and choose Delete Customer Account. This removes only the selected customer and its field records."),
                 .init("privacy-login", "Delete the FireVault sign-in", "Open Settings → Security → Account Data & Deletion, choose Delete FireVault Account, then confirm Delete Account and Data. This permanently removes the cloud sign-in and its data, then clears matching local account records.")
             ],
@@ -270,6 +270,7 @@ enum FireVaultHelpCatalog {
             successDetail: "Both deletion choices are intentionally named differently. Read the confirmation carefully and make a backup first when recovery may matter.",
             notes: [
                 "Signing out is not deletion. It disconnects the device while keeping local information on the iPhone.",
+                "Cloud Vault keeps the three latest metadata-only recovery points and does not duplicate photos, scans, or videos.",
                 "If full cloud-account deletion fails, FireVault leaves local data on the iPhone."
             ],
             resources: []

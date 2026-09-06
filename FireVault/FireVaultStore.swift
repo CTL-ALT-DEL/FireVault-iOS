@@ -2040,6 +2040,60 @@ final class FireVaultStore: ObservableObject {
         return .init(added: added, preserved: preserved)
     }
 
+    /// Restores metadata-only Cloud Vault records without replacing newer
+    /// device content. Existing accounts receive only missing field records;
+    /// media bytes remain the responsibility of Backed-Up Media recovery.
+    func mergeCloudVaultAccounts(
+        _ incoming: [FireVaultWorkspaceAccount]
+    ) throws -> FireVaultBackupMergeResult {
+        try requireRecordChangeAccess()
+        var added = 0
+        var preserved = 0
+
+        for recovered in incoming {
+            let recoveredAccountID = Self.canonicalAccountID(recovered.accountId)
+            let recoveredCloudID = recovered.cloudID?.lowercased()
+            let existingIndex = accounts.firstIndex { current in
+                current.id.caseInsensitiveCompare(recovered.id) == .orderedSame
+                    || (recoveredCloudID != nil && current.cloudID?.lowercased() == recoveredCloudID)
+                    || (!recoveredAccountID.isEmpty
+                        && Self.canonicalAccountID(current.accountId) == recoveredAccountID)
+            }
+
+            guard let index = existingIndex else {
+                accounts.append(recovered)
+                added += 1
+                continue
+            }
+
+            let currentCategory = accounts[index].category.trimmingCharacters(in: .whitespacesAndNewlines)
+            if currentCategory.isEmpty || currentCategory == "Cloud Sync" {
+                accounts[index].category = recovered.category
+            }
+            accounts[index].favorite = accounts[index].favorite || recovered.favorite
+            for tag in recovered.tags where !accounts[index].tags.contains(where: {
+                $0.caseInsensitiveCompare(tag) == .orderedSame
+            }) {
+                accounts[index].tags.append(tag)
+            }
+
+            let noteIDs = Set(accounts[index].notes.map(\.id))
+            accounts[index].notes.append(contentsOf: recovered.notes.filter { !noteIDs.contains($0.id) })
+            let documentIDs = Set(accounts[index].documents.map(\.id))
+            accounts[index].documents.append(contentsOf: recovered.documents.filter { !documentIDs.contains($0.id) })
+            let equipmentIDs = Set(accounts[index].equipment.map(\.id))
+            accounts[index].equipment.append(contentsOf: recovered.equipment.filter { !equipmentIDs.contains($0.id) })
+            let locationIDs = Set(accounts[index].locations.map(\.id))
+            accounts[index].locations.append(contentsOf: recovered.locations.filter { !locationIDs.contains($0.id) })
+            let recentIDs = Set(accounts[index].recent.map(\.id))
+            accounts[index].recent.append(contentsOf: recovered.recent.filter { !recentIDs.contains($0.id) })
+            preserved += 1
+        }
+
+        persist()
+        return .init(added: added, preserved: preserved)
+    }
+
     func backupMediaRecords() throws -> [FireVaultVaultMediaRecord] {
         var records: [FireVaultVaultMediaRecord] = []
         for account in accounts {
