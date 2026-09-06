@@ -7,6 +7,7 @@
 //
 
 import CryptoKit
+import Compression
 import Foundation
 import Supabase
 
@@ -113,28 +114,50 @@ enum FireVaultCloudVaultBackupService {
         let digest = sha256(data)
         let existing = try await listSnapshots()
         if let matching = existing.first(where: { $0.sha256 == digest }) {
+            try await pruneSnapshots(existing)
             return .unchanged(matching)
         }
 
         let session = try await SupabaseManager.client.auth.session
-        let rows: [FireVaultCloudVaultSnapshot] = try await SupabaseManager.client
-            .from("cloud_vault_snapshots")
-            .insert(CloudVaultSnapshotInsert(
-                userID: session.user.id,
-                deviceLabel: normalizedDeviceLabel(deviceLabel),
-                schemaVersion: payload.schemaVersion,
-                payload: .init(archive: data.base64EncodedString()),
-                sha256: digest,
-                accountCount: payload.accounts.count,
-                tripLogDayCount: payload.tripLogDays.count
-            ))
-            .select(summarySelect)
-            .execute()
-            .value
+        let insert = CloudVaultSnapshotInsert(
+            userID: session.user.id,
+            deviceLabel: normalizedDeviceLabel(deviceLabel),
+            schemaVersion: payload.schemaVersion,
+            payload: try FireVaultCloudVaultArchiveCodec.encode(data),
+            sha256: digest,
+            accountCount: payload.accounts.count,
+            tripLogDayCount: payload.tripLogDays.count
+        )
+        let rows: [FireVaultCloudVaultSnapshot]
+        do {
+            rows = try await SupabaseManager.client
+                .from("cloud_vault_snapshots")
+                .insert(insert)
+                .select(summarySelect)
+                .execute()
+                .value
+        } catch {
+            // A mobile upload can reach Postgres just before URLSession reports
+            // a timeout. Confirm the SHA before surfacing a false failure; the
+            // unique (user_id, sha256) constraint makes this retry-safe.
+            if let confirmed = try? await listSnapshots(),
+               let matching = confirmed.first(where: { $0.sha256 == digest }) {
+                try? await pruneSnapshots(confirmed)
+                return .unchanged(matching)
+            }
+            throw error
+        }
         guard let created = rows.first else { throw FireVaultCloudVaultError.snapshotUnavailable }
 
         let refreshed = try await listSnapshots()
-        for stale in refreshed.dropFirst(retainedSnapshotCount) {
+        try await pruneSnapshots(refreshed)
+        return .created(created)
+    }
+
+    private static func pruneSnapshots(_ snapshots: [FireVaultCloudVaultSnapshot]) async throws {
+        guard snapshots.count > retainedSnapshotCount else { return }
+        let session = try await SupabaseManager.client.auth.session
+        for stale in snapshots.dropFirst(retainedSnapshotCount) {
             try await SupabaseManager.client
                 .from("cloud_vault_snapshots")
                 .delete()
@@ -142,7 +165,6 @@ enum FireVaultCloudVaultBackupService {
                 .eq("user_id", value: session.user.id)
                 .execute()
         }
-        return .created(created)
     }
 
     static func downloadSnapshot(id: UUID) async throws -> FireVaultCloudVaultPayload {
@@ -156,10 +178,10 @@ enum FireVaultCloudVaultBackupService {
             .limit(1)
             .execute()
             .value
-        guard let row = rows.first,
-              let data = Data(base64Encoded: row.payload.archive) else {
+        guard let row = rows.first else {
             throw FireVaultCloudVaultError.snapshotUnavailable
         }
+        let data = try FireVaultCloudVaultArchiveCodec.decode(row.payload)
         guard sha256(data) == row.sha256 else { throw FireVaultCloudVaultError.damagedSnapshot }
         return try FireVaultCloudVaultPayload.decode(data)
     }
@@ -214,8 +236,88 @@ enum FireVaultCloudVaultBackupCoordinator {
     }
 }
 
-private struct CloudVaultSnapshotEnvelope: Codable {
+struct CloudVaultSnapshotEnvelope: Codable, Equatable {
     let archive: String
+    let compression: String?
+    let uncompressedSize: Int?
+
+    init(archive: String, compression: String? = nil, uncompressedSize: Int? = nil) {
+        self.archive = archive
+        self.compression = compression
+        self.uncompressedSize = uncompressedSize
+    }
+}
+
+enum FireVaultCloudVaultArchiveCodec {
+    private static let lzfse = "lzfse"
+
+    static func encode(_ data: Data) throws -> CloudVaultSnapshotEnvelope {
+        guard !data.isEmpty, let compressed = compress(data), compressed.count < data.count else {
+            return .init(archive: data.base64EncodedString())
+        }
+        return .init(
+            archive: compressed.base64EncodedString(),
+            compression: lzfse,
+            uncompressedSize: data.count
+        )
+    }
+
+    static func decode(_ envelope: CloudVaultSnapshotEnvelope) throws -> Data {
+        guard let stored = Data(base64Encoded: envelope.archive) else {
+            throw FireVaultCloudVaultError.snapshotUnavailable
+        }
+        guard let compression = envelope.compression else { return stored }
+        guard compression == lzfse,
+              let expectedSize = envelope.uncompressedSize,
+              expectedSize >= 0,
+              expectedSize <= FireVaultCloudVaultBackupService.maximumSnapshotBytes,
+              let restored = decompress(stored, expectedSize: expectedSize) else {
+            throw FireVaultCloudVaultError.damagedSnapshot
+        }
+        return restored
+    }
+
+    private static func compress(_ data: Data) -> Data? {
+        var destination = Data(count: data.count + 65_536)
+        let written = data.withUnsafeBytes { sourceBuffer in
+            destination.withUnsafeMutableBytes { destinationBuffer in
+                guard let source = sourceBuffer.bindMemory(to: UInt8.self).baseAddress,
+                      let output = destinationBuffer.bindMemory(to: UInt8.self).baseAddress else { return 0 }
+                return compression_encode_buffer(
+                    output,
+                    destinationBuffer.count,
+                    source,
+                    sourceBuffer.count,
+                    nil,
+                    COMPRESSION_LZFSE
+                )
+            }
+        }
+        guard written > 0 else { return nil }
+        destination.count = written
+        return destination
+    }
+
+    private static func decompress(_ data: Data, expectedSize: Int) -> Data? {
+        if expectedSize == 0 { return data.isEmpty ? Data() : nil }
+        var destination = Data(count: expectedSize)
+        let written = data.withUnsafeBytes { sourceBuffer in
+            destination.withUnsafeMutableBytes { destinationBuffer in
+                guard let source = sourceBuffer.bindMemory(to: UInt8.self).baseAddress,
+                      let output = destinationBuffer.bindMemory(to: UInt8.self).baseAddress else { return 0 }
+                return compression_decode_buffer(
+                    output,
+                    destinationBuffer.count,
+                    source,
+                    sourceBuffer.count,
+                    nil,
+                    COMPRESSION_LZFSE
+                )
+            }
+        }
+        guard written == expectedSize else { return nil }
+        return destination
+    }
 }
 
 private struct CloudVaultSnapshotInsert: Encodable {

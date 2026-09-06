@@ -184,7 +184,7 @@ final class FireVaultUnifiedSyncService: ObservableObject {
         phase = .accountRecords
         await store.syncAccountsNow()
         if let accountError = store.cloudSyncErrorMessage {
-            failures.append(accountError)
+            failures.append("Account sync: \(accountError)")
         }
 
         phase = .fieldData
@@ -200,7 +200,7 @@ final class FireVaultUnifiedSyncService: ObservableObject {
             )
             acknowledgeFieldData(payload)
         } catch {
-            failures.append(error.localizedDescription)
+            failures.append("Field-data backup: \(error.localizedDescription)")
             refreshPendingFieldData(payload, isDemoMode: false)
         }
 
