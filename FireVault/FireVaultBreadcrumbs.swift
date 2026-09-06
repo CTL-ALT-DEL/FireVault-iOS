@@ -2141,12 +2141,14 @@ struct FireVaultBreadcrumbsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close", systemImage: "xmark", action: dismiss.callAsFunction)
+                        .fireVaultNavigationActionStyle()
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if selectedDay != nil {
                         Button("Report", systemImage: "doc.text") {
                             showsReport = true
                         }
+                        .fireVaultNavigationActionStyle()
                         .accessibilityHint("Previews and exports this workday report")
                     }
                 }
@@ -2579,11 +2581,13 @@ struct FireVaultBreadcrumbStopEditor: View {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .fireVaultNavigationActionStyle()
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         save()
                     }
+                    .fireVaultNavigationActionStyle()
                     .fontWeight(.semibold)
                 }
             }
@@ -2955,6 +2959,7 @@ private struct FireVaultGooglePlacesMatchPicker: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .fireVaultNavigationActionStyle()
                 }
             }
         }
@@ -3029,6 +3034,7 @@ private struct FireVaultBreadcrumbAccountPicker: View {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .fireVaultNavigationActionStyle()
                 }
             }
             .overlay {

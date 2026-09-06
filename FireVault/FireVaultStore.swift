@@ -238,6 +238,16 @@ final class FireVaultStore: ObservableObject {
         }.count
     }
 
+    var pendingCloudAccountCount: Int {
+        guard !demoMode else { return 0 }
+        return accounts.lazy.filter {
+            $0.cloudID == nil
+                || $0.cloudSyncVersion == nil
+                || $0.locallyModifiedAt != nil
+                || $0.cloudSyncError != nil
+        }.count
+    }
+
     func updateRecordChangeAccess(_ isAllowed: Bool) {
         allowsRecordChanges = isAllowed
         if isAllowed {
@@ -1068,6 +1078,26 @@ final class FireVaultStore: ObservableObject {
         }
     }
 
+    /// Builds the complete non-video media queue before a unified sync starts
+    /// processing it. Capture-time callers still use the fire-and-forget path.
+    func enqueueExistingFieldMediaBackupsForUnifiedSync() async {
+        guard !demoMode else { return }
+        for account in accounts {
+            for document in account.documents where document.kind != "video" {
+                guard let displayURL = mediaURL(accountID: account.id, documentID: document.id) else {
+                    continue
+                }
+                await enqueueFieldMediaBackup(
+                    account: account,
+                    document: document,
+                    displayURL: displayURL,
+                    originalURL: originalMediaURL(accountID: account.id, documentID: document.id),
+                    processImmediately: false
+                )
+            }
+        }
+    }
+
     @discardableResult
     func attachScannedDocument(_ pages: [UIImage], to accountID: String) throws -> FireVaultWorkspaceDocument {
         try requireRecordChangeAccess()
@@ -1279,6 +1309,24 @@ final class FireVaultStore: ObservableObject {
         originalURL: URL? = nil
     ) {
         guard !demoMode, document.kind != "video" else { return }
+        Task {
+            await enqueueFieldMediaBackup(
+                account: account,
+                document: document,
+                displayURL: displayURL,
+                originalURL: originalURL,
+                processImmediately: true
+            )
+        }
+    }
+
+    private func enqueueFieldMediaBackup(
+        account: FireVaultWorkspaceAccount,
+        document: FireVaultWorkspaceDocument,
+        displayURL: URL,
+        originalURL: URL?,
+        processImmediately: Bool
+    ) async {
         let category: FireVaultFieldMediaCategory = switch document.kind {
         case "photo": .photos
         case "scan": .scans
@@ -1288,30 +1336,31 @@ final class FireVaultStore: ObservableObject {
         }
         let service = FireVaultFieldMediaBackupService.shared
 
-        Task {
-            if document.kind == "photo", let originalURL {
-                await service.enqueueSavedMedia(
-                    account: account,
-                    localFileURL: originalURL,
-                    category: category,
-                    variant: "original"
-                )
-                await service.enqueueSavedMedia(
-                    account: account,
-                    localFileURL: displayURL,
-                    category: category,
-                    variant: "overlay"
-                )
-            } else {
-                // Legacy photos have only the displayed file. Treat that copy
-                // as the original so enabling backup also protects old media.
-                await service.enqueueSavedMedia(
-                    account: account,
-                    localFileURL: displayURL,
-                    category: category,
-                    variant: "original"
-                )
-            }
+        if document.kind == "photo", let originalURL {
+            await service.enqueueSavedMedia(
+                account: account,
+                localFileURL: originalURL,
+                category: category,
+                variant: "original",
+                processImmediately: processImmediately
+            )
+            await service.enqueueSavedMedia(
+                account: account,
+                localFileURL: displayURL,
+                category: category,
+                variant: "overlay",
+                processImmediately: processImmediately
+            )
+        } else {
+            // Legacy photos have only the displayed file. Treat that copy
+            // as the original so enabling backup also protects old media.
+            await service.enqueueSavedMedia(
+                account: account,
+                localFileURL: displayURL,
+                category: category,
+                variant: "original",
+                processImmediately: processImmediately
+            )
         }
     }
 

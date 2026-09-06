@@ -16,6 +16,7 @@ final class FireVaultNotificationService {
     private enum Identifier {
         static let recording = "firevault.triplog.recording"
         static let paused = "firevault.triplog.paused"
+        static let unifiedSyncFailure = "firevault.sync.failure"
         static func arrival(_ stopID: UUID) -> String { "firevault.triplog.arrival.\(stopID.uuidString)" }
         static func review(_ stopID: UUID) -> String { "firevault.triplog.review.\(stopID.uuidString)" }
     }
@@ -149,6 +150,26 @@ final class FireVaultNotificationService {
         center.removeDeliveredNotifications(withIdentifiers: identifiers)
     }
 
+    func unifiedSyncFailed(
+        detail: String,
+        preferences: FireVaultNotificationPreferences
+    ) {
+        guard preferences.isEnabled, preferences.deliveryFailures ?? true else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "FireVault sync needs attention"
+        content.body = preferences.hidesSensitiveDetails
+            ? "Some account data or files could not be synchronized. Open FireVault to review the status."
+            : String(detail.prefix(220))
+        content.sound = .default
+        content.categoryIdentifier = Category.handsetOnly
+        center.removePendingNotificationRequests(withIdentifiers: [Identifier.unifiedSyncFailure])
+        center.add(.init(
+            identifier: Identifier.unifiedSyncFailure,
+            content: content,
+            trigger: nil
+        ))
+    }
+
 #if DEBUG
     func sendDeveloperTest(title: String, body: String, delay: TimeInterval, sound: Bool) async throws -> String {
         let identifier = "firevault.developer.test.\(UUID().uuidString)"
@@ -265,7 +286,7 @@ struct NativeNotificationSettingsView: View {
             }
 
             Section("Reports, Storage & Security") {
-                Toggle("Report, sync, and backup failures", isOn: optionalBinding(\.deliveryFailures, default: true))
+                Toggle("Report and Data & File Sync failures", isOn: optionalBinding(\.deliveryFailures, default: true))
                 Toggle("Sign-in and security alerts", isOn: optionalBinding(\.securityAlerts, default: true))
             }
 
@@ -335,7 +356,12 @@ struct NativeNotificationSettingsView: View {
         .safeAreaPadding(.bottom, 82)
         .task { authorizationStatus = await FireVaultNotificationService.shared.authorizationStatus() }
         .onDisappear { save() }
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Save", action: save) } }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Save", action: save)
+                    .fireVaultNavigationActionStyle()
+            }
+        }
     }
 
     private var authorizationLabel: String {

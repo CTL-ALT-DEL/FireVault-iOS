@@ -13,6 +13,7 @@ struct FireVaultIPadWorkspaceV3: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+    @ObservedObject var unifiedSync: FireVaultUnifiedSyncService
 
     var body: some View {
         FireVaultIPadWorkspaceV2(
@@ -20,7 +21,8 @@ struct FireVaultIPadWorkspaceV3: View {
             store: store,
             settings: settings,
             locationService: locationService,
-            breadcrumbs: breadcrumbs
+            breadcrumbs: breadcrumbs,
+            unifiedSync: unifiedSync
         )
         .accessibilityIdentifier("ipad-adaptive-workspace-v3")
     }

@@ -19,13 +19,14 @@ struct ContentView: View {
     @StateObject private var widgetDeepLinks = FireVaultWidgetDeepLinkCenter.shared
     @StateObject private var privacyLock = FireVaultPrivacyLockController()
     @StateObject private var fieldMediaBackup = FireVaultFieldMediaBackupService.shared
+    @StateObject private var unifiedSync = FireVaultUnifiedSyncService.shared
     @State private var demoBreadcrumbs: FireVaultBreadcrumbStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showsSplash = true
     @State private var widgetSnapshotTask: Task<Void, Never>?
-    @State private var hasStartedLegacyBackfill = false
+    @State private var hasStartedInitialCloudSync = false
 
     init() {
         _demoBreadcrumbs = State(initialValue: FireVaultDemoShowroom.makeBreadcrumbStore())
@@ -130,6 +131,7 @@ struct ContentView: View {
                             Button("Close") {
                                 store.presentsSubscriptionRequired = false
                             }
+                            .fireVaultNavigationActionStyle()
                         }
                     }
             }
@@ -141,7 +143,7 @@ struct ContentView: View {
         .onChange(of: store.demoMode) { _, isDemoMode in
             synchronizeSubscriptionAccess()
             prepareActiveVault()
-            if !isDemoMode { startLegacyBackfillIfNeeded() }
+            if !isDemoMode { startInitialCloudSyncIfNeeded() }
             Task {
                 await fieldMediaBackup.configure(
                     storagePreferences: settings.preferences.storage,
@@ -188,6 +190,21 @@ struct ContentView: View {
             FireVaultDemoShowroom.installAccountsIfNeeded(into: store, force: true)
             demoBreadcrumbs = FireVaultDemoShowroom.makeBreadcrumbStore(forceReset: true)
         }
+        .onChange(of: store.accounts) { _, _ in
+            refreshUnifiedSyncState()
+        }
+        .onChange(of: settings.preferences) { _, _ in
+            refreshUnifiedSyncState()
+        }
+        .onChange(of: settings.settingsView) { _, _ in
+            refreshUnifiedSyncState()
+        }
+        .onChange(of: settings.appearance) { _, _ in
+            refreshUnifiedSyncState()
+        }
+        .onChange(of: activeBreadcrumbs.days) { _, _ in
+            refreshUnifiedSyncState()
+        }
     }
 
     private var preferredColorScheme: ColorScheme? {
@@ -226,7 +243,8 @@ struct ContentView: View {
                         store: store,
                         settings: settings,
                         locationService: locationService,
-                        breadcrumbs: activeBreadcrumbs
+                        breadcrumbs: activeBreadcrumbs,
+                        unifiedSync: unifiedSync
                     )
                     .transition(.opacity)
                 } else if let account = store.selectedAccount, usesRegularIPad {
@@ -243,7 +261,8 @@ struct ContentView: View {
                         account: account,
                         store: store,
                         settings: settings,
-                        locationService: locationService
+                        locationService: locationService,
+                        unifiedSync: unifiedSync
                     )
                         .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 } else if usesPortraitIPadWorkspace {
@@ -252,7 +271,8 @@ struct ContentView: View {
                         store: store,
                         settings: settings,
                         locationService: locationService,
-                        breadcrumbs: activeBreadcrumbs
+                        breadcrumbs: activeBreadcrumbs,
+                        unifiedSync: unifiedSync
                     )
                     .transition(.opacity)
                 } else {
@@ -261,7 +281,8 @@ struct ContentView: View {
                         store: store,
                         settings: settings,
                         locationService: locationService,
-                        breadcrumbs: activeBreadcrumbs
+                        breadcrumbs: activeBreadcrumbs,
+                        unifiedSync: unifiedSync
                     )
                     .transition(.opacity)
                 }
@@ -289,7 +310,8 @@ struct ContentView: View {
         if settings.preferences.storage.automaticFieldMediaBackup == true {
             store.enqueueExistingFieldMediaBackups()
         }
-        startLegacyBackfillIfNeeded()
+        refreshUnifiedSyncState()
+        startInitialCloudSyncIfNeeded()
         await refreshAndReconcileFeatureControls()
         store.configureCategoryRules(settings.preferences.categoryRules ?? [])
         privacyLock.configure(enabled: settings.preferences.privacy.enabled)
@@ -319,6 +341,7 @@ struct ContentView: View {
                     accounts: store.accounts,
                     isDemoMode: store.demoMode
                 )
+                refreshUnifiedSyncState()
             }
             if subscriptions.products.isEmpty {
                 Task { await subscriptions.refresh() }
@@ -358,10 +381,17 @@ struct ContentView: View {
         }
     }
 
-    private func startLegacyBackfillIfNeeded() {
-        guard !store.demoMode, !hasStartedLegacyBackfill else { return }
-        hasStartedLegacyBackfill = true
-        Task { await store.syncAccountsNow() }
+    private func startInitialCloudSyncIfNeeded() {
+        guard !store.demoMode, !hasStartedInitialCloudSync else { return }
+        hasStartedInitialCloudSync = true
+        Task {
+            await unifiedSync.syncNow(
+                store: store,
+                settings: settings,
+                breadcrumbs: activeBreadcrumbs,
+                mediaBackup: fieldMediaBackup
+            )
+        }
     }
 
     private var isPrivacyLocked: Bool {
@@ -442,7 +472,7 @@ struct ContentView: View {
             store.closeAccount(to: .photo)
             store.requestCapture(.photo)
         case .sync:
-            store.closeAccount(to: .settings)
+            store.closeAccount(to: .accounts)
         }
         updateWidgetSnapshot()
     }
@@ -472,9 +502,7 @@ struct ContentView: View {
         let accuracyFeet = location.flatMap { reading in
             reading.horizontalAccuracy >= 0 ? reading.horizontalAccuracy * 3.280_84 : nil
         }
-        let pendingCloudAccounts = store.accounts.lazy.filter {
-            $0.cloudID == nil || $0.cloudSyncedAt == nil || $0.cloudSyncError != nil
-        }.count
+        let pendingCloudAccounts = store.pendingCloudAccountCount
         var widgetAccounts = store.accounts.filter(\.favorite)
         if let contextAccount {
             widgetAccounts.removeAll { $0.id == contextAccount.id }
@@ -538,9 +566,21 @@ struct ContentView: View {
     }
 
     private var widgetCloudState: FireVaultWidgetSnapshot.CloudState {
-        if store.isCloudSyncing { return .syncing }
-        if store.cloudSyncErrorMessage != nil { return .needsAttention }
-        return store.cloudLastSyncedAt == nil ? .notSynced : .upToDate
+        let status = unifiedSync.status(store: store, mediaBackup: fieldMediaBackup)
+        if status.isSyncing { return .syncing }
+        if status.needsAttention { return .needsAttention }
+        return status.needsAction ? .notSynced : .upToDate
+    }
+
+    private func refreshUnifiedSyncState() {
+        unifiedSync.refreshPendingFieldData(
+            FireVaultCloudVaultBackupCoordinator.payload(
+                store: store,
+                settings: settings,
+                breadcrumbs: activeBreadcrumbs
+            ),
+            isDemoMode: store.demoMode
+        )
     }
 
     private func widgetGPSQuality(accuracyFeet: Double?) -> FireVaultWidgetSnapshot.GPSQuality {

@@ -616,6 +616,7 @@ struct FireVaultBreadcrumbReportView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                        .fireVaultNavigationActionStyle()
                 }
             }
             .fileExporter(

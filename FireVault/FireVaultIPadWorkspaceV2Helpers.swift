@@ -14,6 +14,8 @@ struct FireVaultIPadPortraitWorkspace: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+    @ObservedObject var unifiedSync: FireVaultUnifiedSyncService
+    @ObservedObject private var mediaBackup = FireVaultFieldMediaBackupService.shared
 
     var body: some View {
         Group {
@@ -28,7 +30,13 @@ struct FireVaultIPadPortraitWorkspace: View {
                     showsBottomNavigation: false
                 )
             case .accounts:
-                FireVaultIPadAccountsWorkspaceV2(payload: payload, store: store)
+                FireVaultIPadAccountsWorkspaceV2(
+                    payload: payload,
+                    store: store,
+                    settings: settings,
+                    breadcrumbs: breadcrumbs,
+                    unifiedSync: unifiedSync
+                )
             case .trip:
                 FireVaultTripLogPortraitView(
                     breadcrumbs: breadcrumbs,
@@ -78,6 +86,13 @@ struct FireVaultIPadPortraitWorkspace: View {
                                     : (selected ? NativeShellPalette.blue : NativeShellPalette.navigationInactive)
                             )
                             .frame(width: 38, height: 29)
+                            .symbolEffect(
+                                .pulse,
+                                options: .repeating,
+                                isActive: tab == .accounts
+                                    && unifiedSync.status(store: store, mediaBackup: mediaBackup).needsAction
+                                    && !unifiedSync.status(store: store, mediaBackup: mediaBackup).isSyncing
+                            )
                             .background(
                                 selected ? NativeShellPalette.blue.opacity(0.12) : .clear,
                                 in: RoundedRectangle(cornerRadius: 10, style: .continuous)

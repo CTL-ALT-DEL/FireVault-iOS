@@ -488,6 +488,7 @@ private struct FireVaultReportTemplatePickerView: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }
+                    .fireVaultNavigationActionStyle()
             }
         }
     }
@@ -580,7 +581,7 @@ private struct FireVaultReportEvidencePickerView: View {
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }
-                    .fontWeight(.semibold)
+                    .fireVaultNavigationActionStyle()
             }
         }
     }
@@ -612,11 +613,13 @@ private struct FireVaultGeneratedReportPreview: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Done") { dismiss() }
+                            .fireVaultNavigationActionStyle()
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         ShareLink(item: report.url) {
                             Label("Share", systemImage: "square.and.arrow.up")
                         }
+                        .fireVaultNavigationActionStyle()
                     }
                 }
                 .safeAreaInset(edge: .bottom) {
@@ -645,6 +648,7 @@ struct FireVaultStoredPDFDetailView: View {
                     ShareLink(item: url) {
                         Label("Share PDF", systemImage: "square.and.arrow.up")
                     }
+                    .fireVaultNavigationActionStyle()
                 }
             }
     }

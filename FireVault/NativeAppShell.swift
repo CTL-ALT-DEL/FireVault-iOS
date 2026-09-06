@@ -272,6 +272,8 @@ struct NativeAppShellView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var locationService: FireVaultLocationService
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+    @ObservedObject var unifiedSync: FireVaultUnifiedSyncService
+    @ObservedObject private var mediaBackup = FireVaultFieldMediaBackupService.shared
     @State private var keyboardVisible = false
 
     var body: some View {
@@ -292,7 +294,9 @@ struct NativeAppShellView: View {
                         NativeAccountsView(
                             payload: payload,
                             store: store,
-                            settings: settings
+                            settings: settings,
+                            breadcrumbs: breadcrumbs,
+                            unifiedSync: unifiedSync
                         )
                     case .trip:
                         FireVaultTripLogPortraitView(
@@ -342,6 +346,8 @@ struct NativeAppShellView: View {
             ForEach(FireVaultShellTab.allCases.filter(isTabVisible)) { tab in
                 let isSelected = store.selectedTab == tab
                 let isTripRecording = tab == .trip && breadcrumbs.isRecording
+                let syncStatus = unifiedSync.status(store: store, mediaBackup: mediaBackup)
+                let hasPendingSync = tab == .accounts && syncStatus.needsAction && !syncStatus.isSyncing
                 Button {
                     if tab == .nearby {
                         store.requestNearbyReset()
@@ -365,6 +371,7 @@ struct NativeAppShellView: View {
                                         : NativeShellPalette.navigationInactive)
                             )
                             .frame(width: 34, height: 26)
+                            .symbolEffect(.pulse, options: .repeating, isActive: hasPendingSync)
                             .shadow(
                                 color: .black.opacity(isSelected || isTripRecording ? 0.52 : 0.18),
                                 radius: isSelected || isTripRecording ? 2.5 : 1.5,
@@ -844,6 +851,7 @@ private struct NativeNearbyView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { showsTripLogDetailPicker = false }
+                        .fireVaultNavigationActionStyle()
                 }
             }
         }
@@ -942,6 +950,7 @@ private struct NativeNearbyView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { showsAutoRotateEditor = false }
+                        .fireVaultNavigationActionStyle()
                 }
             }
         }
@@ -1851,6 +1860,8 @@ private struct NativeAccountsView: View {
     let payload: FireVaultAppPayload
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+    @ObservedObject var unifiedSync: FireVaultUnifiedSyncService
     @State private var search = ""
     @State private var sort: NativeAccountSort = .alphabetic
 
@@ -1910,66 +1921,78 @@ private struct NativeAccountsView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
-                if accounts.isEmpty {
-                    Group {
-                        if search.isEmpty {
-                            ContentUnavailableView(
-                                "No Accounts",
-                                systemImage: "building.2",
-                                description: Text("Add an account or import an existing CSV file.")
-                            )
-                        } else {
-                            ContentUnavailableView.search(text: search)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                            accountsHeader
+                VStack(spacing: 0) {
+                    FireVaultUnifiedSyncCard(
+                        store: store,
+                        settings: settings,
+                        breadcrumbs: breadcrumbs,
+                        unifiedSync: unifiedSync
+                    )
+                    .padding(.horizontal, 14)
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
 
-                            ForEach(accountSections) { section in
-                                Section {
-                                    ForEach(Array(section.accounts.enumerated()), id: \.element.id) { index, account in
-                                        if index > 0 {
-                                            Divider()
-                                                .padding(.leading, 16)
-                                        }
-
-                                        NativeAccountRow(
-                                            account: account,
-                                            onOpen: { store.openAccount(account.id) },
-                                            onToggleFavorite: { store.toggleFavorite(account.id) }
-                                        )
-                                        .contextMenu {
-                                            Button {
-                                                store.toggleFavorite(account.id)
-                                            } label: {
-                                                Label(
-                                                    account.favorite ? "Remove from Favorites" : "Add to Favorites",
-                                                    systemImage: account.favorite ? "star.slash" : "star"
-                                                )
-                                            }
-                                        }
-                                        .accessibilityIdentifier("account-row-\(account.id)")
-                                    }
-                                } header: {
-                                    accountSectionHeader(section.title)
-                                }
+                    if accounts.isEmpty {
+                        Group {
+                            if search.isEmpty {
+                                ContentUnavailableView(
+                                    "No Accounts",
+                                    systemImage: "building.2",
+                                    description: Text("Add an account or import an existing CSV file.")
+                                )
+                            } else {
+                                ContentUnavailableView.search(text: search)
                             }
-
-                            Color.clear
-                                .frame(height: max(0, geometry.size.height - 92))
-                                .allowsHitTesting(false)
                         }
-                        .padding(.bottom, 18)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                                accountsHeader
+
+                                ForEach(accountSections) { section in
+                                    Section {
+                                        ForEach(Array(section.accounts.enumerated()), id: \.element.id) { index, account in
+                                            if index > 0 {
+                                                Divider()
+                                                    .padding(.leading, 16)
+                                            }
+
+                                            NativeAccountRow(
+                                                account: account,
+                                                onOpen: { store.openAccount(account.id) },
+                                                onToggleFavorite: { store.toggleFavorite(account.id) }
+                                            )
+                                            .contextMenu {
+                                                Button {
+                                                    store.toggleFavorite(account.id)
+                                                } label: {
+                                                    Label(
+                                                        account.favorite ? "Remove from Favorites" : "Add to Favorites",
+                                                        systemImage: account.favorite ? "star.slash" : "star"
+                                                    )
+                                                }
+                                            }
+                                            .accessibilityIdentifier("account-row-\(account.id)")
+                                        }
+                                    } header: {
+                                        accountSectionHeader(section.title)
+                                    }
+                                }
+
+                                Color.clear
+                                    .frame(height: max(0, geometry.size.height - 92))
+                                    .allowsHitTesting(false)
+                            }
+                            .padding(.bottom, 18)
+                        }
+                        .scrollIndicators(.hidden)
+                        .refreshable {
+                            store.reloadAccounts()
+                            try? await Task.sleep(for: .milliseconds(350))
+                        }
+                        .accessibilityIdentifier("accounts-scroll")
                     }
-                    .scrollIndicators(.hidden)
-                    .refreshable {
-                        store.reloadAccounts()
-                        try? await Task.sleep(for: .milliseconds(350))
-                    }
-                    .accessibilityIdentifier("accounts-scroll")
                 }
             }
             .background(NativeShellPalette.background)
@@ -2861,6 +2884,7 @@ private struct NativeCaptureAccountPicker: View {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .fireVaultNavigationActionStyle()
                 }
             }
         }
@@ -3078,6 +3102,13 @@ struct NativeSettingsView: View {
                             .font(.caption)
                             .foregroundStyle(subscriptionStatus.color)
                             .lineLimit(1)
+                        if let detail = subscriptionStatus.detail {
+                            Text(detail)
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.78)
+                        }
                     }
                     Spacer(minLength: 4)
                 }
@@ -3088,16 +3119,16 @@ struct NativeSettingsView: View {
         }
     }
 
-    private var subscriptionStatus: (title: String, symbol: String, color: Color) {
+    private var subscriptionStatus: (title: String, detail: String?, symbol: String, color: Color) {
         switch subscriptions.access {
-        case .trial: ("Free trial active", "sparkles", NativeShellPalette.green)
-        case .active: ("Technician active", "checkmark.seal.fill", NativeShellPalette.green)
-        case .billingGracePeriod, .offlineGracePeriod: ("Temporary access", "clock.badge.checkmark", .orange)
-        case .billingRetry: ("Payment needs attention", "creditcard.trianglebadge.exclamationmark", .orange)
-        case .expired: ("Subscription expired", "calendar.badge.exclamationmark", .secondary)
-        case .notSubscribed: ("View plans", "person.crop.circle.badge.plus", NativeShellPalette.blue)
-        case .checking: ("Checking access…", "hourglass", .secondary)
-        case .unavailable: ("Plans unavailable", "wifi.exclamationmark", .secondary)
+        case .trial: ("Free trial active", subscriptions.access.planCardDetail(), "sparkles", NativeShellPalette.green)
+        case .active: ("Technician active", subscriptions.access.planCardDetail(), "checkmark.seal.fill", NativeShellPalette.green)
+        case .billingGracePeriod, .offlineGracePeriod: ("Temporary access", subscriptions.access.planCardDetail(), "clock.badge.checkmark", .orange)
+        case .billingRetry: ("Payment needs attention", nil, "creditcard.trianglebadge.exclamationmark", .orange)
+        case .expired: ("Subscription expired", nil, "calendar.badge.exclamationmark", .secondary)
+        case .notSubscribed: ("View plans", nil, "person.crop.circle.badge.plus", NativeShellPalette.blue)
+        case .checking: ("Checking access…", nil, "hourglass", .secondary)
+        case .unavailable: ("Plans unavailable", nil, "wifi.exclamationmark", .secondary)
         }
     }
 
@@ -3648,6 +3679,7 @@ private struct NativeGPSSettingsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Save", action: save)
+                    .fireVaultNavigationActionStyle()
             }
         }
         .onChange(of: draft) { _, _ in saved = false }

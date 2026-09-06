@@ -1095,7 +1095,8 @@ private struct FireVaultIPadLegacyDetailHost: View {
                 store: store,
                 settings: settings,
                 locationService: locationService,
-                breadcrumbs: breadcrumbs
+                breadcrumbs: breadcrumbs,
+                unifiedSync: .shared
             )
             .frame(
                 width: geometry.size.width,

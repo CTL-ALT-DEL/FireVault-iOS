@@ -487,7 +487,10 @@ struct NativeSettingsFormModifier: ViewModifier {
             .navigationBarTitleDisplayMode(.inline)
             .onDisappear(perform: save)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Save", action: save) }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save", action: save)
+                        .fireVaultNavigationActionStyle()
+                }
                 if let focused {
                     ToolbarItemGroup(placement: .keyboard) {
                         Spacer()

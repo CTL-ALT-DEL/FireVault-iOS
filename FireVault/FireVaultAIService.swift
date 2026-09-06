@@ -219,6 +219,7 @@ struct FireVaultAccountBriefSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                        .fireVaultNavigationActionStyle()
                 }
             }
         }

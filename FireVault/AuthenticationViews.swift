@@ -596,6 +596,7 @@ private struct FireVaultTurnstileChallengeView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: onCancel)
+                        .fireVaultNavigationActionStyle()
                 }
             }
         }
@@ -842,31 +843,6 @@ struct FireVaultAccountProfileSections: View {
         return email.isEmpty ? "Signed in" : email
     }
 
-    private var cloudSyncTint: Color {
-        if store.cloudSyncErrorMessage != nil || !store.accountSyncConflicts.isEmpty { return .orange }
-        if store.isCloudSyncing { return NativeShellPalette.blue }
-        if store.cloudLastSyncedAt == nil { return .secondary }
-        return NativeShellPalette.green
-    }
-
-    private var cloudSyncSymbol: String {
-        if store.isCloudSyncing { return "arrow.triangle.2.circlepath" }
-        if !store.accountSyncConflicts.isEmpty { return "arrow.triangle.branch" }
-        if store.cloudSyncErrorMessage != nil { return "exclamationmark.icloud.fill" }
-        if store.cloudLastSyncedAt == nil { return "icloud.slash" }
-        return "checkmark.icloud.fill"
-    }
-
-    private var lastSyncText: String {
-        guard let date = store.cloudLastSyncedAt else { return "Not yet" }
-        return date.formatted(date: .abbreviated, time: .shortened)
-    }
-
-    private var lastCheckedText: String {
-        guard let date = store.cloudLastCheckedAt else { return "Not yet" }
-        return date.formatted(date: .abbreviated, time: .shortened)
-    }
-
     var body: some View {
         Group {
             Section("FireVault Account") {
@@ -891,80 +867,10 @@ struct FireVaultAccountProfileSections: View {
                 Text("Connects this device, customer records, CSV imports, and the FireVault portal.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-            }
 
-            Section {
-                HStack(spacing: 12) {
-                    Image(systemName: cloudSyncSymbol)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(cloudSyncTint)
-                        .frame(width: 30)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Account records")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(store.cloudSyncStatusText)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(cloudSyncTint)
-                    }
-
-                    Spacer(minLength: 4)
-                    if store.isCloudSyncing { ProgressView() }
-                }
-
-                HStack(spacing: 12) {
-                    syncTimestamp(title: "Last synced", value: lastSyncText)
-                    Divider().frame(height: 34)
-                    syncTimestamp(title: "Last checked", value: lastCheckedText)
-                }
-
-                Button {
-                    Task {
-                        await store.syncAccountsNow()
-                    }
-                } label: {
-                    HStack {
-                        Label(
-                            store.isCloudSyncing ? "Syncing…" : "Sync Now",
-                            systemImage: "arrow.triangle.2.circlepath"
-                        )
-                        Spacer()
-                    }
-                }
-                .disabled(store.isCloudSyncing || store.demoMode)
-
-                if store.isCloudSyncing, store.cloudSyncTotal > 0 {
-                    ProgressView(value: Double(store.cloudSyncCompleted), total: Double(store.cloudSyncTotal)) {
-                        Text("Backing up legacy accounts")
-                    } currentValueLabel: {
-                        Text("\(store.cloudSyncCompleted) of \(store.cloudSyncTotal)")
-                    }
-                }
-                if !store.accountSyncConflicts.isEmpty {
-                    NavigationLink {
-                        FireVaultAccountSyncConflictsView(store: store)
-                    } label: {
-                        Label(
-                            "Review \(store.accountSyncConflicts.count) Sync Conflict\(store.accountSyncConflicts.count == 1 ? "" : "s")",
-                            systemImage: "arrow.triangle.branch"
-                        )
-                        .foregroundStyle(.orange)
-                    }
-                }
-                if let message = store.cloudSyncErrorMessage {
-                    Label(message, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                }
-            } header: {
-                Text("Cloud Sync")
-            } footer: {
-                Text(
-                    store.demoMode
-                        ? "Demo data stays on this iPhone."
-                        : "FireVault checks automatically. Use Sync Now after portal changes or whenever you want an immediate check."
-                )
+                Label("Data & File Sync is available at the top of Accounts.", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -1000,22 +906,9 @@ struct FireVaultAccountProfileSections: View {
         }
     }
 
-    private func syncTimestamp(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
 }
 
-private struct FireVaultAccountSyncConflictsView: View {
+struct FireVaultAccountSyncConflictsView: View {
     @ObservedObject var store: FireVaultStore
 
     var body: some View {
