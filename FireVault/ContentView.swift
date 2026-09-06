@@ -108,9 +108,11 @@ struct ContentView: View {
                 await fieldMediaBackup.configure(
                     storagePreferences: storage,
                     accounts: store.accounts,
-                    isDemoMode: store.demoMode
+                    isDemoMode: store.demoMode,
+                    hasSubscriptionAccess: subscriptions.access.grantsFullAccess
                 )
-                if storage.automaticFieldMediaBackup == true {
+                if subscriptions.access.grantsFullAccess,
+                   storage.automaticFieldMediaBackup == true {
                     store.enqueueExistingFieldMediaBackups()
                 }
             }
@@ -137,8 +139,21 @@ struct ContentView: View {
             }
             .environmentObject(subscriptions)
         }
-        .onChange(of: subscriptions.access) { _, _ in
+        .onChange(of: subscriptions.access) { _, access in
             synchronizeSubscriptionAccess()
+            startInitialCloudSyncIfNeeded()
+            Task {
+                await fieldMediaBackup.configure(
+                    storagePreferences: settings.preferences.storage,
+                    accounts: store.accounts,
+                    isDemoMode: store.demoMode,
+                    hasSubscriptionAccess: access.grantsFullAccess
+                )
+                if access.grantsFullAccess,
+                   settings.preferences.storage.automaticFieldMediaBackup == true {
+                    store.enqueueExistingFieldMediaBackups()
+                }
+            }
         }
         .onChange(of: store.demoMode) { _, isDemoMode in
             synchronizeSubscriptionAccess()
@@ -148,9 +163,11 @@ struct ContentView: View {
                 await fieldMediaBackup.configure(
                     storagePreferences: settings.preferences.storage,
                     accounts: store.accounts,
-                    isDemoMode: isDemoMode
+                    isDemoMode: isDemoMode,
+                    hasSubscriptionAccess: subscriptions.access.grantsFullAccess
                 )
-                if !isDemoMode, settings.preferences.storage.automaticFieldMediaBackup == true {
+                if !isDemoMode, subscriptions.access.grantsFullAccess,
+                   settings.preferences.storage.automaticFieldMediaBackup == true {
                     store.enqueueExistingFieldMediaBackups()
                 }
             }
@@ -171,9 +188,11 @@ struct ContentView: View {
                 await fieldMediaBackup.configure(
                     storagePreferences: settings.preferences.storage,
                     accounts: store.accounts,
-                    isDemoMode: store.demoMode
+                    isDemoMode: store.demoMode,
+                    hasSubscriptionAccess: subscriptions.access.grantsFullAccess
                 )
-                if settings.preferences.storage.automaticFieldMediaBackup == true {
+                if subscriptions.access.grantsFullAccess,
+                   settings.preferences.storage.automaticFieldMediaBackup == true {
                     store.enqueueExistingFieldMediaBackups()
                 }
             }
@@ -305,9 +324,11 @@ struct ContentView: View {
         await fieldMediaBackup.configure(
             storagePreferences: settings.preferences.storage,
             accounts: store.accounts,
-            isDemoMode: store.demoMode
+            isDemoMode: store.demoMode,
+            hasSubscriptionAccess: subscriptions.access.grantsFullAccess
         )
-        if settings.preferences.storage.automaticFieldMediaBackup == true {
+        if subscriptions.access.grantsFullAccess,
+           settings.preferences.storage.automaticFieldMediaBackup == true {
             store.enqueueExistingFieldMediaBackups()
         }
         refreshUnifiedSyncState()
@@ -339,7 +360,8 @@ struct ContentView: View {
                 await fieldMediaBackup.configure(
                     storagePreferences: settings.preferences.storage,
                     accounts: store.accounts,
-                    isDemoMode: store.demoMode
+                    isDemoMode: store.demoMode,
+                    hasSubscriptionAccess: subscriptions.access.grantsFullAccess
                 )
                 refreshUnifiedSyncState()
             }
@@ -382,7 +404,9 @@ struct ContentView: View {
     }
 
     private func startInitialCloudSyncIfNeeded() {
-        guard !store.demoMode, !hasStartedInitialCloudSync else { return }
+        guard !store.demoMode,
+              subscriptions.access.grantsFullAccess,
+              !hasStartedInitialCloudSync else { return }
         hasStartedInitialCloudSync = true
         Task {
             await unifiedSync.syncNow(
@@ -478,7 +502,9 @@ struct ContentView: View {
     }
 
     private var recordChangesAreAllowed: Bool {
-        store.demoMode || !subscriptions.access.preservesReadOnlyAccess
+        // The free tier remains a fully usable local field vault. Subscription
+        // checks are applied only at paid cloud, API, and delivery boundaries.
+        store.demoMode || subscriptions.access.grantsLocalAccess
     }
 
     private func synchronizeSubscriptionAccess() {
@@ -486,6 +512,15 @@ struct ContentView: View {
         store.updateRecordChangeAccess(isAllowed)
         activeBreadcrumbs.updateRecordChangeAccess(isAllowed) {
             store.requestSubscriptionForRecordChanges()
+        }
+        if subscriptions.access.grantsFullAccess
+            || subscriptions.access.isResolvedWithoutPaidAccess {
+            Task {
+                try? await FireVaultTripLogAutomationService.shared.syncPreferences(
+                    settings.preferences,
+                    hasSubscriptionAccess: subscriptions.access.grantsFullAccess
+                )
+            }
         }
     }
 
@@ -566,6 +601,7 @@ struct ContentView: View {
     }
 
     private var widgetCloudState: FireVaultWidgetSnapshot.CloudState {
+        guard subscriptions.access.grantsFullAccess else { return .subscriptionRequired }
         let status = unifiedSync.status(store: store, mediaBackup: fieldMediaBackup)
         if status.isSyncing { return .syncing }
         if status.needsAttention { return .needsAttention }

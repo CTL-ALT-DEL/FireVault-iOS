@@ -90,6 +90,7 @@ enum FireVaultCloudVaultBackupService {
     private static let summarySelect = "id,device_label,schema_version,sha256,account_count,trip_log_day_count,created_at"
 
     static func listSnapshots() async throws -> [FireVaultCloudVaultSnapshot] {
+        try FireVaultPaidFeatureAccess.requireCached(.cloudStorage)
         let session = try await SupabaseManager.client.auth.session
         return try await SupabaseManager.client
             .from("cloud_vault_snapshots")
@@ -104,6 +105,7 @@ enum FireVaultCloudVaultBackupService {
         payload: FireVaultCloudVaultPayload,
         deviceLabel: String = "iPhone"
     ) async throws -> FireVaultCloudVaultBackupResult {
+        try FireVaultPaidFeatureAccess.requireCached(.cloudStorage)
         let data = try payload.encoded()
         guard data.count <= maximumSnapshotBytes else {
             throw FireVaultCloudVaultError.snapshotTooLarge
@@ -144,6 +146,7 @@ enum FireVaultCloudVaultBackupService {
     }
 
     static func downloadSnapshot(id: UUID) async throws -> FireVaultCloudVaultPayload {
+        try FireVaultPaidFeatureAccess.requireCached(.cloudStorage)
         let session = try await SupabaseManager.client.auth.session
         let rows: [CloudVaultSnapshotDownload] = try await SupabaseManager.client
             .from("cloud_vault_snapshots")

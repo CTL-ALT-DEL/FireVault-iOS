@@ -405,7 +405,7 @@ final class FireVaultTests: XCTestCase {
         XCTAssertNotNil(FireVaultBackedUpMediaCatalog.restoreTarget(for: file, accounts: store.accounts))
     }
 
-    func testExpiredPlanKeepsProductionRecordsReadOnly() throws {
+    func testExpiredPlanKeepsProductionRecordsEditableOnDevice() throws {
         let suite = "FireVaultTests.Subscription.ReadOnly.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -413,14 +413,15 @@ final class FireVaultTests: XCTestCase {
         let store = FireVaultStore(defaults: defaults)
         let originalAccounts = store.accounts
 
-        store.updateRecordChangeAccess(false)
-        _ = store.addAccount()
+        store.updateRecordChangeAccess(FireVaultSubscriptionAccess.expired.grantsLocalAccess)
+        let added = store.addAccount()
 
-        XCTAssertEqual(store.accounts, originalAccounts)
-        XCTAssertTrue(store.presentsSubscriptionRequired)
+        XCTAssertEqual(store.accounts.count, originalAccounts.count + 1)
+        XCTAssertEqual(store.accounts.last?.id, added.id)
+        XCTAssertFalse(store.presentsSubscriptionRequired)
     }
 
-    func testReadOnlyPlanBlocksEditorPresentationAndRequestsStorefront() throws {
+    func testExplicitReadOnlyModeBlocksEditorPresentationAndRequestsStorefront() throws {
         let suite = "FireVaultTests.Subscription.EditorGate.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -430,6 +431,20 @@ final class FireVaultTests: XCTestCase {
         store.updateRecordChangeAccess(false)
 
         XCTAssertFalse(store.beginRecordChange())
+        XCTAssertTrue(store.presentsSubscriptionRequired)
+    }
+
+    func testPaidFeatureCanRequestStorefrontWhileLocalEditingRemainsAllowed() throws {
+        let suite = "FireVaultTests.Subscription.PaidPrompt.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+
+        store.updateRecordChangeAccess(true)
+        XCTAssertTrue(store.beginRecordChange())
+
+        store.requestSubscriptionForPaidFeature()
         XCTAssertTrue(store.presentsSubscriptionRequired)
     }
 
@@ -447,6 +462,50 @@ final class FireVaultTests: XCTestCase {
         XCTAssertFalse(addedAccount.id.isEmpty)
         XCTAssertEqual(store.accounts.count, originalCount + 1)
         XCTAssertFalse(store.presentsSubscriptionRequired)
+    }
+
+    func testPaidFeaturePolicyAllowsOnlyVerifiedAccessStates() {
+        let expiration = Date().addingTimeInterval(86_400)
+        let allowed: [FireVaultSubscriptionAccess] = [
+            .trial(productID: "trial", expiresAt: expiration),
+            .active(productID: "monthly", expiresAt: expiration),
+            .billingGracePeriod(productID: "monthly", expiresAt: expiration),
+            .offlineGracePeriod(productID: "annual", expiresAt: expiration)
+        ]
+        let denied: [FireVaultSubscriptionAccess] = [
+            .checking,
+            .billingRetry,
+            .expired,
+            .notSubscribed,
+            .unavailable
+        ]
+
+        XCTAssertTrue(allowed.allSatisfy(FireVaultPaidFeatureAccess.isAllowed))
+        XCTAssertTrue(denied.allSatisfy { !FireVaultPaidFeatureAccess.isAllowed($0) })
+        XCTAssertTrue((allowed + denied).allSatisfy(\.grantsLocalAccess))
+        XCTAssertTrue(denied.dropFirst().allSatisfy(\.isResolvedWithoutPaidAccess))
+        XCTAssertFalse(FireVaultSubscriptionAccess.checking.isResolvedWithoutPaidAccess)
+    }
+
+    func testPaidFeaturePolicyReturnsSubscriptionRequiredMessage() {
+        XCTAssertThrowsError(
+            try FireVaultPaidFeatureAccess.require(.cloudStorage, access: .expired)
+        ) { error in
+            XCTAssertEqual(
+                error.localizedDescription,
+                "Subscription Required: Cloud storage is included with a FireVault Technician plan."
+            )
+        }
+    }
+
+    func testCachedPaidFeatureGateFailsClosedWithoutVerifiedEntitlement() throws {
+        let suite = "FireVaultTests.Subscription.PaidGate.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertThrowsError(
+            try FireVaultPaidFeatureAccess.requireCached(.aiGeneration, defaults: defaults)
+        )
     }
 
     func testRemoteFeatureControlDefaultsToEnabledWithoutConfiguration() throws {
@@ -4188,6 +4247,7 @@ final class FireVaultTests: XCTestCase {
 
     func testUnifiedSyncStatusSummarizesPendingWorkAndAttention() {
         let pending = FireVaultUnifiedSyncStatus(
+            hasSubscriptionAccess: true,
             isDemoMode: false,
             isSyncing: false,
             phase: .idle,
@@ -4209,6 +4269,7 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(pending.detail.contains("1 file"))
 
         let failed = FireVaultUnifiedSyncStatus(
+            hasSubscriptionAccess: true,
             isDemoMode: false,
             isSyncing: false,
             phase: .idle,
@@ -4225,6 +4286,32 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(failed.needsAction)
         XCTAssertTrue(failed.needsAttention)
         XCTAssertEqual(failed.title, "Sync needs attention")
+
+        let subscriptionRequired = FireVaultUnifiedSyncStatus(
+            hasSubscriptionAccess: false,
+            isDemoMode: false,
+            isSyncing: false,
+            phase: .idle,
+            pendingAccountCount: 7,
+            fieldDataNeedsSync: true,
+            waitingFileCount: 2,
+            failedFileCount: 0,
+            conflictCount: 0,
+            hasAccountError: false,
+            fileBackupEnabled: true,
+            lastCompletedAt: nil
+        )
+
+        XCTAssertFalse(subscriptionRequired.needsAction)
+        XCTAssertEqual(subscriptionRequired.title, "Subscription Required")
+        XCTAssertTrue(subscriptionRequired.detail.contains("stay on this iPhone"))
+    }
+
+    func testWidgetCloudStateExplainsSubscriptionRequirement() {
+        XCTAssertEqual(
+            FireVaultWidgetSnapshot.CloudState.subscriptionRequired.title,
+            "Subscription Required"
+        )
     }
 
     func testCloudSyncCandidateSelectionIncludesLegacyRevisionAndRetryStates() {

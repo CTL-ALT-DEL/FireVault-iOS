@@ -56,6 +56,7 @@ struct FireVaultAdaptiveAccountDetailsView: View {
     @ObservedObject var store: FireVaultStore
     @ObservedObject var locationService: FireVaultLocationService
     @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var subscriptions: FireVaultSubscriptionStore
     let returnTab: FireVaultShellTab
     let returnTitle: String
 
@@ -304,11 +305,19 @@ struct FireVaultAdaptiveAccountDetailsView: View {
 
                 Spacer()
 
-                Button("Account Brief", systemImage: "sparkles") {
-                    generateAccountBrief()
+                Button(
+                    subscriptions.access.grantsFullAccess ? "Account Brief" : "Subscription Required",
+                    systemImage: subscriptions.access.grantsFullAccess ? "sparkles" : "lock.fill"
+                ) {
+                    if subscriptions.access.grantsFullAccess {
+                        generateAccountBrief()
+                    } else {
+                        store.requestSubscriptionForPaidFeature()
+                    }
                 }
                 .buttonStyle(.glass)
                 .disabled(isLoadingAccountBrief)
+                .opacity(subscriptions.access.grantsFullAccess ? 1 : 0.65)
                 .accessibilityIdentifier("generate-account-brief")
 
                 Button {
@@ -429,6 +438,10 @@ struct FireVaultAdaptiveAccountDetailsView: View {
     }
 
     private func generateAccountBrief() {
+        guard subscriptions.access.grantsFullAccess else {
+            store.requestSubscriptionForPaidFeature()
+            return
+        }
         guard !isLoadingAccountBrief else { return }
         accountBrief = nil
         accountBriefError = nil

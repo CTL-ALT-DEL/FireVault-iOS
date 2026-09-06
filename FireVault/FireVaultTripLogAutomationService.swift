@@ -72,7 +72,14 @@ final class FireVaultTripLogAutomationService {
         }
     }
 
-    func syncPreferences(_ preferences: FireVaultNativePreferences) async throws {
+    func syncPreferences(
+        _ preferences: FireVaultNativePreferences,
+        hasSubscriptionAccess: Bool? = nil
+    ) async throws {
+        let hasSubscriptionAccess = hasSubscriptionAccess
+            ?? FireVaultSubscriptionStore.cachedRecordChangesAreAllowed()
+        let requestsDelivery = preferences.reports.dailyEmailEnabled
+            || preferences.reports.weeklyEmailEnabled
         let session = try await SupabaseManager.client.auth.session
         let recipients = Self.addresses(
             preferences.email.defaultTo.isEmpty
@@ -81,10 +88,10 @@ final class FireVaultTripLogAutomationService {
         )
         let row = PreferenceRow(
             userID: session.user.id,
-            dailyEnabled: preferences.reports.dailyEmailEnabled,
+            dailyEnabled: hasSubscriptionAccess && preferences.reports.dailyEmailEnabled,
             dailyHour: preferences.reports.dailyEmailHour,
             dailyMinute: preferences.reports.dailyEmailMinute,
-            weeklyEnabled: preferences.reports.weeklyEmailEnabled,
+            weeklyEnabled: hasSubscriptionAccess && preferences.reports.weeklyEmailEnabled,
             weeklyWeekday: preferences.reports.weeklyEmailWeekday,
             weeklyHour: preferences.reports.weeklyEmailHour,
             weeklyMinute: preferences.reports.weeklyEmailMinute,
@@ -105,7 +112,7 @@ final class FireVaultTripLogAutomationService {
             .upsert(row, onConflict: "user_id", returning: .minimal)
             .execute()
 
-        if preferences.reports.dailyEmailEnabled || preferences.reports.weeklyEmailEnabled {
+        if hasSubscriptionAccess && requestsDelivery {
             try await flushPendingDays(userID: session.user.id)
         } else {
             savePendingDays([])
@@ -120,6 +127,7 @@ final class FireVaultTripLogAutomationService {
         guard preferences.reports.dailyEmailEnabled || preferences.reports.weeklyEmailEnabled else {
             return
         }
+        guard FireVaultSubscriptionStore.cachedRecordChangesAreAllowed() else { return }
         queue(day)
         do {
             try await syncPreferences(preferences)

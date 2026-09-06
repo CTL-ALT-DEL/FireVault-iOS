@@ -625,7 +625,7 @@ private struct FireVaultCloudStatusWidgetView: View {
                         VStack(spacing: 1) {
                             Image(systemName: cloudSymbol)
                                 .font(.headline)
-                            Text(pendingCount == 0 ? "OK" : "\(pendingCount)")
+                            Text(cloudState == .subscriptionRequired ? "PLAN" : (pendingCount == 0 ? "OK" : "\(pendingCount)"))
                                 .font(.caption2.bold())
                         }
                     }
@@ -701,10 +701,12 @@ private struct FireVaultCloudStatusWidgetView: View {
             VStack(spacing: 9) {
                 FireVaultWidgetMetric(value: "\(accountCount)", title: "Accounts", symbol: "building.2.fill")
                 FireVaultWidgetMetric(
-                    value: "\(pendingCount)",
-                    title: "Pending",
-                    symbol: "arrow.triangle.2.circlepath",
-                    color: pendingCount == 0 ? FireVaultWidgetDesign.green : FireVaultWidgetDesign.amber
+                    value: cloudState == .subscriptionRequired ? "—" : "\(pendingCount)",
+                    title: cloudState == .subscriptionRequired ? "Cloud" : "Pending",
+                    symbol: cloudState == .subscriptionRequired ? "lock.fill" : "arrow.triangle.2.circlepath",
+                    color: cloudState == .subscriptionRequired
+                        ? .gray
+                        : (pendingCount == 0 ? FireVaultWidgetDesign.green : FireVaultWidgetDesign.amber)
                 )
             }
             .frame(maxWidth: 126)
@@ -725,6 +727,7 @@ private struct FireVaultCloudStatusWidgetView: View {
         case .syncing: "arrow.triangle.2.circlepath.icloud.fill"
         case .upToDate: "checkmark.icloud.fill"
         case .needsAttention: "exclamationmark.icloud.fill"
+        case .subscriptionRequired: "lock.fill"
         }
     }
 
@@ -734,16 +737,19 @@ private struct FireVaultCloudStatusWidgetView: View {
         case .syncing: FireVaultWidgetDesign.navy
         case .upToDate: FireVaultWidgetDesign.green
         case .needsAttention: FireVaultWidgetDesign.amber
+        case .subscriptionRequired: .gray
         }
     }
 
     private var lastSyncText: String {
+        if cloudState == .subscriptionRequired { return "View plans in FireVault" }
         guard let date = entry.snapshot.cloudLastSyncedAt else { return "Not yet synced" }
         return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: entry.date)
     }
 
     private var cloudSummary: String {
-        pendingCount == 0 ? "\(accountCount) accounts protected" : "\(pendingCount) records pending"
+        if cloudState == .subscriptionRequired { return "\(accountCount) local accounts" }
+        return pendingCount == 0 ? "\(accountCount) accounts protected" : "\(pendingCount) records pending"
     }
 
     private var cloudDetail: String {
@@ -752,6 +758,7 @@ private struct FireVaultCloudStatusWidgetView: View {
         case .syncing: "Checking and updating your field records."
         case .upToDate: pendingCount == 0 ? "All field records are protected." : "Finishing the last pending records."
         case .needsAttention: "Open FireVault to review pending records."
+        case .subscriptionRequired: "Subscribe in FireVault to sync and protect records in the cloud."
         }
     }
 }

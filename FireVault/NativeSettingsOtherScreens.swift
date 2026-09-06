@@ -68,8 +68,10 @@ struct NativePlusCodeSettingsView: View {
 struct NativeReportSettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @EnvironmentObject private var authentication: FireVaultAuthentication
+    @EnvironmentObject private var subscriptions: FireVaultSubscriptionStore
     @State private var draft: FireVaultNativePreferences
     @State private var deliveryStatus = ""
+    @State private var showsSubscriptionPlans = false
     @FocusState private var focused: Bool
     init(settings: FireVaultNativeSettingsStore) { self.settings = settings; _draft = State(initialValue: settings.preferences) }
     var body: some View {
@@ -83,36 +85,50 @@ struct NativeReportSettingsView: View {
                 }
             }
             Section {
+                if !subscriptions.access.grantsFullAccess {
+                    Button("Subscription Required", systemImage: "lock.fill") {
+                        showsSubscriptionPlans = true
+                    }
+                    .foregroundStyle(NativeShellPalette.blue)
+                }
+
                 TextField("Email reports to", text: $draft.email.defaultTo)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
                     .focused($focused)
+                    .disabled(!subscriptions.access.grantsFullAccess)
                 TextField("CC (optional)", text: $draft.email.cc)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
                     .focused($focused)
+                    .disabled(!subscriptions.access.grantsFullAccess)
 
                 Toggle("Email daily report", isOn: $draft.reports.dailyEmailEnabled)
+                    .disabled(!subscriptions.access.grantsFullAccess)
                 if draft.reports.dailyEmailEnabled {
                     DatePicker(
                         "Daily delivery time",
                         selection: dailyDeliveryTime,
                         displayedComponents: .hourAndMinute
                     )
+                    .disabled(!subscriptions.access.grantsFullAccess)
                 }
 
                 Toggle("Email weekly report", isOn: $draft.reports.weeklyEmailEnabled)
+                    .disabled(!subscriptions.access.grantsFullAccess)
                 if draft.reports.weeklyEmailEnabled {
                     Picker("Weekly delivery day", selection: $draft.reports.weeklyEmailWeekday) {
                         ForEach(Array(Calendar.current.weekdaySymbols.enumerated()), id: \.offset) { index, day in
                             Text(day).tag(index + 1)
                         }
                     }
+                    .disabled(!subscriptions.access.grantsFullAccess)
                     DatePicker(
                         "Weekly delivery time",
                         selection: weeklyDeliveryTime,
                         displayedComponents: .hourAndMinute
                     )
+                    .disabled(!subscriptions.access.grantsFullAccess)
                 }
 
                 LabeledContent("Time zone", value: timeZoneLabel)
@@ -125,7 +141,9 @@ struct NativeReportSettingsView: View {
             } header: {
                 Text("Automatic Delivery")
             } footer: {
-                Text("Multiple email addresses may be separated with commas. Delivery uses the current device time zone.")
+                Text(subscriptions.access.grantsFullAccess
+                     ? "Multiple email addresses may be separated with commas. Delivery uses the current device time zone."
+                     : "Automatic Trip Report email is paused. Subscribe to enable delivery; local report viewing and export remain available.")
             }
             Section("Email Template") {
                 TextField("Default subject", text: $draft.email.defaultSubject).focused($focused)
@@ -145,7 +163,9 @@ struct NativeReportSettingsView: View {
             Task {
                 do {
                     try await FireVaultTripLogAutomationService.shared.syncPreferences(settings.preferences)
-                    deliveryStatus = "Automation settings saved"
+                    deliveryStatus = subscriptions.access.grantsFullAccess
+                        ? "Automation settings saved"
+                        : "Subscription Required for automatic email"
                 } catch {
                     deliveryStatus = "Saved on this device; cloud sync will retry"
                 }
@@ -156,6 +176,18 @@ struct NativeReportSettingsView: View {
         }
         .onChange(of: authentication.signedInEmail) { _, email in
             applySignedInEmailIfNeeded(email)
+        }
+        .sheet(isPresented: $showsSubscriptionPlans) {
+            NavigationStack {
+                FireVaultTechnicianStorefrontView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") { showsSubscriptionPlans = false }
+                                .fireVaultNavigationActionStyle()
+                        }
+                    }
+            }
+            .environmentObject(subscriptions)
         }
     }
 
@@ -199,6 +231,7 @@ struct NativeStorageSettingsView: View {
     @ObservedObject var store: FireVaultStore
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @ObservedObject private var mediaBackup = FireVaultFieldMediaBackupService.shared
+    @EnvironmentObject private var subscriptions: FireVaultSubscriptionStore
     @State private var storageReport = FireVaultMediaStorageReport(
         referencedFiles: 0,
         orphanedFiles: 0,
@@ -230,9 +263,17 @@ struct NativeStorageSettingsView: View {
 
             Section {
                 Toggle("Back up Field Media to FireVault Cloud", isOn: automaticBackupBinding)
-                    .disabled(store.demoMode)
+                    .disabled(store.demoMode || !subscriptions.access.grantsFullAccess)
 
-                if settings.preferences.storage.automaticFieldMediaBackup == true, !store.demoMode {
+                if !store.demoMode, !subscriptions.access.grantsFullAccess {
+                    Button("Subscription Required", systemImage: "lock.fill") {
+                        store.requestSubscriptionForPaidFeature()
+                    }
+                }
+
+                if settings.preferences.storage.automaticFieldMediaBackup == true,
+                   !store.demoMode,
+                   subscriptions.access.grantsFullAccess {
                     Toggle("Wi-Fi only", isOn: wifiOnlyBinding)
                     Toggle("Back up stamped copies too", isOn: overlayBackupBinding)
 
@@ -268,6 +309,10 @@ struct NativeStorageSettingsView: View {
                     Text("Demo media stays on this iPhone and is never uploaded.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                } else if !subscriptions.access.grantsFullAccess {
+                    Text("New media stays safely on this iPhone until a Technician plan is active.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             } header: {
                 Text("Automatic Cloud Backup")
@@ -281,7 +326,7 @@ struct NativeStorageSettingsView: View {
                 } label: {
                     Label("Backed-Up Media", systemImage: "icloud.and.arrow.down")
                 }
-                .disabled(store.demoMode)
+                .disabled(store.demoMode || !subscriptions.access.grantsFullAccess)
 
                 NavigationLink {
                     NativeBackupRestoreView(
@@ -295,7 +340,9 @@ struct NativeStorageSettingsView: View {
             } footer: {
                 Text(store.demoMode
                      ? "Cloud-backed media is unavailable in Demo Mode."
-                     : "Preview, download, or restore verified cloud copies, export a complete backup, or safely remove files that are no longer attached to an account.")
+                     : (subscriptions.access.grantsFullAccess
+                        ? "Preview, download, or restore verified cloud copies, export a complete backup, or safely remove files that are no longer attached to an account."
+                        : "Subscription Required for cloud backup and recovery. Complete local export, restore, and cleanup remain available."))
             }
         }
         .fireVaultThemedCollection()
@@ -352,7 +399,8 @@ struct NativeStorageSettingsView: View {
                 Text(title)
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.secondary)
-                Text(settings.preferences.storage.automaticFieldMediaBackup == true ? "Device + Cloud" : "This Device")
+                Text(settings.preferences.storage.automaticFieldMediaBackup == true
+                     && subscriptions.access.grantsFullAccess ? "Device + Cloud" : "This Device")
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -895,6 +943,7 @@ struct NativeBackupRestoreView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
     @ObservedObject private var unifiedSync = FireVaultUnifiedSyncService.shared
+    @EnvironmentObject private var subscriptions: FireVaultSubscriptionStore
     @State private var exportDocument = FireVaultVaultBackupDocument()
     @State private var isExporting = false
     @State private var isImporting = false
@@ -914,6 +963,12 @@ struct NativeBackupRestoreView: View {
     var body: some View {
         List {
             Section {
+                if !subscriptions.access.grantsFullAccess {
+                    Button("Subscription Required", systemImage: "lock.fill") {
+                        store.requestSubscriptionForPaidFeature()
+                    }
+                }
+
                 Button {
                     createCloudSnapshot()
                 } label: {
@@ -923,9 +978,13 @@ struct NativeBackupRestoreView: View {
                         if isCloudVaultWorking { ProgressView() }
                     }
                 }
-                .disabled(isCloudVaultWorking || store.demoMode)
+                .disabled(isCloudVaultWorking || store.demoMode || !subscriptions.access.grantsFullAccess)
 
-                if cloudSnapshots.isEmpty {
+                if !subscriptions.access.grantsFullAccess {
+                    Text("Cloud Vault backup and recovery are paused. Local Complete Vault export and restore remain available below.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else if cloudSnapshots.isEmpty {
                     Text("No cloud recovery points yet")
                         .foregroundStyle(.secondary)
                 } else {
@@ -1009,7 +1068,11 @@ struct NativeBackupRestoreView: View {
         .navigationTitle("Backup & Restore")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { storageReport = store.mediaStorageReport() }
-        .task { await refreshCloudSnapshots() }
+        .task {
+            if subscriptions.access.grantsFullAccess {
+                await refreshCloudSnapshots()
+            }
+        }
         .confirmationDialog(
             "Restore this cloud recovery point?",
             isPresented: Binding(
@@ -1096,7 +1159,7 @@ struct NativeBackupRestoreView: View {
     }
 
     private func refreshCloudSnapshots() async {
-        guard !store.demoMode else { return }
+        guard !store.demoMode, subscriptions.access.grantsFullAccess else { return }
         do {
             cloudSnapshots = try await FireVaultCloudVaultBackupService.listSnapshots()
         } catch {
@@ -1105,6 +1168,10 @@ struct NativeBackupRestoreView: View {
     }
 
     private func createCloudSnapshot() {
+        guard subscriptions.access.grantsFullAccess else {
+            store.requestSubscriptionForPaidFeature()
+            return
+        }
         guard !isCloudVaultWorking else { return }
         isCloudVaultWorking = true
         errorMessage = ""
@@ -1137,6 +1204,10 @@ struct NativeBackupRestoreView: View {
     }
 
     private func restoreCloudSnapshot(_ snapshot: FireVaultCloudVaultSnapshot) {
+        guard subscriptions.access.grantsFullAccess else {
+            store.requestSubscriptionForPaidFeature()
+            return
+        }
         guard !isCloudVaultWorking else { return }
         isCloudVaultWorking = true
         errorMessage = ""

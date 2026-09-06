@@ -570,6 +570,7 @@ struct FireVaultBreadcrumbReportView: View {
     let availableDays: [FireVaultBreadcrumbDay]
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var subscriptions: FireVaultSubscriptionStore
     @State private var scope: FireVaultTripLogReportScope = .daily
     @State private var detail: FireVaultTripLogReportDetail = .detailed
     @State private var exportDocument: FireVaultBreadcrumbExportDocument?
@@ -579,6 +580,7 @@ struct FireVaultBreadcrumbReportView: View {
     @State private var isGeneratingImages = false
     @State private var imageSharePayload: FireVaultImageSharePayload?
     @State private var pdfSharePayload: FireVaultPDFSharePayload?
+    @State private var showsSubscriptionPlans = false
 
     init(
         report: FireVaultBreadcrumbReport,
@@ -658,6 +660,18 @@ struct FireVaultBreadcrumbReportView: View {
                         payload.url
                     ]
                 )
+            }
+            .sheet(isPresented: $showsSubscriptionPlans) {
+                NavigationStack {
+                    FireVaultTechnicianStorefrontView()
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Close") { showsSubscriptionPlans = false }
+                                    .fireVaultNavigationActionStyle()
+                            }
+                        }
+                }
+                .environmentObject(subscriptions)
             }
         }
         .tint(NativeShellPalette.blue)
@@ -1275,6 +1289,13 @@ struct FireVaultBreadcrumbReportView: View {
                     .tracking(1)
                     .foregroundStyle(.secondary)
 
+                if !subscriptions.access.grantsFullAccess {
+                    Button("Subscription Required for Sharing", systemImage: "lock.fill") {
+                        showsSubscriptionPlans = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
                 Button {
                     Task { await sharePDF() }
                 } label: {
@@ -1291,7 +1312,7 @@ struct FireVaultBreadcrumbReportView: View {
                     .frame(height: 48)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isGeneratingPDF)
+                .disabled(isGeneratingPDF || !subscriptions.access.grantsFullAccess)
 
                 Button {
                     Task { await savePDF() }
@@ -1320,7 +1341,7 @@ struct FireVaultBreadcrumbReportView: View {
                     .frame(height: 44)
                 }
                 .buttonStyle(.bordered)
-                .disabled(isGeneratingImages)
+                .disabled(isGeneratingImages || !subscriptions.access.grantsFullAccess)
 
                 ShareLink(
                     item: scope == .daily ? report.plainText : weeklyReport.plainText,
@@ -1334,8 +1355,11 @@ struct FireVaultBreadcrumbReportView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .disabled(!subscriptions.access.grantsFullAccess)
 
-                Text("Share PDF sends the complete report to Mail, AirDrop, or a cloud app. Save PDF to Files supports iCloud Drive and on-device storage. Personal stop details and map pins remain redacted.")
+                Text(subscriptions.access.grantsFullAccess
+                     ? "Share PDF sends the complete report to Mail, AirDrop, or a cloud app. Save PDF to Files supports iCloud Drive and on-device storage. Personal stop details and map pins remain redacted."
+                     : "Subscription Required for Trip Report email and sharing. You can still save a local PDF to Files.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -103,6 +103,8 @@ final class FireVaultAIService: FireVaultAIProviding {
     }
 
     func generateAccountBrief(for account: FireVaultWorkspaceAccount) async throws -> String {
+        try FireVaultPaidFeatureAccess.requireCached(.aiGeneration)
+
         do {
             _ = try await client.auth.session
         } catch {

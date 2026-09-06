@@ -247,6 +247,7 @@ final class FireVaultSupabaseFieldMediaRecoveryClient: FireVaultFieldMediaRecove
     }
 
     func listFiles() async throws -> [FireVaultBackedUpMediaFile] {
+        try FireVaultPaidFeatureAccess.requireCached(.cloudStorage)
         let session: Session
         do {
             session = try await supabase.auth.session
@@ -278,6 +279,7 @@ final class FireVaultSupabaseFieldMediaRecoveryClient: FireVaultFieldMediaRecove
     }
 
     func download(_ file: FireVaultBackedUpMediaFile) async throws -> Data {
+        try FireVaultPaidFeatureAccess.requireCached(.cloudStorage)
         let session: Session
         do {
             session = try await supabase.auth.session
@@ -426,6 +428,7 @@ extension FireVaultStore {
 struct FireVaultBackedUpMediaRecoveryView: View {
     @ObservedObject var store: FireVaultStore
     @StateObject private var recovery: FireVaultFieldMediaRecoveryViewModel
+    @EnvironmentObject private var subscriptions: FireVaultSubscriptionStore
 
     init(
         store: FireVaultStore,
@@ -445,7 +448,16 @@ struct FireVaultBackedUpMediaRecoveryView: View {
 
     var body: some View {
         List {
-            if recovery.isLoading, recovery.files.isEmpty {
+            if !subscriptions.access.grantsFullAccess {
+                ContentUnavailableView {
+                    Label("Subscription Required", systemImage: "lock.fill")
+                } description: {
+                    Text("Subscribe to preview, download, or restore cloud-backed media. Local files remain on this iPhone.")
+                } actions: {
+                    Button("View Plans") { store.requestSubscriptionForPaidFeature() }
+                        .buttonStyle(.borderedProminent)
+                }
+            } else if recovery.isLoading, recovery.files.isEmpty {
                 Section {
                     HStack {
                         Spacer()
@@ -509,8 +521,14 @@ struct FireVaultBackedUpMediaRecoveryView: View {
         .contentMargins(.bottom, 96, for: .scrollContent)
         .navigationTitle("Backed-Up Media")
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await recovery.load() }
-        .task { if recovery.files.isEmpty { await recovery.load() } }
+        .refreshable {
+            if subscriptions.access.grantsFullAccess { await recovery.load() }
+        }
+        .task {
+            if subscriptions.access.grantsFullAccess, recovery.files.isEmpty {
+                await recovery.load()
+            }
+        }
     }
 }
 
