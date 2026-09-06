@@ -42,17 +42,17 @@ jobs:
 
       - name: Install rclone
         env:
-          RCLONE_VERSION: 1.75.1
-          RCLONE_SHA256: 982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab
+          RCLONE_INSTALL_VERSION: 1.75.1
+          RCLONE_INSTALL_SHA256: 982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab
         run: |
-          archive="rclone-v${RCLONE_VERSION}-linux-amd64.zip"
+          archive="rclone-v${RCLONE_INSTALL_VERSION}-linux-amd64.zip"
           curl --fail --silent --show-error --location \
-            "https://downloads.rclone.org/v${RCLONE_VERSION}/${archive}" \
+            "https://downloads.rclone.org/v${RCLONE_INSTALL_VERSION}/${archive}" \
             --output "${RUNNER_TEMP}/${archive}"
-          echo "${RCLONE_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check
+          echo "${RCLONE_INSTALL_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check
           unzip -q "${RUNNER_TEMP}/${archive}" -d "${RUNNER_TEMP}"
           sudo install -m 0755 \
-            "${RUNNER_TEMP}/rclone-v${RCLONE_VERSION}-linux-amd64/rclone" \
+            "${RUNNER_TEMP}/rclone-v${RCLONE_INSTALL_VERSION}-linux-amd64/rclone" \
             /usr/local/bin/rclone
           rclone version
 
