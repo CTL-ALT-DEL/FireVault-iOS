@@ -1169,6 +1169,61 @@ final class FireVaultTests: XCTestCase {
         XCTAssertNotNil(store.cloudSyncErrorMessage)
     }
 
+    func testCustomerDeletionAcceptsOnlyFilesInsideOwnedAccountFolder() throws {
+        let userID = UUID()
+        let accountID = UUID()
+        let prefix = "\(userID.uuidString.lowercased())/accounts/\(accountID.uuidString.lowercased())"
+        let files = [
+            FireVaultCloudAccountFileReference(
+                bucketID: FireVaultSupabaseFieldMediaUploader.bucketID,
+                storagePath: "\(prefix)/photos/b-photo.jpg"
+            ),
+            FireVaultCloudAccountFileReference(
+                bucketID: FireVaultSupabaseFieldMediaUploader.bucketID,
+                storagePath: "\(prefix)/documents/a-report.pdf"
+            ),
+            FireVaultCloudAccountFileReference(
+                bucketID: FireVaultSupabaseFieldMediaUploader.bucketID,
+                storagePath: "\(prefix)/photos/b-photo.jpg"
+            )
+        ]
+
+        XCTAssertEqual(
+            try FireVaultAccountSyncService.validatedCloudFilePaths(
+                files,
+                userID: userID,
+                accountID: accountID
+            ),
+            [
+                "\(prefix)/documents/a-report.pdf",
+                "\(prefix)/photos/b-photo.jpg"
+            ]
+        )
+    }
+
+    func testCustomerDeletionRejectsCloudFileOutsideOwnedAccountFolder() throws {
+        let userID = UUID()
+        let accountID = UUID()
+        let otherAccountID = UUID()
+        let reference = FireVaultCloudAccountFileReference(
+            bucketID: FireVaultSupabaseFieldMediaUploader.bucketID,
+            storagePath: "\(userID.uuidString.lowercased())/accounts/\(otherAccountID.uuidString.lowercased())/photos/file.jpg"
+        )
+
+        XCTAssertThrowsError(
+            try FireVaultAccountSyncService.validatedCloudFilePaths(
+                [reference],
+                userID: userID,
+                accountID: accountID
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? FireVaultRemoteAccountDeletionError,
+                .invalidCloudFileReference
+            )
+        }
+    }
+
     func testCloudVaultOwnershipRejectsDifferentLogin() throws {
         let suite = "FireVaultTests.CloudOwnerMismatch.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

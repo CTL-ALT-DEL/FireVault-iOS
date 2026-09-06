@@ -20,6 +20,7 @@ enum FireVaultRemoteAccountDeletionResult: Equatable {
 enum FireVaultRemoteAccountDeletionError: LocalizedError, Equatable {
     case linkedToDifferentLogin
     case cloudRecordUnavailable
+    case invalidCloudFileReference
     case deletionNotConfirmed
 
     var errorDescription: String? {
@@ -28,6 +29,8 @@ enum FireVaultRemoteAccountDeletionError: LocalizedError, Equatable {
             "This iPhone's vault belongs to a different FireVault login. Nothing was deleted."
         case .cloudRecordUnavailable:
             "FireVault could not confirm that this cloud record belongs to the signed-in user. Nothing was deleted."
+        case .invalidCloudFileReference:
+            "FireVault could not safely verify every cloud file for this account. Nothing was deleted from this iPhone."
         case .deletionNotConfirmed:
             "FireVault Cloud did not confirm the deletion. The account remains saved on this iPhone."
         }
@@ -116,6 +119,7 @@ struct FireVaultCloudAccountRow: Decodable {
 enum FireVaultAccountSyncService {
     private static let bucket = "csv-imports"
     private static let accountSelect = "id,account_name,account_number,address_line_1,address_line_2,city,state,postal_code,country,latitude,longitude,phone,archived"
+    private static let cloudFileDeleteBatchSize = 100
 
     static func fetchAccounts() async throws -> [FireVaultCloudAccountRow] {
         try await SupabaseManager.client
@@ -172,6 +176,55 @@ enum FireVaultAccountSyncService {
 
         guard let remote else { return .noCloudRecord }
 
+        let cloudFiles: [FireVaultCloudAccountFileReference] = try await SupabaseManager.client
+            .from("account_files")
+            .select("bucket_id,storage_path")
+            .eq("user_id", value: session.user.id)
+            .eq("account_id", value: remote.id)
+            .execute()
+            .value
+        let storagePaths = try validatedCloudFilePaths(
+            cloudFiles,
+            userID: session.user.id,
+            accountID: remote.id
+        )
+
+        // Storage policies require the parent account to still exist, while the
+        // account_files foreign key deliberately blocks deleting a parent that
+        // still has metadata. Remove objects first, then metadata, then the
+        // account. Any failure preserves the on-device account for a safe retry.
+        for start in stride(from: 0, to: storagePaths.count, by: cloudFileDeleteBatchSize) {
+            let end = min(start + cloudFileDeleteBatchSize, storagePaths.count)
+            let batch = Array(storagePaths[start..<end])
+            try await withRetry {
+                try await SupabaseManager.client.storage
+                    .from(FireVaultSupabaseFieldMediaUploader.bucketID)
+                    .remove(paths: batch)
+            }
+        }
+
+        if !cloudFiles.isEmpty {
+            try await withRetry {
+                try await SupabaseManager.client
+                    .from("account_files")
+                    .delete()
+                    .eq("user_id", value: session.user.id)
+                    .eq("account_id", value: remote.id)
+                    .execute()
+            }
+
+            let remainingFiles: [FireVaultCloudAccountFileIdentity] = try await SupabaseManager.client
+                .from("account_files")
+                .select("id")
+                .eq("user_id", value: session.user.id)
+                .eq("account_id", value: remote.id)
+                .execute()
+                .value
+            guard remainingFiles.isEmpty else {
+                throw FireVaultRemoteAccountDeletionError.deletionNotConfirmed
+            }
+        }
+
         try await withRetry {
             try await SupabaseManager.client
                 .from("accounts")
@@ -192,6 +245,24 @@ enum FireVaultAccountSyncService {
             throw FireVaultRemoteAccountDeletionError.deletionNotConfirmed
         }
         return .deleted(remote.id)
+    }
+
+    static func validatedCloudFilePaths(
+        _ files: [FireVaultCloudAccountFileReference],
+        userID: UUID,
+        accountID: UUID
+    ) throws -> [String] {
+        let expectedPrefix = "\(userID.uuidString.lowercased())/accounts/\(accountID.uuidString.lowercased())/"
+        var paths = Set<String>()
+        for file in files {
+            guard file.bucketID == FireVaultSupabaseFieldMediaUploader.bucketID,
+                  file.storagePath.lowercased().hasPrefix(expectedPrefix),
+                  file.storagePath.count > expectedPrefix.count else {
+                throw FireVaultRemoteAccountDeletionError.invalidCloudFileReference
+            }
+            paths.insert(file.storagePath)
+        }
+        return paths.sorted()
     }
 
     static func backfillLegacyAccounts(
@@ -442,6 +513,20 @@ enum FireVaultAccountSyncService {
 }
 
 private struct CloudAccountIdentity: Decodable {
+    let id: UUID
+}
+
+struct FireVaultCloudAccountFileReference: Decodable, Equatable {
+    let bucketID: String
+    let storagePath: String
+
+    enum CodingKeys: String, CodingKey {
+        case bucketID = "bucket_id"
+        case storagePath = "storage_path"
+    }
+}
+
+private struct FireVaultCloudAccountFileIdentity: Decodable {
     let id: UUID
 }
 
