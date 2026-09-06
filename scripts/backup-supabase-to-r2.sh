@@ -46,6 +46,12 @@ validate_identifier() {
   [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fail "${label} contains unsupported characters."
 }
 
+reject_whitespace() {
+  local label="$1"
+  local value="$2"
+  [[ ! "$value" =~ [[:space:]] ]] || fail "${label} cannot contain spaces or line breaks."
+}
+
 sha256_hex() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
@@ -63,6 +69,16 @@ require_command awk
 
 validate_identifier "SUPABASE_PROJECT_REF" "$SUPABASE_PROJECT_REF"
 validate_identifier "R2_BUCKET" "$R2_BUCKET"
+reject_whitespace "SUPABASE_DB_URL" "$SUPABASE_DB_URL"
+reject_whitespace "SUPABASE_STORAGE_ENDPOINT" "$SUPABASE_STORAGE_ENDPOINT"
+reject_whitespace "SUPABASE_STORAGE_ACCESS_KEY_ID" "$SUPABASE_STORAGE_ACCESS_KEY_ID"
+reject_whitespace "SUPABASE_STORAGE_SECRET_ACCESS_KEY" "$SUPABASE_STORAGE_SECRET_ACCESS_KEY"
+reject_whitespace "R2_ENDPOINT" "$R2_ENDPOINT"
+reject_whitespace "R2_ACCESS_KEY_ID" "$R2_ACCESS_KEY_ID"
+reject_whitespace "R2_SECRET_ACCESS_KEY" "$R2_SECRET_ACCESS_KEY"
+reject_whitespace "BACKUP_ENCRYPTION_PASSWORD" "$BACKUP_ENCRYPTION_PASSWORD"
+reject_whitespace "BACKUP_ENCRYPTION_SALT" "$BACKUP_ENCRYPTION_SALT"
+[[ "$R2_ENDPOINT" =~ ^https://[^/]+/?$ ]] || fail "R2_ENDPOINT must be the account-level HTTPS endpoint without a bucket path."
 
 readonly BACKUP_PREFIX="${BACKUP_PREFIX:-firevault}"
 [[ "$BACKUP_PREFIX" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || fail "BACKUP_PREFIX contains unsupported characters."
@@ -105,7 +121,7 @@ export RCLONE_CONFIG_R2_PROVIDER=Cloudflare
 export RCLONE_CONFIG_R2_ENV_AUTH=false
 export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
 export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
-export RCLONE_CONFIG_R2_ENDPOINT="$R2_ENDPOINT"
+export RCLONE_CONFIG_R2_ENDPOINT="${R2_ENDPOINT%/}"
 export RCLONE_CONFIG_R2_REGION=auto
 export RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
 

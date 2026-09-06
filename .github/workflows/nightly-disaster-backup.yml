@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Supabase CLI
         uses: supabase/setup-cli@v1
@@ -41,9 +41,20 @@ jobs:
           version: latest
 
       - name: Install rclone
+        env:
+          RCLONE_VERSION: 1.75.1
+          RCLONE_SHA256: 982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes rclone
+          archive="rclone-v${RCLONE_VERSION}-linux-amd64.zip"
+          curl --fail --silent --show-error --location \
+            "https://downloads.rclone.org/v${RCLONE_VERSION}/${archive}" \
+            --output "${RUNNER_TEMP}/${archive}"
+          echo "${RCLONE_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check
+          unzip -q "${RUNNER_TEMP}/${archive}" -d "${RUNNER_TEMP}"
+          sudo install -m 0755 \
+            "${RUNNER_TEMP}/rclone-v${RCLONE_VERSION}-linux-amd64/rclone" \
+            /usr/local/bin/rclone
+          rclone version
 
       - name: Back up Supabase to encrypted R2 snapshot
         run: scripts/backup-supabase-to-r2.sh
