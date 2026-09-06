@@ -405,7 +405,10 @@ enum FireVaultAccountSyncService {
         var mappings: [String: UUID] = [:]
         var uploaded = 0
         var matched = 0
-        let candidates = accounts.filter { $0.cloudID == nil || $0.cloudSyncedAt == nil }
+        // Include every record the status UI considers pending. In particular,
+        // accounts linked by the legacy sync can have a cloud ID and timestamp
+        // but no revision, and must be rematched before reconciliation.
+        let candidates = accounts.filter(\.needsCloudAccountSync)
 
         for (offset, account) in candidates.enumerated() {
             try Task.checkCancellation()

@@ -208,7 +208,14 @@ final class FireVaultUnifiedSyncService: ObservableObject {
             isDemoMode: false
         )
 
-        if failures.isEmpty, store.pendingCloudAccountCount == 0,
+        let remainingAccountCount = store.pendingCloudAccountCount
+        if failures.isEmpty, remainingAccountCount > 0 {
+            failures.append(
+                "\(remainingAccountCount) account change\(remainingAccountCount == 1 ? "" : "s") could not be finalized. Your iPhone copies remain safe; tap Sync All to retry."
+            )
+        }
+
+        if failures.isEmpty, remainingAccountCount == 0,
            !fieldDataNeedsSync, store.accountSyncConflicts.isEmpty,
            mediaBackup.waitingCount == 0, mediaBackup.failedCount == 0 {
             let completedAt = Date()
