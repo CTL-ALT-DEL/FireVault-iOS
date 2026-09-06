@@ -18,7 +18,11 @@ An incomplete run can leave a partial prefix, but it cannot create `_SUCCESS`.
 
 1. In Cloudflare, create a private R2 bucket dedicated to FireVault backups.
 2. Create an R2 API token limited to Object Read & Write for only that bucket.
-3. Record the S3 endpoint, access-key ID, and secret access key.
+3. Create a second R2 API token limited to Object Read only for only that bucket.
+   This credential is used by recovery verification and cannot modify or delete
+   backup objects.
+4. Record the S3 endpoint and both access-key pairs. Cloudflare shows each
+   secret access key only once.
 
 Do not add a deletion lifecycle rule yet. Retention is a product decision because
 it controls the last recoverable date after corruption or accidental deletion.
@@ -53,6 +57,8 @@ Add these repository secrets:
 - `SUPABASE_STORAGE_SECRET_ACCESS_KEY`
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
+- `R2_RECOVERY_ACCESS_KEY_ID`: the bucket-scoped Object Read only key.
+- `R2_RECOVERY_SECRET_ACCESS_KEY`: the matching Object Read only secret.
 - `BACKUP_ENCRYPTION_PASSWORD`: a randomly generated, long password.
 - `BACKUP_ENCRYPTION_SALT`: a second independently generated random value.
 
@@ -83,7 +89,8 @@ Mountain Daylight Time. GitHub may delay scheduled jobs during high load.
 
 The weekly **Verify latest disaster backup** workflow decrypts the newest
 snapshot on an ephemeral runner and validates its manifest, SHA-256 checksums,
-gzip streams, and Storage totals. It never uploads decrypted artifacts.
+gzip streams, and Storage totals. It never uploads decrypted artifacts and uses
+the dedicated Object Read only R2 credential.
 
 The guarded download and separate-project restore procedure is documented in
 `docs/DISASTER_RECOVERY_RUNBOOK.md`. Perform a full restore drill after major

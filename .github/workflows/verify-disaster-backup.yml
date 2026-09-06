@@ -26,8 +26,8 @@ jobs:
     env:
       R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
       R2_BUCKET: ${{ vars.R2_BUCKET }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_RECOVERY_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_RECOVERY_SECRET_ACCESS_KEY }}
       BACKUP_ENCRYPTION_PASSWORD: ${{ secrets.BACKUP_ENCRYPTION_PASSWORD }}
       BACKUP_ENCRYPTION_SALT: ${{ secrets.BACKUP_ENCRYPTION_SALT }}
       RECOVERY_SNAPSHOT: ${{ inputs.snapshot || 'latest' }}
