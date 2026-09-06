@@ -1,0 +1,59 @@
+name: Verify latest disaster backup
+
+on:
+  schedule:
+    # A weekly decrypt-and-verify drill every Sunday at 3:11 AM MDT / 2:11 AM MST.
+    - cron: "11 9 * * 0"
+  workflow_dispatch:
+    inputs:
+      snapshot:
+        description: Snapshot ID, or latest
+        required: true
+        default: latest
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firevault-disaster-backup-verification
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      BACKUP_ENCRYPTION_PASSWORD: ${{ secrets.BACKUP_ENCRYPTION_PASSWORD }}
+      BACKUP_ENCRYPTION_SALT: ${{ secrets.BACKUP_ENCRYPTION_SALT }}
+      RECOVERY_SNAPSHOT: ${{ inputs.snapshot || 'latest' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install rclone
+        env:
+          RCLONE_INSTALL_VERSION: 1.75.1
+          RCLONE_INSTALL_SHA256: 982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab
+        run: |
+          archive="rclone-v${RCLONE_INSTALL_VERSION}-linux-amd64.zip"
+          curl --fail --silent --show-error --location \
+            "https://downloads.rclone.org/v${RCLONE_INSTALL_VERSION}/${archive}" \
+            --output "${RUNNER_TEMP}/${archive}"
+          echo "${RCLONE_INSTALL_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check
+          unzip -q "${RUNNER_TEMP}/${archive}" -d "${RUNNER_TEMP}"
+          sudo install -m 0755 \
+            "${RUNNER_TEMP}/rclone-v${RCLONE_INSTALL_VERSION}-linux-amd64/rclone" \
+            /usr/local/bin/rclone
+          rclone version
+
+      - name: Decrypt and verify recovery package
+        run: |
+          scripts/recover-supabase-from-r2.sh download \
+            --snapshot "$RECOVERY_SNAPSHOT" \
+            --output "$RUNNER_TEMP/firevault-recovery-verified"

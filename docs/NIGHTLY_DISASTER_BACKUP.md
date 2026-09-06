@@ -81,27 +81,13 @@ Mountain Daylight Time. GitHub may delay scheduled jobs during high load.
 
 ## Restore drill
 
-Perform a restore drill into a separate Supabase project before relying on this
-backup in production, and repeat the drill after major schema or Auth changes.
+The weekly **Verify latest disaster backup** workflow decrypts the newest
+snapshot on an ephemeral runner and validates its manifest, SHA-256 checksums,
+gzip streams, and Storage totals. It never uploads decrypted artifacts.
 
-1. Install current `rclone`, the Supabase CLI, Postgres `psql`, and Docker.
-2. Recreate the `r2` and `r2crypt` remotes with the same endpoint, bucket,
-   credentials, encryption password, and encryption salt used by the workflow.
-3. List `r2crypt:firevault` and select a snapshot containing `_SUCCESS`.
-4. Copy its `database` directory locally, then verify `SHA256SUMS` before
-   decompressing the three SQL files.
-5. Follow Supabase's current **Backup and Restore using the CLI** guide to restore
-   `roles.sql`, `schema.sql`, and `data.sql` into a newly created project.
-6. Create any missing target Storage buckets, configure a `target-supabase` S3
-   remote, and copy each snapshot Storage directory to its corresponding bucket.
-7. Verify object counts and bytes, sign in with a test account, open an account,
-   and download at least one Backed-Up Media original.
-8. Redeploy the version-controlled Edge Functions in `supabase/functions` and
-   recreate their secrets and scheduled jobs.
-
-Supabase's restore guidance changes as Auth and Storage evolve. Always use the
-current official guide during a real recovery rather than treating these notes
-as a replacement for it.
+The guarded download and separate-project restore procedure is documented in
+`docs/DISASTER_RECOVERY_RUNBOOK.md`. Perform a full restore drill after major
+schema or Auth changes and before relying on the backup for production recovery.
 
 ## Retention decision
 
