@@ -18,6 +18,7 @@ struct ContentView: View {
     @StateObject private var quickActions = FireVaultQuickActionCenter.shared
     @StateObject private var widgetDeepLinks = FireVaultWidgetDeepLinkCenter.shared
     @StateObject private var privacyLock = FireVaultPrivacyLockController()
+    @StateObject private var fieldMediaBackup = FireVaultFieldMediaBackupService.shared
     @State private var demoBreadcrumbs: FireVaultBreadcrumbStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -101,6 +102,18 @@ struct ContentView: View {
         .onChange(of: settings.preferences.categoryRules) { _, rules in
             store.configureCategoryRules(rules ?? [])
         }
+        .onChange(of: settings.preferences.storage) { _, storage in
+            Task {
+                await fieldMediaBackup.configure(
+                    storagePreferences: storage,
+                    accounts: store.accounts,
+                    isDemoMode: store.demoMode
+                )
+                if storage.automaticFieldMediaBackup == true {
+                    store.enqueueExistingFieldMediaBackups()
+                }
+            }
+        }
         .onChange(of: settings.remoteFeatureVisibility) { _, _ in
             reconcileSelectedTabWithFeatureControls()
         }
@@ -129,6 +142,16 @@ struct ContentView: View {
             synchronizeSubscriptionAccess()
             prepareActiveVault()
             if !isDemoMode { startLegacyBackfillIfNeeded() }
+            Task {
+                await fieldMediaBackup.configure(
+                    storagePreferences: settings.preferences.storage,
+                    accounts: store.accounts,
+                    isDemoMode: isDemoMode
+                )
+                if !isDemoMode, settings.preferences.storage.automaticFieldMediaBackup == true {
+                    store.enqueueExistingFieldMediaBackups()
+                }
+            }
             scheduleWidgetSnapshotUpdate()
         }
         .onChange(of: store.selectedAccountID) { _, _ in
@@ -142,6 +165,16 @@ struct ContentView: View {
         }
         .onChange(of: store.cloudLastSyncedAt) { _, _ in
             scheduleWidgetSnapshotUpdate()
+            Task {
+                await fieldMediaBackup.configure(
+                    storagePreferences: settings.preferences.storage,
+                    accounts: store.accounts,
+                    isDemoMode: store.demoMode
+                )
+                if settings.preferences.storage.automaticFieldMediaBackup == true {
+                    store.enqueueExistingFieldMediaBackups()
+                }
+            }
         }
         .onChange(of: store.cloudSyncErrorMessage) { _, _ in
             scheduleWidgetSnapshotUpdate()
@@ -248,6 +281,14 @@ struct ContentView: View {
         await subscriptions.start()
         synchronizeSubscriptionAccess()
         prepareActiveVault()
+        await fieldMediaBackup.configure(
+            storagePreferences: settings.preferences.storage,
+            accounts: store.accounts,
+            isDemoMode: store.demoMode
+        )
+        if settings.preferences.storage.automaticFieldMediaBackup == true {
+            store.enqueueExistingFieldMediaBackups()
+        }
         startLegacyBackfillIfNeeded()
         await refreshAndReconcileFeatureControls()
         store.configureCategoryRules(settings.preferences.categoryRules ?? [])
@@ -271,7 +312,14 @@ struct ContentView: View {
         case .active:
             prepareActiveVault()
             resumeNearbyLocationIfNeeded()
-            Task { await refreshAndReconcileFeatureControls() }
+            Task {
+                await refreshAndReconcileFeatureControls()
+                await fieldMediaBackup.configure(
+                    storagePreferences: settings.preferences.storage,
+                    accounts: store.accounts,
+                    isDemoMode: store.demoMode
+                )
+            }
             if subscriptions.products.isEmpty {
                 Task { await subscriptions.refresh() }
             }

@@ -137,7 +137,7 @@ enum FireVaultHelpCatalog {
             successTitle: "What is actually synced",
             successDetail: "Sync Now exchanges customer account records with your private FireVault Cloud vault and resolves older records that predate cloud sync.",
             notes: [
-                "Photos and scans follow the destinations configured under Settings → File Storage; they are not uploaded by the account-record Sync Now button.",
+                "Field Media backup is managed separately under Settings → File Storage; the account-record Sync Now button does not upload photos or scans.",
                 "A Last checked time without a newer Last successful sync usually means the most recent attempt did not finish."
             ],
             resources: []
@@ -210,14 +210,14 @@ enum FireVaultHelpCatalog {
             steps: [
                 .init("capture-account", "Choose the customer first", "Open an account for notes, equipment, files, scans, and locations. Use the Photo tab for a new photo, video, scan, or photo-library capture."),
                 .init("capture-overlay", "Check the overlay", "Before field photos or videos, review Settings → Photo Overlay so the visible account information and logo are useful and not intrusive."),
-                .init("capture-save", "Save to the right place", "Select the customer when prompted and confirm the save result. Photos, overlaid videos, and scans appear under that account’s Files & Scans workspace."),
+                .init("capture-save", "Save to the right place", "Select the customer when prompted and confirm the save result. Photos appear in Photos & Videos; scans appear in Files & Scans."),
                 .init("capture-pin", "Place precise arrival pins", "Open the account’s Arrival Map or Locations workspace. Add a location, name its purpose, and drag the pin to the actual entrance, parking area, panel, or riser.")
             ],
-            successTitle: "Storage is explicit",
-            successDetail: "Review Settings → File Storage before relying on an external destination. Connected storage remains inactive until it is configured.",
+            successTitle: "Local first, cloud second",
+            successDetail: "Turn on Back up Field Media to FireVault Cloud under Settings → File Storage. FireVault saves the local original before adding it to the private retry queue.",
             notes: [
-                "A descriptive location label such as Main Entrance or South Parking is more useful in CarPlay than a generic pin name.",
-                "Protected backups can include referenced photos and scans along with accounts, settings, and Trip Log history."
+                "Use Wi-Fi only when cellular uploads are undesirable. Failed uploads remain queued and can be retried from File Storage.",
+                "Stamped photo copies are optional; the unstamped source remains the primary backup. Videos remain local in this release."
             ],
             resources: []
         ),

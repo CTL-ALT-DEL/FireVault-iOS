@@ -2603,7 +2603,11 @@ struct NativePhotoView: View {
         )
 
         do {
-            let document = try store.attachCapturedPhoto(renderedImage, to: account.id)
+            let document = try store.attachCapturedPhoto(
+                renderedImage,
+                originalImage: image,
+                to: account.id
+            )
             selectedImage = renderedImage
             selectedImageDocumentID = document.id
             selectedVideoURL = nil

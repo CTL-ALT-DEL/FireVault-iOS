@@ -21,7 +21,7 @@ enum NativeSettingsCatalog {
             item("reports", "Report Settings", "Content, delivery, and email defaults", "doc.text")
         ]),
         group("data", "Storage & Data", "Storage, account import, categories, and backup", "externaldrive", "amber", [
-            item("cloudFiles", "File Storage", "Local photos, scans, and files", "folder"),
+            item("cloudFiles", "File Storage", "Local media and automatic cloud backup", "folder"),
             item("customerImport", "Import Accounts", "Review and import account data from CSV", "square.and.arrow.down"),
             item("categories", "Account Categories", "Manage account classifications", "tag"),
             item("backup", "Backup & Restore", "Export or safely merge a vault backup", "externaldrive.badge.timemachine")

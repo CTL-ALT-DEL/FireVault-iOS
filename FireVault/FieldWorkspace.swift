@@ -61,6 +61,9 @@ struct FireVaultWorkspaceDocument: Codable, Identifiable, Equatable {
     var kind: String
     var date: String
     var mediaFileName: String? = nil
+    /// Unstamped source copy for photos whose displayed file has a baked
+    /// FireVault overlay. Optional so existing vault archives remain decodable.
+    var originalMediaFileName: String? = nil
     var updatedAt: Date? = nil
 }
 
@@ -2776,6 +2779,7 @@ struct FireVaultNoteEditorSheet: View {
 private struct FilesScansView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
+    @ObservedObject private var mediaBackup = FireVaultFieldMediaBackupService.shared
     @State private var searchText = ""
     @State private var expandedDocumentIDs: Set<String> = []
     @State private var showsDocumentScanner = false
@@ -2837,6 +2841,9 @@ private struct FilesScansView: View {
                                     .font(.caption.weight(.semibold).monospacedDigit())
                                     .foregroundStyle(FieldWorkspacePalette.secondaryText)
                                     .fixedSize(horizontal: true, vertical: false)
+                                if let backupItem = backupItem(for: document) {
+                                    FireVaultMediaBackupBadge(item: backupItem)
+                                }
                                 Image(systemName: expandedDocumentIDs.contains(document.id) ? "chevron.up" : "chevron.down")
                                     .font(.caption2.bold())
                                     .foregroundStyle(FieldWorkspacePalette.secondaryText)
@@ -2959,6 +2966,19 @@ private struct FilesScansView: View {
         }
     }
 
+    private func backupItem(for document: FireVaultWorkspaceDocument) -> FireVaultFieldMediaBackupItem? {
+        let paths = Set([
+            store.mediaURL(accountID: account.id, documentID: document.id),
+            store.originalMediaURL(accountID: account.id, documentID: document.id)
+        ].compactMap { $0?.standardizedFileURL.path })
+        return FireVaultMediaBackupBadge.preferredItem(
+            from: mediaBackup.items.filter {
+                $0.localAccountID == account.id
+                    && paths.contains($0.localFileURL.standardizedFileURL.path)
+            }
+        )
+    }
+
     @ViewBuilder
     private func documentDestination(_ document: FireVaultWorkspaceDocument) -> some View {
         if let url = store.mediaURL(accountID: account.id, documentID: document.id),
@@ -2986,6 +3006,7 @@ private struct PhotoVideoLibraryView: View {
     let account: FireVaultWorkspaceAccount
     @ObservedObject var store: FireVaultStore
     @ObservedObject var settings: FireVaultNativeSettingsStore
+    @ObservedObject private var mediaBackup = FireVaultFieldMediaBackupService.shared
     @State private var searchText = ""
     @State private var isSelectingPhotos = false
     @State private var selectedPhotoIDs: Set<String> = []
@@ -3131,6 +3152,9 @@ private struct PhotoVideoLibraryView: View {
                     .font(.subheadline)
                     .foregroundStyle(FieldWorkspacePalette.secondaryText)
                     .lineLimit(2)
+                if let backupItem = backupItem(for: document) {
+                    FireVaultMediaBackupBadge(item: backupItem)
+                }
             }
 
             Spacer(minLength: 8)
@@ -3141,6 +3165,19 @@ private struct PhotoVideoLibraryView: View {
                 .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.vertical, 6)
+    }
+
+    private func backupItem(for document: FireVaultWorkspaceDocument) -> FireVaultFieldMediaBackupItem? {
+        let paths = Set([
+            store.mediaURL(accountID: account.id, documentID: document.id),
+            store.originalMediaURL(accountID: account.id, documentID: document.id)
+        ].compactMap { $0?.standardizedFileURL.path })
+        return FireVaultMediaBackupBadge.preferredItem(
+            from: mediaBackup.items.filter {
+                $0.localAccountID == account.id
+                    && paths.contains($0.localFileURL.standardizedFileURL.path)
+            }
+        )
     }
 
     @ViewBuilder
@@ -3174,6 +3211,60 @@ private struct PhotoVideoLibraryView: View {
                 subtitle: "The saved media file could not be found.",
                 symbol: "exclamationmark.triangle"
             )
+        }
+    }
+}
+
+private struct FireVaultMediaBackupBadge: View {
+    let item: FireVaultFieldMediaBackupItem
+
+    var body: some View {
+        Label(title, systemImage: symbol)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(tint)
+            .accessibilityLabel("Cloud backup \(title)")
+    }
+
+    private var title: String {
+        switch item.state {
+        case .waiting: "Waiting"
+        case .uploading: "Uploading"
+        case .backedUp: "Backed Up"
+        case .failed: "Failed"
+        }
+    }
+
+    private var symbol: String {
+        switch item.state {
+        case .waiting: "clock"
+        case .uploading: "arrow.up.circle"
+        case .backedUp: "checkmark.icloud.fill"
+        case .failed: "exclamationmark.icloud.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch item.state {
+        case .waiting: .secondary
+        case .uploading: FieldWorkspacePalette.blue
+        case .backedUp: FieldWorkspacePalette.green
+        case .failed: FieldWorkspacePalette.red
+        }
+    }
+
+    static func preferredItem(
+        from items: [FireVaultFieldMediaBackupItem]
+    ) -> FireVaultFieldMediaBackupItem? {
+        let priority: [FireVaultFieldMediaBackupState: Int] = [
+            .failed: 0,
+            .uploading: 1,
+            .waiting: 2,
+            .backedUp: 3
+        ]
+        return items.min {
+            let lhs = priority[$0.state, default: 4]
+            let rhs = priority[$1.state, default: 4]
+            return lhs == rhs ? $0.createdAt > $1.createdAt : lhs < rhs
         }
     }
 }

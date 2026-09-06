@@ -493,6 +493,9 @@ final class FireVaultStore: ObservableObject {
         if selectedAccountID == id { selectedAccountID = nil }
         if captureAccountID == id { captureAccountID = nil }
         persistAccounts()
+        Task {
+            await FireVaultFieldMediaBackupService.shared.removePending(localAccountID: id)
+        }
     }
 
     func refreshNearby() {
@@ -904,7 +907,11 @@ final class FireVaultStore: ObservableObject {
     }
 
     @discardableResult
-    func attachCapturedPhoto(_ image: UIImage, to accountID: String) throws -> FireVaultWorkspaceDocument {
+    func attachCapturedPhoto(
+        _ image: UIImage,
+        originalImage: UIImage? = nil,
+        to accountID: String
+    ) throws -> FireVaultWorkspaceDocument {
         try requireRecordChangeAccess()
         guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
             throw FireVaultMediaError.accountUnavailable
@@ -913,8 +920,35 @@ final class FireVaultStore: ObservableObject {
             throw FireVaultMediaError.encodingFailed
         }
 
-        let fileName = "\(UUID().uuidString).jpg"
-        try data.write(to: try mediaURL(accountID: accountID, fileName: fileName), options: .atomic)
+        let identifier = UUID().uuidString
+        let fileName = "\(identifier)-overlay.jpg"
+        let displayURL = try mediaURL(accountID: accountID, fileName: fileName)
+        var originalFileName: String?
+        var originalURL: URL?
+
+        if let originalImage {
+            guard let originalData = originalImage.jpegData(compressionQuality: 0.98) else {
+                throw FireVaultMediaError.encodingFailed
+            }
+            let name = "\(identifier)-original.jpg"
+            let url = try mediaURL(accountID: accountID, fileName: name)
+            try originalData.write(
+                to: url,
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            )
+            originalFileName = name
+            originalURL = url
+        }
+
+        do {
+            try data.write(
+                to: displayURL,
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            )
+        } catch {
+            if let originalURL { try? FileManager.default.removeItem(at: originalURL) }
+            throw error
+        }
 
         let document = FireVaultWorkspaceDocument(
             id: UUID().uuidString,
@@ -923,6 +957,7 @@ final class FireVaultStore: ObservableObject {
             kind: "photo",
             date: Date().formatted(date: .abbreviated, time: .shortened),
             mediaFileName: fileName,
+            originalMediaFileName: originalFileName,
             updatedAt: Date()
         )
         accounts[index].documents.insert(document, at: 0)
@@ -938,6 +973,12 @@ final class FireVaultStore: ObservableObject {
             at: 0
         )
         persist()
+        scheduleFieldMediaBackup(
+            account: accounts[index],
+            document: document,
+            displayURL: displayURL,
+            originalURL: originalURL
+        )
         return document
     }
 
@@ -990,6 +1031,34 @@ final class FireVaultStore: ObservableObject {
         return try? mediaURL(accountID: accountID, fileName: fileName)
     }
 
+    func originalMediaURL(accountID: String, documentID: String) -> URL? {
+        guard let document = accounts
+            .first(where: { $0.id == accountID })?
+            .documents.first(where: { $0.id == documentID }),
+              let fileName = document.originalMediaFileName,
+              fileName == URL(fileURLWithPath: fileName).lastPathComponent else { return nil }
+        return try? mediaURL(accountID: accountID, fileName: fileName)
+    }
+
+    /// Queues existing saved media when automatic backup is enabled after
+    /// capture, or when an account acquires its cloud UUID after sync.
+    func enqueueExistingFieldMediaBackups() {
+        guard !demoMode else { return }
+        for account in accounts {
+            for document in account.documents where document.kind != "video" {
+                guard let displayURL = mediaURL(accountID: account.id, documentID: document.id) else {
+                    continue
+                }
+                scheduleFieldMediaBackup(
+                    account: account,
+                    document: document,
+                    displayURL: displayURL,
+                    originalURL: originalMediaURL(accountID: account.id, documentID: document.id)
+                )
+            }
+        }
+    }
+
     @discardableResult
     func attachScannedDocument(_ pages: [UIImage], to accountID: String) throws -> FireVaultWorkspaceDocument {
         try requireRecordChangeAccess()
@@ -1010,7 +1079,11 @@ final class FireVaultStore: ObservableObject {
                 page.draw(in: bounds)
             }
         }
-        try data.write(to: try mediaURL(accountID: accountID, fileName: fileName), options: .atomic)
+        let savedURL = try mediaURL(accountID: accountID, fileName: fileName)
+        try data.write(
+            to: savedURL,
+            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+        )
 
         let pageLabel = "\(pages.count) page\(pages.count == 1 ? "" : "s")"
         let document = FireVaultWorkspaceDocument(
@@ -1035,6 +1108,11 @@ final class FireVaultStore: ObservableObject {
             at: 0
         )
         persist()
+        scheduleFieldMediaBackup(
+            account: accounts[index],
+            document: document,
+            displayURL: savedURL
+        )
         return document
     }
 
@@ -1055,7 +1133,11 @@ final class FireVaultStore: ObservableObject {
         }
 
         let fileName = "\(UUID().uuidString).pdf"
-        try data.write(to: try mediaURL(accountID: accountID, fileName: fileName), options: .atomic)
+        let savedURL = try mediaURL(accountID: accountID, fileName: fileName)
+        try data.write(
+            to: savedURL,
+            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+        )
 
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let document = FireVaultWorkspaceDocument(
@@ -1080,6 +1162,11 @@ final class FireVaultStore: ObservableObject {
             at: 0
         )
         persist()
+        scheduleFieldMediaBackup(
+            account: accounts[index],
+            document: document,
+            displayURL: savedURL
+        )
         return document
     }
 
@@ -1176,6 +1263,49 @@ final class FireVaultStore: ObservableObject {
         }
     }
 
+    private func scheduleFieldMediaBackup(
+        account: FireVaultWorkspaceAccount,
+        document: FireVaultWorkspaceDocument,
+        displayURL: URL,
+        originalURL: URL? = nil
+    ) {
+        guard !demoMode, document.kind != "video" else { return }
+        let category: FireVaultFieldMediaCategory = switch document.kind {
+        case "photo": .photos
+        case "scan": .scans
+        case "report": .reports
+        case "file": .documents
+        default: .other
+        }
+        let service = FireVaultFieldMediaBackupService.shared
+
+        Task {
+            if document.kind == "photo", let originalURL {
+                await service.enqueueSavedMedia(
+                    account: account,
+                    localFileURL: originalURL,
+                    category: category,
+                    variant: "original"
+                )
+                await service.enqueueSavedMedia(
+                    account: account,
+                    localFileURL: displayURL,
+                    category: category,
+                    variant: "overlay"
+                )
+            } else {
+                // Legacy photos have only the displayed file. Treat that copy
+                // as the original so enabling backup also protects old media.
+                await service.enqueueSavedMedia(
+                    account: account,
+                    localFileURL: displayURL,
+                    category: category,
+                    variant: "original"
+                )
+            }
+        }
+    }
+
     private func mediaRootURL() throws -> URL {
         guard let applicationSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,
@@ -1190,13 +1320,15 @@ final class FireVaultStore: ObservableObject {
 
     private var referencedMediaPaths: Set<String> {
         Set(accounts.flatMap { account in
-            account.documents.compactMap { document in
-                guard let fileName = document.mediaFileName,
-                      fileName == URL(fileURLWithPath: fileName).lastPathComponent,
-                      let url = try? mediaURL(accountID: account.id, fileName: fileName) else {
-                    return nil
+            account.documents.flatMap { document in
+                [document.mediaFileName, document.originalMediaFileName].compactMap { fileName in
+                    guard let fileName,
+                          fileName == URL(fileURLWithPath: fileName).lastPathComponent,
+                          let url = try? mediaURL(accountID: account.id, fileName: fileName) else {
+                        return nil
+                    }
+                    return url.standardizedFileURL.path
                 }
-                return url.standardizedFileURL.path
             }
         })
     }
@@ -1442,6 +1574,9 @@ final class FireVaultStore: ObservableObject {
         defaults.removeObject(forKey: Key.cloudLastCheckedAt)
         defaults.removeObject(forKey: Key.cloudVaultOwnerUserID)
         persistAccounts()
+        Task {
+            await FireVaultFieldMediaBackupService.shared.removeAll()
+        }
         return true
     }
 
@@ -1771,17 +1906,19 @@ final class FireVaultStore: ObservableObject {
         var records: [FireVaultVaultMediaRecord] = []
         for account in accounts {
             for document in account.documents {
-                guard let fileName = document.mediaFileName,
-                      fileName == URL(fileURLWithPath: fileName).lastPathComponent else { continue }
-                let url = try mediaURL(accountID: account.id, fileName: fileName)
-                guard FileManager.default.fileExists(atPath: url.path) else { continue }
-                records.append(
-                    .init(
-                        accountID: account.id,
-                        fileName: fileName,
-                        data: try Data(contentsOf: url, options: .mappedIfSafe)
+                let fileNames = Set([document.mediaFileName, document.originalMediaFileName].compactMap { $0 })
+                for fileName in fileNames {
+                    guard fileName == URL(fileURLWithPath: fileName).lastPathComponent else { continue }
+                    let url = try mediaURL(accountID: account.id, fileName: fileName)
+                    guard FileManager.default.fileExists(atPath: url.path) else { continue }
+                    records.append(
+                        .init(
+                            accountID: account.id,
+                            fileName: fileName,
+                            data: try Data(contentsOf: url, options: .mappedIfSafe)
+                        )
                     )
-                )
+                }
             }
         }
         return records
@@ -1811,10 +1948,12 @@ final class FireVaultStore: ObservableObject {
             return false
         }
         let document = accounts[accountIndex].documents[documentIndex]
-        if let fileName = document.mediaFileName,
-           fileName == URL(fileURLWithPath: fileName).lastPathComponent,
-           let url = try? mediaURL(accountID: accountID, fileName: fileName),
-           FileManager.default.fileExists(atPath: url.path) {
+        let localURLs = Set([document.mediaFileName, document.originalMediaFileName].compactMap { $0 })
+            .compactMap { fileName -> URL? in
+                guard fileName == URL(fileURLWithPath: fileName).lastPathComponent else { return nil }
+                return try? mediaURL(accountID: accountID, fileName: fileName)
+            }
+        for url in localURLs where FileManager.default.fileExists(atPath: url.path) {
             do {
                 try FileManager.default.removeItem(at: url)
             } catch {
@@ -1825,6 +1964,11 @@ final class FireVaultStore: ObservableObject {
         let deletion = Self.documentDeletionActivity(for: document)
         accounts[accountIndex].recent.insert(deletion, at: 0)
         persist()
+        Task {
+            await FireVaultFieldMediaBackupService.shared.removePending(
+                localFileURLs: Array(localURLs)
+            )
+        }
         return true
     }
 

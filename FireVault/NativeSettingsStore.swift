@@ -368,6 +368,8 @@ struct FireVaultStoragePreferences: Codable, Equatable {
     var useAccountFolders: Bool?
     var preserveOriginals: Bool?
     var wifiOnlyUploads: Bool?
+    var automaticFieldMediaBackup: Bool?
+    var backupOverlayCopies: Bool?
     var photoQuality: String?
     var scanFormat: String?
 }

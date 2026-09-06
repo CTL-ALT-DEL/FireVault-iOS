@@ -70,6 +70,157 @@ final class FireVaultTests: XCTestCase {
         XCTAssertNotNil(account.recent.first?.updatedAt)
     }
 
+    func testCapturedPhotoPreservesOriginalAlongsideStampedCopy() throws {
+        let suite = "FireVaultTests.MediaOriginal.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "firevault.native.demo-mode.v1")
+        let store = FireVaultStore(defaults: defaults)
+        let account = store.addAccount()
+        let original = solidImage(color: .red)
+        let stamped = solidImage(color: .blue)
+
+        let document = try store.attachCapturedPhoto(
+            stamped,
+            originalImage: original,
+            to: account.id
+        )
+        let stampedURL = try XCTUnwrap(store.mediaURL(accountID: account.id, documentID: document.id))
+        let originalURL = try XCTUnwrap(store.originalMediaURL(accountID: account.id, documentID: document.id))
+
+        XCTAssertNotEqual(stampedURL, originalURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stampedURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: originalURL.path))
+        XCTAssertNotEqual(try Data(contentsOf: stampedURL), try Data(contentsOf: originalURL))
+
+        let backedUpFileNames = Set(try store.backupMediaRecords().map(\.fileName))
+        XCTAssertTrue(backedUpFileNames.contains(stampedURL.lastPathComponent))
+        XCTAssertTrue(backedUpFileNames.contains(originalURL.lastPathComponent))
+
+        XCTAssertTrue(store.deleteDocument(accountID: account.id, documentID: document.id))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stampedURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: originalURL.path))
+    }
+
+    func testLegacyWorkspaceDocumentDecodesWithoutOriginalMediaReference() throws {
+        let data = try XCTUnwrap(
+            """
+            {
+              "id":"legacy-photo",
+              "title":"Field photo",
+              "subtitle":"Saved before original preservation",
+              "kind":"photo",
+              "date":"Sep 1, 2026",
+              "mediaFileName":"legacy.jpg"
+            }
+            """.data(using: .utf8)
+        )
+
+        let document = try JSONDecoder().decode(FireVaultWorkspaceDocument.self, from: data)
+
+        XCTAssertEqual(document.mediaFileName, "legacy.jpg")
+        XCTAssertNil(document.originalMediaFileName)
+    }
+
+    func testFieldMediaQueueDeduplicatesAndWaitsForCloudAccountID() async throws {
+        let fixture = try makeFieldMediaQueueFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        let store = try FireVaultFieldMediaBackupStore(fileURL: fixture.queueURL)
+        let userID = UUID()
+        let cloudAccountID = UUID()
+        let modifiedAt = Date(timeIntervalSince1970: 1_788_000_000)
+        let first = FireVaultFieldMediaBackupItem(
+            localAccountID: "local-account",
+            userID: userID,
+            accountID: nil,
+            localFileURL: fixture.mediaURL,
+            originalFilename: fixture.mediaURL.lastPathComponent,
+            category: .photos,
+            mimeType: "image/jpeg",
+            fileModifiedAt: modifiedAt
+        )
+        let duplicate = FireVaultFieldMediaBackupItem(
+            localAccountID: "local-account",
+            userID: userID,
+            accountID: nil,
+            localFileURL: fixture.mediaURL,
+            originalFilename: fixture.mediaURL.lastPathComponent,
+            category: .photos,
+            mimeType: "image/jpeg",
+            fileModifiedAt: modifiedAt
+        )
+
+        let firstID = try await store.enqueueIfNeeded(first)
+        let duplicateID = try await store.enqueueIfNeeded(duplicate)
+        let queuedBeforeLink = await store.allItems()
+        let pendingBeforeLink = await store.pendingItems(activeUserID: userID)
+
+        XCTAssertEqual(firstID, duplicateID)
+        XCTAssertEqual(queuedBeforeLink.count, 1)
+        XCTAssertTrue(pendingBeforeLink.isEmpty)
+
+        try await store.linkAccounts(
+            ["local-account": cloudAccountID],
+            accountNumbers: ["local-account": "FV-1027"]
+        )
+
+        let pending = await store.pendingItems(activeUserID: userID)
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertEqual(pending.first?.accountID, cloudAccountID)
+        XCTAssertEqual(pending.first?.accountNumber, "FV-1027")
+
+        try await store.removePending(localAccountID: "local-account")
+        let afterAccountDeletion = await store.allItems()
+        XCTAssertTrue(afterAccountDeletion.isEmpty)
+    }
+
+    func testFieldMediaQueueRecoversInterruptedUploadForImmediateRetry() async throws {
+        let fixture = try makeFieldMediaQueueFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        let userID = UUID()
+        let item = FireVaultFieldMediaBackupItem(
+            localAccountID: "local-account",
+            userID: userID,
+            accountID: UUID(),
+            localFileURL: fixture.mediaURL,
+            originalFilename: fixture.mediaURL.lastPathComponent,
+            category: .scans,
+            mimeType: "application/pdf"
+        )
+        let initialStore = try FireVaultFieldMediaBackupStore(fileURL: fixture.queueURL)
+        try await initialStore.enqueueIfNeeded(item)
+        try await initialStore.markUploading(item.id)
+
+        let recoveredStore = try FireVaultFieldMediaBackupStore(fileURL: fixture.queueURL)
+        let recoveredItems = await recoveredStore.allItems()
+        let recovered = try XCTUnwrap(recoveredItems.first)
+        let pendingIDs = await recoveredStore.pendingItems(activeUserID: userID).map(\.id)
+
+        XCTAssertEqual(recovered.state, .waiting)
+        XCTAssertEqual(recovered.retryCount, 1)
+        XCTAssertEqual(recovered.lastError, "Upload interrupted; queued for retry.")
+        XCTAssertEqual(pendingIDs, [item.id])
+    }
+
+    func testFieldMediaRetryUsesBoundedExponentialBackoff() {
+        XCTAssertEqual(FireVaultFieldMediaBackupCoordinator.backoffSeconds(for: 1), 60)
+        XCTAssertEqual(FireVaultFieldMediaBackupCoordinator.backoffSeconds(for: 2), 300)
+        XCTAssertEqual(FireVaultFieldMediaBackupCoordinator.backoffSeconds(for: 3), 900)
+        XCTAssertEqual(FireVaultFieldMediaBackupCoordinator.backoffSeconds(for: 4), 3_600)
+        XCTAssertEqual(FireVaultFieldMediaBackupCoordinator.backoffSeconds(for: 50), 14_400)
+    }
+
+    func testFieldMediaHashAndMIMEDetectionAreStable() throws {
+        let fixture = try makeFieldMediaQueueFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        XCTAssertEqual(
+            try FireVaultFieldMediaHash.sha256Hex(of: fixture.mediaURL),
+            "986cf303719fc088e1157cdefd2a8a92e0c58fc05f86676756384a6f017dc49a"
+        )
+        XCTAssertEqual(FireVaultFieldMediaMIME.detect(for: fixture.mediaURL), "application/pdf")
+    }
+
     func testExpiredPlanKeepsProductionRecordsReadOnly() throws {
         let suite = "FireVaultTests.Subscription.ReadOnly.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -3663,14 +3814,16 @@ final class FireVaultTests: XCTestCase {
         XCTAssertTrue(privacy.searchableText.contains("delete account and data"))
     }
 
-    func testHelpCatalogDoesNotAdvertiseUnreleasedPurchasingOrMediaCloudSync() {
+    func testHelpCatalogExplainsAutomaticFieldMediaBackupWithoutPurchasingClaims() {
         let allHelp = FireVaultHelpCatalog.topics.map(\.searchableText).joined(separator: " ")
 
         XCTAssertFalse(allHelp.contains("$29"))
         XCTAssertFalse(allHelp.contains("$49"))
         XCTAssertFalse(allHelp.contains("buy pro"))
-        XCTAssertTrue(allHelp.contains("photos and scans follow the destinations configured"))
-        XCTAssertTrue(allHelp.contains("connected storage remains inactive until it is configured"))
+        XCTAssertTrue(allHelp.contains("back up field media to firevault cloud"))
+        XCTAssertTrue(allHelp.contains("saves the local original"))
+        XCTAssertTrue(allHelp.contains("failed uploads remain queued"))
+        XCTAssertTrue(allHelp.contains("videos remain local"))
     }
 
     func testHelpSearchFindsRelevantTaskGuides() {
@@ -3816,6 +3969,30 @@ final class FireVaultTests: XCTestCase {
             course: -1,
             speed: speed,
             timestamp: timestamp
+        )
+    }
+
+    private func solidImage(color: UIColor) -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 12, height: 12)).image { context in
+            color.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 12, height: 12))
+        }
+    }
+
+    private func makeFieldMediaQueueFixture() throws -> (
+        directory: URL,
+        queueURL: URL,
+        mediaURL: URL
+    ) {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FireVaultFieldMediaQueue-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let mediaURL = directory.appendingPathComponent("evidence.pdf")
+        try Data("field evidence".utf8).write(to: mediaURL, options: .atomic)
+        return (
+            directory,
+            directory.appendingPathComponent("queue.json"),
+            mediaURL
         )
     }
 }

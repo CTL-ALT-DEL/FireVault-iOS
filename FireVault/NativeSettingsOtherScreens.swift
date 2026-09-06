@@ -198,6 +198,7 @@ struct NativeStorageSettingsView: View {
     @ObservedObject var settings: FireVaultNativeSettingsStore
     @ObservedObject var store: FireVaultStore
     @ObservedObject var breadcrumbs: FireVaultBreadcrumbStore
+    @ObservedObject private var mediaBackup = FireVaultFieldMediaBackupService.shared
     @State private var storageReport = FireVaultMediaStorageReport(
         referencedFiles: 0,
         orphanedFiles: 0,
@@ -225,6 +226,53 @@ struct NativeStorageSettingsView: View {
                 )
                 LabeledContent("Storage used", value: storageReport.formattedSize)
                 LabeledContent("Referenced files", value: "\(storageReport.referencedFiles)")
+            }
+
+            Section {
+                Toggle("Back up Field Media to FireVault Cloud", isOn: automaticBackupBinding)
+                    .disabled(store.demoMode)
+
+                if settings.preferences.storage.automaticFieldMediaBackup == true, !store.demoMode {
+                    Toggle("Wi-Fi only", isOn: wifiOnlyBinding)
+                    Toggle("Back up stamped copies too", isOn: overlayBackupBinding)
+
+                    LabeledContent("Status", value: mediaBackup.summaryText)
+                    LabeledContent("Connection", value: mediaBackup.networkStatusText)
+                    LabeledContent("Waiting", value: "\(mediaBackup.waitingCount)")
+                    LabeledContent("Backed up", value: "\(mediaBackup.backedUpCount)")
+
+                    if mediaBackup.failedCount > 0 {
+                        Button("Retry Failed Backups", systemImage: "arrow.clockwise") {
+                            Task { await mediaBackup.retryAllFailed() }
+                        }
+                        ForEach(mediaBackup.items.filter { $0.state == .failed }.prefix(5)) { item in
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(item.originalFilename)
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+                                if let error = item.lastError {
+                                    Text(error)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                                Button("Retry Now") {
+                                    Task { await mediaBackup.retryNow(item.id) }
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                            .padding(.vertical, 3)
+                        }
+                    }
+                } else if store.demoMode {
+                    Text("Demo media stays on this iPhone and is never uploaded.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Automatic Cloud Backup")
+            } footer: {
+                Text("FireVault saves the local original first. Eligible photos, scans, documents, and reports up to 50 MB use the account's private storage; videos remain on this iPhone.")
             }
 
             Section {
@@ -260,7 +308,7 @@ struct NativeStorageSettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Storage Plan")
                         .font(.headline)
-                    Text("FireVault keeps account media in private storage on this device.")
+                    Text("FireVault keeps account media on this device and can add private cloud backup copies.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -295,7 +343,7 @@ struct NativeStorageSettingsView: View {
                 Text(title)
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.secondary)
-                Text("This Device")
+                Text(settings.preferences.storage.automaticFieldMediaBackup == true ? "Device + Cloud" : "This Device")
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -331,6 +379,39 @@ struct NativeStorageSettingsView: View {
                 .accessibilityLabel("Stored on this device")
         }
         .padding(.vertical, 3)
+    }
+
+    private var automaticBackupBinding: Binding<Bool> {
+        Binding(
+            get: { settings.preferences.storage.automaticFieldMediaBackup ?? false },
+            set: { enabled in
+                var preferences = settings.preferences
+                preferences.storage.automaticFieldMediaBackup = enabled
+                settings.save(preferences)
+            }
+        )
+    }
+
+    private var wifiOnlyBinding: Binding<Bool> {
+        Binding(
+            get: { settings.preferences.storage.wifiOnlyUploads ?? false },
+            set: { enabled in
+                var preferences = settings.preferences
+                preferences.storage.wifiOnlyUploads = enabled
+                settings.save(preferences)
+            }
+        )
+    }
+
+    private var overlayBackupBinding: Binding<Bool> {
+        Binding(
+            get: { settings.preferences.storage.backupOverlayCopies ?? false },
+            set: { enabled in
+                var preferences = settings.preferences
+                preferences.storage.backupOverlayCopies = enabled
+                settings.save(preferences)
+            }
+        )
     }
 }
 
