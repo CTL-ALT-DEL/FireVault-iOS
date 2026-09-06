@@ -127,6 +127,7 @@ final class FireVaultStore: ObservableObject {
     @Published private(set) var isCloudSyncing = false
     @Published private(set) var cloudSyncCompleted = 0
     @Published private(set) var cloudSyncTotal = 0
+    @Published private(set) var accountSyncConflicts: [FireVaultAccountSyncConflict] = []
     @Published var presentsSubscriptionRequired = false
 
     private(set) var allowsRecordChanges: Bool
@@ -280,6 +281,9 @@ final class FireVaultStore: ObservableObject {
             preferences: FireVaultNativeSettingsStore().preferences.plusCodes
         )
         accounts = repairedAccounts
+        accountSyncConflicts.removeAll { conflict in
+            !accounts.contains(where: { $0.id == conflict.localAccountID })
+        }
         if let selectedAccountID, !accounts.contains(where: { $0.id == selectedAccountID }) {
             self.selectedAccountID = nil
         }
@@ -489,6 +493,7 @@ final class FireVaultStore: ObservableObject {
             }
         }
         accounts.removeAll { $0.id == id }
+        accountSyncConflicts.removeAll { $0.localAccountID == id }
         categoryRuleSuppressedAccountIDs.remove(id)
         if selectedAccountID == id { selectedAccountID = nil }
         if captureAccountID == id { captureAccountID = nil }
@@ -661,8 +666,10 @@ final class FireVaultStore: ObservableObject {
 
         for index in accounts.indices {
             guard let match = matchByAccountID[accounts[index].id] else { continue }
+            let previous = accounts[index]
             accounts[index].latitude = match.latitude
             accounts[index].longitude = match.longitude
+            markCloudFieldsModified(previous: previous, at: index)
         }
         persist()
     }
@@ -718,6 +725,7 @@ final class FireVaultStore: ObservableObject {
 
         let previousCategory = accounts[index].category.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        let previous = accounts[index]
         accounts[index].name = normalizedName
         accounts[index].address = address.trimmingCharacters(in: .whitespacesAndNewlines)
         accounts[index].category = normalizedCategory
@@ -735,6 +743,7 @@ final class FireVaultStore: ObservableObject {
         accounts[index].phone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
         accounts[index].latitude = latitude
         accounts[index].longitude = longitude
+        markCloudFieldsModified(previous: previous, at: index)
         persist()
         return true
     }
@@ -1474,6 +1483,7 @@ final class FireVaultStore: ObservableObject {
         selectedAccountID = nil
         captureAccountID = nil
         demoMode = false
+        accountSyncConflicts = []
         defaults.set(false, forKey: Key.demoMode)
         accounts = accountArchiveURL.flatMap(FireVaultAccountArchive.load(from:))
             ?? Self.savedAccounts(defaults: defaults, key: Key.productionAccounts)
@@ -1489,6 +1499,7 @@ final class FireVaultStore: ObservableObject {
         selectedAccountID = nil
         captureAccountID = nil
         demoMode = true
+        accountSyncConflicts = []
         defaults.set(true, forKey: Key.demoMode)
         accounts = accountArchiveURL.flatMap(FireVaultAccountArchive.load(from:))
             ?? Self.savedAccounts(defaults: defaults, key: Key.demoAccounts)
@@ -1520,6 +1531,7 @@ final class FireVaultStore: ObservableObject {
     var cloudSyncStatusText: String {
         if demoMode { return "Demo data" }
         if isCloudSyncing { return "Syncing" }
+        if !accountSyncConflicts.isEmpty { return "Review needed" }
         if cloudSyncErrorMessage != nil { return "Needs attention" }
         return cloudLastSyncedAt == nil ? "Not synced yet" : "Up to date"
     }
@@ -1530,7 +1542,9 @@ final class FireVaultStore: ObservableObject {
         isCloudSyncing = true
         cloudSyncErrorMessage = nil
         cloudSyncCompleted = 0
-        cloudSyncTotal = accounts.filter { $0.cloudID == nil || $0.cloudSyncedAt == nil }.count
+        cloudSyncTotal = accounts.filter {
+            $0.cloudID == nil || $0.cloudSyncVersion == nil || $0.locallyModifiedAt != nil
+        }.count
         defer { isCloudSyncing = false }
         do {
             let session = try await SupabaseManager.client.auth.session
@@ -1542,16 +1556,14 @@ final class FireVaultStore: ObservableObject {
                     self?.cloudSyncTotal = total
                 }
             }
-            let timestamp = Date()
             for index in accounts.indices {
                 guard let remoteID = result.mappings[accounts[index].id] else { continue }
                 accounts[index].cloudID = remoteID.uuidString
-                accounts[index].cloudSyncedAt = timestamp
                 accounts[index].cloudSyncError = nil
             }
             persist()
             let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
-            mergeCloudAccounts(cloudRows)
+            try await reconcileCloudAccounts(cloudRows, userID: session.user.id)
             recordCloudCheck()
             recordSuccessfulCloudSync()
         } catch {
@@ -1566,6 +1578,7 @@ final class FireVaultStore: ObservableObject {
     func eraseLocalAccountDataAfterCloudDeletion(for userID: UUID) -> Bool {
         guard cloudVaultOwnerUserID == userID else { return false }
         accounts.removeAll()
+        accountSyncConflicts.removeAll()
         selectedAccountID = nil
         captureAccountID = nil
         cloudLastSyncedAt = nil
@@ -1594,7 +1607,7 @@ final class FireVaultStore: ObservableObject {
             let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
             try validateCloudVaultOwnership(userID: session.user.id, cloudRows: cloudRows)
             guard !demoMode else { return }
-            mergeCloudAccounts(cloudRows)
+            try await reconcileCloudAccounts(cloudRows, userID: session.user.id)
             recordCloudCheck()
             recordSuccessfulCloudSync()
         } catch {
@@ -1632,11 +1645,10 @@ final class FireVaultStore: ObservableObject {
             let cloudResult = try await FireVaultAccountSyncService.importCSV(
                 data: csvData,
                 fileName: fileName.isEmpty ? "accounts.csv" : fileName,
-                analysis: analysis,
-                localAccounts: accounts
+                analysis: analysis
             )
             let cloudRows = try await FireVaultAccountSyncService.fetchAccounts()
-            mergeCloudAccounts(cloudRows)
+            try await reconcileCloudAccounts(cloudRows, userID: session.user.id)
             recordCloudCheck()
             recordSuccessfulCloudSync()
             messages.insert(
@@ -1644,6 +1656,19 @@ final class FireVaultStore: ObservableObject {
                 at: 0
             )
         } catch {
+            // A conditional import update can lose its race to a portal edit.
+            // Refresh immediately so Settings presents both versions for review
+            // without requiring the technician to run a second manual sync.
+            if let session = try? await SupabaseManager.client.auth.session,
+               let cloudRows = try? await FireVaultAccountSyncService.fetchAccounts() {
+                do {
+                    try validateCloudVaultOwnership(userID: session.user.id, cloudRows: cloudRows)
+                    try await reconcileCloudAccounts(cloudRows, userID: session.user.id)
+                } catch {
+                    // Preserve the original import failure below. The normal
+                    // Sync Now path can retry ownership validation and refresh.
+                }
+            }
             recordCloudCheck()
             recordCloudSyncFailure(error)
             messages.insert(
@@ -1707,54 +1732,165 @@ final class FireVaultStore: ObservableObject {
             cloudSyncErrorMessage = accessError.localizedDescription
             return
         }
+        if let syncError = error as? FireVaultAccountSyncError {
+            cloudSyncErrorMessage = syncError.localizedDescription
+            return
+        }
         // Offline-first behavior is intentional: the last valid on-device vault
         // stays available. Keep the customer message actionable and avoid
         // exposing low-level network or authentication details.
         cloudSyncErrorMessage = "FireVault Cloud could not be reached. Your saved accounts remain available."
     }
 
-    private func mergeCloudAccounts(_ cloudRows: [FireVaultCloudAccountRow]) {
-        for row in cloudRows where !row.archived {
-            let cloud = row.workspaceAccount
-            let cloudAccountID = Self.canonicalAccountID(cloud.accountId)
-            let cloudIdentity = Self.csvIdentityKey(name: cloud.name, address: cloud.address)
+    private func reconcileCloudAccounts(
+        _ cloudRows: [FireVaultCloudAccountRow],
+        userID: UUID
+    ) async throws {
+        var conflicts: [FireVaultAccountSyncConflict] = []
 
-            let existingIndex = accounts.firstIndex {
-                $0.id.caseInsensitiveCompare(cloud.id) == .orderedSame
-            } ?? accounts.firstIndex {
-                !cloudAccountID.isEmpty && Self.canonicalAccountID($0.accountId) == cloudAccountID
-            } ?? accounts.firstIndex {
-                Self.csvIdentityKey(name: $0.name, address: $0.address) == cloudIdentity
-            }
+        for row in cloudRows where !row.archived {
+            let existingIndex = existingAccountIndex(for: row)
 
             guard let existingIndex else {
-                accounts.append(cloud)
+                accounts.append(row.workspaceAccount)
                 continue
             }
 
-            accounts[existingIndex].name = cloud.name
-            if cloud.address != "No address supplied" {
-                accounts[existingIndex].address = cloud.address
-            }
-            if !cloud.accountId.isEmpty {
-                accounts[existingIndex].accountId = cloud.accountId
-            }
-            if !cloud.phone.isEmpty {
-                accounts[existingIndex].phone = cloud.phone
-            }
-            if let latitude = cloud.latitude, let longitude = cloud.longitude {
-                accounts[existingIndex].latitude = latitude
-                accounts[existingIndex].longitude = longitude
-            }
-            if !accounts[existingIndex].tags.contains("Cloud Sync") {
-                accounts[existingIndex].tags.append("Cloud Sync")
-            }
             accounts[existingIndex].cloudID = row.id.uuidString
-            accounts[existingIndex].cloudSyncedAt = Date()
-            accounts[existingIndex].cloudSyncError = nil
+            switch FireVaultAccountSyncService.reconciliationAction(
+                local: accounts[existingIndex],
+                remote: row
+            ) {
+            case .acceptRemoteBaseline, .downloadRemote:
+                applyRemoteAccount(row, at: existingIndex)
+            case .uploadLocal(let expectedVersion):
+                if let updated = try await FireVaultAccountSyncService.updateAccount(
+                    accounts[existingIndex],
+                    remoteID: row.id,
+                    expectedVersion: expectedVersion,
+                    userID: userID
+                ) {
+                    applyAcceptedCloudRevision(updated, at: existingIndex)
+                } else {
+                    let latest = try await FireVaultAccountSyncService.fetchAccount(
+                        id: row.id,
+                        userID: userID
+                    ) ?? row
+                    conflicts.append(.init(localAccountID: accounts[existingIndex].id, remote: latest))
+                }
+            case .conflict:
+                conflicts.append(.init(localAccountID: accounts[existingIndex].id, remote: row))
+            }
         }
 
+        accountSyncConflicts = conflicts.sorted { lhs, rhs in
+            let lhsName = accounts.first(where: { $0.id == lhs.localAccountID })?.name ?? ""
+            let rhsName = accounts.first(where: { $0.id == rhs.localAccountID })?.name ?? ""
+            return lhsName.localizedStandardCompare(rhsName) == .orderedAscending
+        }
         persist()
+    }
+
+    func resolveAccountSyncConflict(
+        id: String,
+        choice: FireVaultAccountSyncConflictChoice
+    ) async {
+        guard authorizeRecordChange() else { return }
+        guard !demoMode, !isCloudSyncing,
+              let conflict = accountSyncConflicts.first(where: { $0.id == id }),
+              let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+
+        isCloudSyncing = true
+        cloudSyncErrorMessage = nil
+        defer { isCloudSyncing = false }
+
+        do {
+            let session = try await SupabaseManager.client.auth.session
+            let visibleCloudRows = try await FireVaultAccountSyncService.fetchAccounts()
+            try validateCloudVaultOwnership(userID: session.user.id, cloudRows: visibleCloudRows)
+            guard let latest = visibleCloudRows.first(where: { $0.id == conflict.remote.id }) else {
+                throw FireVaultAccountSyncError.concurrentModification
+            }
+
+            switch choice {
+            case .usePortal:
+                applyRemoteAccount(latest, at: index)
+            case .keepIPhone:
+                guard latest.syncVersion == conflict.remote.syncVersion,
+                      let updated = try await FireVaultAccountSyncService.updateAccount(
+                        accounts[index],
+                        remoteID: latest.id,
+                        expectedVersion: latest.syncVersion,
+                        userID: session.user.id
+                      ) else {
+                    replaceConflictRemote(id: id, with: latest)
+                    throw FireVaultAccountSyncError.concurrentModification
+                }
+                applyAcceptedCloudRevision(updated, at: index)
+            }
+
+            accountSyncConflicts.removeAll { $0.id == id }
+            recordCloudCheck()
+            recordSuccessfulCloudSync()
+            persist()
+        } catch {
+            recordCloudCheck()
+            cloudSyncErrorMessage = error.localizedDescription.isEmpty
+                ? "The conflict could not be resolved. Both versions are still preserved."
+                : error.localizedDescription
+        }
+    }
+
+    private func existingAccountIndex(for row: FireVaultCloudAccountRow) -> Int? {
+        let cloud = row.workspaceAccount
+        let cloudAccountID = Self.canonicalAccountID(cloud.accountId)
+        let cloudIdentity = Self.csvIdentityKey(name: cloud.name, address: cloud.address)
+        return accounts.firstIndex {
+            $0.cloudID?.caseInsensitiveCompare(row.id.uuidString) == .orderedSame
+                || $0.id.caseInsensitiveCompare(row.id.uuidString) == .orderedSame
+        } ?? accounts.firstIndex {
+            !cloudAccountID.isEmpty && Self.canonicalAccountID($0.accountId) == cloudAccountID
+        } ?? accounts.firstIndex {
+            Self.csvIdentityKey(name: $0.name, address: $0.address) == cloudIdentity
+        }
+    }
+
+    private func applyRemoteAccount(_ row: FireVaultCloudAccountRow, at index: Int) {
+        accounts[index].name = row.accountName
+        accounts[index].address = row.combinedAddress.isEmpty
+            ? "No address supplied"
+            : row.combinedAddress
+        accounts[index].accountId = row.accountNumber ?? ""
+        accounts[index].phone = row.phone ?? ""
+        accounts[index].latitude = row.latitude
+        accounts[index].longitude = row.longitude
+        applyAcceptedCloudRevision(row, at: index)
+    }
+
+    private func applyAcceptedCloudRevision(_ row: FireVaultCloudAccountRow, at index: Int) {
+        if !accounts[index].tags.contains("Cloud Sync") {
+            accounts[index].tags.append("Cloud Sync")
+        }
+        accounts[index].cloudID = row.id.uuidString
+        accounts[index].cloudSyncedAt = Date()
+        accounts[index].cloudSyncVersion = row.syncVersion
+        accounts[index].locallyModifiedAt = nil
+        accounts[index].cloudSyncError = nil
+    }
+
+    private func replaceConflictRemote(id: String, with row: FireVaultCloudAccountRow) {
+        guard let conflictIndex = accountSyncConflicts.firstIndex(where: { $0.id == id }) else { return }
+        accountSyncConflicts[conflictIndex] = .init(localAccountID: id, remote: row)
+    }
+
+    private func markCloudFieldsModified(
+        previous: FireVaultWorkspaceAccount,
+        at index: Int
+    ) {
+        guard !demoMode,
+              !FireVaultAccountSyncService.cloudValuesMatch(previous, accounts[index]) else { return }
+        accounts[index].locallyModifiedAt = Date()
+        accounts[index].cloudSyncError = nil
     }
 
     func applyCSVImport(_ analysis: FireVaultCSVAnalysis) -> FireVaultCSVImportResult {
@@ -1805,6 +1941,7 @@ final class FireVaultStore: ObservableObject {
                 ? nameAddressIndex[identity]
                 : accountIDIndex[accountID]
             if let existingIndex {
+                let previous = accounts[existingIndex]
                 let addressChanged = !record.address.isEmpty &&
                     accounts[existingIndex].address.caseInsensitiveCompare(record.address) != .orderedSame
                 accounts[existingIndex].name = record.name
@@ -1822,6 +1959,7 @@ final class FireVaultStore: ObservableObject {
                 if !accounts[existingIndex].tags.contains("CSV Import") {
                     accounts[existingIndex].tags.append("CSV Import")
                 }
+                markCloudFieldsModified(previous: previous, at: existingIndex)
                 if !accountID.isEmpty { accountIDIndex[accountID] = existingIndex }
                 nameAddressIndex[Self.csvIdentityKey(
                     name: accounts[existingIndex].name,

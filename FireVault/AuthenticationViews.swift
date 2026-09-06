@@ -843,7 +843,7 @@ struct FireVaultAccountProfileSections: View {
     }
 
     private var cloudSyncTint: Color {
-        if store.cloudSyncErrorMessage != nil { return .orange }
+        if store.cloudSyncErrorMessage != nil || !store.accountSyncConflicts.isEmpty { return .orange }
         if store.isCloudSyncing { return NativeShellPalette.blue }
         if store.cloudLastSyncedAt == nil { return .secondary }
         return NativeShellPalette.green
@@ -851,6 +851,7 @@ struct FireVaultAccountProfileSections: View {
 
     private var cloudSyncSymbol: String {
         if store.isCloudSyncing { return "arrow.triangle.2.circlepath" }
+        if !store.accountSyncConflicts.isEmpty { return "arrow.triangle.branch" }
         if store.cloudSyncErrorMessage != nil { return "exclamationmark.icloud.fill" }
         if store.cloudLastSyncedAt == nil { return "icloud.slash" }
         return "checkmark.icloud.fill"
@@ -940,6 +941,17 @@ struct FireVaultAccountProfileSections: View {
                         Text("\(store.cloudSyncCompleted) of \(store.cloudSyncTotal)")
                     }
                 }
+                if !store.accountSyncConflicts.isEmpty {
+                    NavigationLink {
+                        FireVaultAccountSyncConflictsView(store: store)
+                    } label: {
+                        Label(
+                            "Review \(store.accountSyncConflicts.count) Sync Conflict\(store.accountSyncConflicts.count == 1 ? "" : "s")",
+                            systemImage: "arrow.triangle.branch"
+                        )
+                        .foregroundStyle(.orange)
+                    }
+                }
                 if let message = store.cloudSyncErrorMessage {
                     Label(message, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
@@ -1000,6 +1012,170 @@ struct FireVaultAccountProfileSections: View {
                 .minimumScaleFactor(0.72)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct FireVaultAccountSyncConflictsView: View {
+    @ObservedObject var store: FireVaultStore
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(store.accountSyncConflicts) { conflict in
+                    NavigationLink {
+                        FireVaultAccountSyncConflictDetailView(
+                            store: store,
+                            conflictID: conflict.id
+                        )
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(localAccount(for: conflict)?.name ?? conflict.remote.accountName)
+                                .font(.headline)
+                            Text("Changed on both this iPhone and the portal")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } footer: {
+                Text("FireVault has preserved both versions. Open each account, compare the values, and choose which version should be used for cloud-shared details.")
+            }
+        }
+        .navigationTitle("Sync Conflicts")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func localAccount(for conflict: FireVaultAccountSyncConflict) -> FireVaultWorkspaceAccount? {
+        store.accounts.first { $0.id == conflict.localAccountID }
+    }
+}
+
+private struct FireVaultAccountSyncConflictDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: FireVaultStore
+    let conflictID: String
+    @State private var showsKeepIPhoneConfirmation = false
+    @State private var showsUsePortalConfirmation = false
+
+    private var conflict: FireVaultAccountSyncConflict? {
+        store.accountSyncConflicts.first { $0.id == conflictID }
+    }
+
+    private var local: FireVaultWorkspaceAccount? {
+        store.accounts.first { $0.id == conflictID }
+    }
+
+    var body: some View {
+        Group {
+            if let conflict, let local {
+                Form {
+                    accountSection(title: "On This iPhone", account: local)
+                    portalSection(conflict.remote)
+
+                    Section {
+                        Button("Keep iPhone Version") {
+                            showsKeepIPhoneConfirmation = true
+                        }
+                        Button("Use Portal Version") {
+                            showsUsePortalConfirmation = true
+                        }
+                    } footer: {
+                        Text("Your notes, equipment, files, favorites, and other iPhone-only details are preserved with either choice.")
+                    }
+
+                    if store.isCloudSyncing {
+                        Section { ProgressView("Resolving conflict…") }
+                    }
+                    if let message = store.cloudSyncErrorMessage {
+                        Section {
+                            Label(message, systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+                .disabled(store.isCloudSyncing)
+            } else {
+                ContentUnavailableView(
+                    "Conflict Resolved",
+                    systemImage: "checkmark.circle.fill",
+                    description: Text("This account no longer needs review.")
+                )
+            }
+        }
+        .navigationTitle(local?.name ?? "Account Conflict")
+        .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Keep the iPhone version?",
+            isPresented: $showsKeepIPhoneConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Keep iPhone Version") {
+                resolve(.keepIPhone)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The cloud-shared account details in the portal will be replaced by the values shown under On This iPhone.")
+        }
+        .confirmationDialog(
+            "Use the portal version?",
+            isPresented: $showsUsePortalConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Use Portal Version") {
+                resolve(.usePortal)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The cloud-shared details on this iPhone will be replaced by the values shown under Portal.")
+        }
+    }
+
+    @ViewBuilder
+    private func accountSection(
+        title: String,
+        account: FireVaultWorkspaceAccount
+    ) -> some View {
+        Section(title) {
+            LabeledContent("Name", value: display(account.name))
+            LabeledContent("Account ID", value: display(account.accountId))
+            LabeledContent("Address", value: display(account.address))
+            LabeledContent("Phone", value: display(account.phone))
+            LabeledContent("Location", value: coordinate(account.latitude, account.longitude))
+            if let changed = account.locallyModifiedAt {
+                LabeledContent("Changed", value: changed.formatted(date: .abbreviated, time: .shortened))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func portalSection(_ account: FireVaultCloudAccountRow) -> some View {
+        Section("Portal") {
+            LabeledContent("Name", value: display(account.accountName))
+            LabeledContent("Account ID", value: display(account.accountNumber ?? ""))
+            LabeledContent("Address", value: display(account.combinedAddress))
+            LabeledContent("Phone", value: display(account.phone ?? ""))
+            LabeledContent("Location", value: coordinate(account.latitude, account.longitude))
+            LabeledContent("Changed", value: account.updatedAt.formatted(date: .abbreviated, time: .shortened))
+        }
+    }
+
+    private func display(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Not provided" : trimmed
+    }
+
+    private func coordinate(_ latitude: Double?, _ longitude: Double?) -> String {
+        guard let latitude, let longitude else { return "Not provided" }
+        return String(format: "%.5f, %.5f", latitude, longitude)
+    }
+
+    private func resolve(_ choice: FireVaultAccountSyncConflictChoice) {
+        Task {
+            await store.resolveAccountSyncConflict(id: conflictID, choice: choice)
+            if !store.accountSyncConflicts.contains(where: { $0.id == conflictID }) {
+                dismiss()
+            }
+        }
     }
 }
 

@@ -1270,7 +1270,9 @@ final class FireVaultTests: XCTestCase {
             latitude: nil,
             longitude: nil,
             phone: nil,
-            archived: false
+            archived: false,
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            syncVersion: 1
         )
 
         XCTAssertNoThrow(
@@ -1279,6 +1281,98 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(
             defaults.string(forKey: "firevault.native.cloud-vault-owner-user-id.v1"),
             userID.uuidString.lowercased()
+        )
+    }
+
+    func testAccountSyncAdoptsMatchingRemoteAsBaseline() {
+        let remoteID = UUID()
+        let remote = makeCloudAccountRow(
+            id: remoteID,
+            name: "Acme Fire",
+            accountNumber: "FV-100",
+            address: "100 Main Street, Boise, ID 83702",
+            phone: "208-555-0100",
+            latitude: 43.615,
+            longitude: -116.202,
+            syncVersion: 8
+        )
+        let local = makeWorkspaceAccount(
+            cloudID: remoteID,
+            name: " acme fire ",
+            accountNumber: "fv-100",
+            address: "100 Main Street,  Boise, ID 83702",
+            phone: "208-555-0100",
+            latitude: 43.615,
+            longitude: -116.202
+        )
+
+        XCTAssertEqual(
+            FireVaultAccountSyncService.reconciliationAction(local: local, remote: remote),
+            .acceptRemoteBaseline
+        )
+    }
+
+    func testAccountSyncTreatsNoAddressPlaceholderAsEmptyCloudAddress() {
+        let remoteID = UUID()
+        let remote = makeCloudAccountRow(id: remoteID, name: "Acme Fire", syncVersion: 2)
+        let local = makeWorkspaceAccount(
+            cloudID: remoteID,
+            name: "Acme Fire",
+            address: "No address supplied"
+        )
+
+        XCTAssertEqual(
+            FireVaultAccountSyncService.reconciliationAction(local: local, remote: remote),
+            .acceptRemoteBaseline
+        )
+    }
+
+    func testAccountSyncUploadsPendingIPhoneChangeOnlyAtAcceptedRevision() {
+        let remoteID = UUID()
+        let remote = makeCloudAccountRow(id: remoteID, name: "Portal Name", syncVersion: 4)
+        var local = makeWorkspaceAccount(cloudID: remoteID, name: "iPhone Name")
+        local.cloudSyncVersion = 4
+        local.locallyModifiedAt = Date()
+
+        XCTAssertEqual(
+            FireVaultAccountSyncService.reconciliationAction(local: local, remote: remote),
+            .uploadLocal(expectedVersion: 4)
+        )
+    }
+
+    func testAccountSyncDetectsConcurrentIPhoneAndPortalChanges() {
+        let remoteID = UUID()
+        let remote = makeCloudAccountRow(id: remoteID, name: "Portal Name", syncVersion: 5)
+        var local = makeWorkspaceAccount(cloudID: remoteID, name: "iPhone Name")
+        local.cloudSyncVersion = 4
+        local.locallyModifiedAt = Date()
+
+        XCTAssertEqual(
+            FireVaultAccountSyncService.reconciliationAction(local: local, remote: remote),
+            .conflict
+        )
+    }
+
+    func testAccountSyncDownloadsPortalChangeWhenIPhoneIsClean() {
+        let remoteID = UUID()
+        let remote = makeCloudAccountRow(id: remoteID, name: "Portal Name", syncVersion: 5)
+        var local = makeWorkspaceAccount(cloudID: remoteID, name: "Old Name")
+        local.cloudSyncVersion = 4
+
+        XCTAssertEqual(
+            FireVaultAccountSyncService.reconciliationAction(local: local, remote: remote),
+            .downloadRemote
+        )
+    }
+
+    func testAccountSyncPreservesDifferingLegacyIPhoneRecordForReview() {
+        let remoteID = UUID()
+        let remote = makeCloudAccountRow(id: remoteID, name: "Portal Name", syncVersion: 1)
+        let local = makeWorkspaceAccount(cloudID: remoteID, name: "Legacy iPhone Name")
+
+        XCTAssertEqual(
+            FireVaultAccountSyncService.reconciliationAction(local: local, remote: remote),
+            .conflict
         )
     }
 
@@ -1383,10 +1477,12 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(updated.equipment.map(\.id), ["equipment-1"])
         XCTAssertEqual(updated.locations.map(\.id), ["location-1"])
         XCTAssertEqual(updated.recent.map(\.id), ["recent-1"])
+        XCTAssertNotNil(updated.locallyModifiedAt)
 
         let reloadedStore = FireVaultStore(defaults: defaults)
         let persisted = try XCTUnwrap(reloadedStore.accounts.first(where: { $0.id == account.id }))
         XCTAssertEqual(persisted, updated)
+        XCTAssertNotNil(persisted.locallyModifiedAt)
     }
 
     func testUpdatingAccountGPSRecalibratesCoordinateWithoutChangingFieldData() throws {
@@ -4232,6 +4328,64 @@ final class FireVaultTests: XCTestCase {
             directory,
             directory.appendingPathComponent("queue.json"),
             mediaURL
+        )
+    }
+
+    private func makeWorkspaceAccount(
+        cloudID: UUID,
+        name: String,
+        accountNumber: String = "",
+        address: String = "",
+        phone: String = "",
+        latitude: Double? = nil,
+        longitude: Double? = nil
+    ) -> FireVaultWorkspaceAccount {
+        .init(
+            id: UUID().uuidString,
+            name: name,
+            address: address,
+            category: "Uncategorized",
+            accountId: accountNumber,
+            phone: phone,
+            favorite: false,
+            latitude: latitude,
+            longitude: longitude,
+            tags: [],
+            notes: [],
+            documents: [],
+            equipment: [],
+            locations: [],
+            recent: [],
+            cloudID: cloudID.uuidString
+        )
+    }
+
+    private func makeCloudAccountRow(
+        id: UUID,
+        name: String,
+        accountNumber: String? = nil,
+        address: String? = nil,
+        phone: String? = nil,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        syncVersion: Int
+    ) -> FireVaultCloudAccountRow {
+        .init(
+            id: id,
+            accountName: name,
+            accountNumber: accountNumber,
+            addressLine1: address,
+            addressLine2: nil,
+            city: nil,
+            state: nil,
+            postalCode: nil,
+            country: "US",
+            latitude: latitude,
+            longitude: longitude,
+            phone: phone,
+            archived: false,
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            syncVersion: syncVersion
         )
     }
 

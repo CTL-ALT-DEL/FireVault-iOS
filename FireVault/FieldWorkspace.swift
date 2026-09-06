@@ -35,6 +35,13 @@ struct FireVaultWorkspaceAccount: Codable, Identifiable, Equatable {
     var cloudID: String? = nil
     var cloudSyncedAt: Date? = nil
     var cloudSyncError: String? = nil
+    /// Database-maintained revision last accepted by this iPhone. The server
+    /// increments it for every portal or device update, allowing conditional
+    /// writes without relying on device clocks.
+    var cloudSyncVersion: Int? = nil
+    /// Set whenever a cloud-shared field changes locally and cleared only after
+    /// the server accepts it or the user explicitly chooses the portal copy.
+    var locallyModifiedAt: Date? = nil
 
     var coordinate: CLLocationCoordinate2D? {
         guard let latitude, let longitude,

@@ -37,7 +37,7 @@ enum FireVaultRemoteAccountDeletionError: LocalizedError, Equatable {
     }
 }
 
-struct FireVaultCloudAccountRow: Decodable {
+struct FireVaultCloudAccountRow: Decodable, Equatable, Identifiable {
     let id: UUID
     let accountName: String
     let accountNumber: String?
@@ -51,6 +51,8 @@ struct FireVaultCloudAccountRow: Decodable {
     let longitude: Double?
     let phone: String?
     let archived: Bool
+    let updatedAt: Date
+    let syncVersion: Int
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -66,6 +68,8 @@ struct FireVaultCloudAccountRow: Decodable {
         case longitude
         case phone
         case archived
+        case updatedAt = "updated_at"
+        case syncVersion = "sync_version"
     }
 
     var workspaceAccount: FireVaultWorkspaceAccount {
@@ -94,8 +98,19 @@ struct FireVaultCloudAccountRow: Decodable {
             locations: [],
             recent: [],
             cloudID: id.uuidString,
-            cloudSyncedAt: Date()
+            cloudSyncedAt: Date(),
+            cloudSyncVersion: syncVersion
         )
+    }
+
+    var combinedAddress: String {
+        [addressLine1, addressLine2, city, state, postalCode]
+            .compactMap { value -> String? in
+                guard let value else { return nil }
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
+            .joined(separator: ", ")
     }
 
     var identityKey: String {
@@ -116,10 +131,44 @@ struct FireVaultCloudAccountRow: Decodable {
     }
 }
 
+enum FireVaultAccountReconciliationAction: Equatable {
+    case acceptRemoteBaseline
+    case downloadRemote
+    case uploadLocal(expectedVersion: Int)
+    case conflict
+}
+
+struct FireVaultAccountSyncConflict: Identifiable, Equatable {
+    let localAccountID: String
+    let remote: FireVaultCloudAccountRow
+
+    var id: String { localAccountID }
+}
+
+enum FireVaultAccountSyncConflictChoice {
+    case keepIPhone
+    case usePortal
+}
+
+enum FireVaultAccountSyncError: LocalizedError, Equatable {
+    case concurrentModification
+    case cloudImportFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .concurrentModification:
+            "An account changed in the portal while FireVault was syncing. Review the two versions before choosing which one to keep."
+        case .cloudImportFailed:
+            "FireVault Cloud could not save an imported account. Your iPhone copy is still preserved."
+        }
+    }
+}
+
 enum FireVaultAccountSyncService {
     private static let bucket = "csv-imports"
-    private static let accountSelect = "id,account_name,account_number,address_line_1,address_line_2,city,state,postal_code,country,latitude,longitude,phone,archived"
+    private static let accountSelect = "id,account_name,account_number,address_line_1,address_line_2,city,state,postal_code,country,latitude,longitude,phone,archived,updated_at,sync_version"
     private static let cloudFileDeleteBatchSize = 100
+    private static let concurrentImportUpdateLimit = 8
 
     static func fetchAccounts() async throws -> [FireVaultCloudAccountRow] {
         try await SupabaseManager.client
@@ -129,6 +178,81 @@ enum FireVaultAccountSyncService {
             .order("account_name", ascending: true)
             .execute()
             .value
+    }
+
+    static func fetchAccount(id: UUID, userID: UUID) async throws -> FireVaultCloudAccountRow? {
+        let rows: [FireVaultCloudAccountRow] = try await SupabaseManager.client
+            .from("accounts")
+            .select(accountSelect)
+            .eq("id", value: id)
+            .eq("user_id", value: userID)
+            .limit(1)
+            .execute()
+            .value
+        return rows.first
+    }
+
+    static func reconciliationAction(
+        local: FireVaultWorkspaceAccount,
+        remote: FireVaultCloudAccountRow
+    ) -> FireVaultAccountReconciliationAction {
+        if cloudValuesMatch(local: local, remote: remote) {
+            return .acceptRemoteBaseline
+        }
+
+        guard let acceptedVersion = local.cloudSyncVersion else {
+            return .conflict
+        }
+
+        if local.locallyModifiedAt != nil {
+            return acceptedVersion == remote.syncVersion
+                ? .uploadLocal(expectedVersion: acceptedVersion)
+                : .conflict
+        }
+
+        return acceptedVersion == remote.syncVersion ? .conflict : .downloadRemote
+    }
+
+    static func cloudValuesMatch(
+        local: FireVaultWorkspaceAccount,
+        remote: FireVaultCloudAccountRow
+    ) -> Bool {
+        normalized(local.name) == normalized(remote.accountName)
+            && canonicalAccountID(local.accountId) == canonicalAccountID(remote.accountNumber ?? "")
+            && normalizedAddress(local.address) == normalizedAddress(remote.combinedAddress)
+            && normalized(local.phone) == normalized(remote.phone ?? "")
+            && local.latitude == remote.latitude
+            && local.longitude == remote.longitude
+    }
+
+    static func cloudValuesMatch(
+        _ lhs: FireVaultWorkspaceAccount,
+        _ rhs: FireVaultWorkspaceAccount
+    ) -> Bool {
+        normalized(lhs.name) == normalized(rhs.name)
+            && canonicalAccountID(lhs.accountId) == canonicalAccountID(rhs.accountId)
+            && normalizedAddress(lhs.address) == normalizedAddress(rhs.address)
+            && normalized(lhs.phone) == normalized(rhs.phone)
+            && lhs.latitude == rhs.latitude
+            && lhs.longitude == rhs.longitude
+    }
+
+    static func updateAccount(
+        _ account: FireVaultWorkspaceAccount,
+        remoteID: UUID,
+        expectedVersion: Int,
+        userID: UUID
+    ) async throws -> FireVaultCloudAccountRow? {
+        let rows: [FireVaultCloudAccountRow] = try await SupabaseManager.client
+            .from("accounts")
+            .update(CloudAccountUpdate(account: account))
+            .eq("id", value: remoteID)
+            .eq("user_id", value: userID)
+            .eq("sync_version", value: expectedVersion)
+            .select(accountSelect)
+            .execute()
+            .value
+        return rows.first
     }
 
     /// Permanently deletes one user-owned customer account. The explicit
@@ -314,7 +438,8 @@ enum FireVaultAccountSyncService {
                     id: remoteID, accountName: account.name, accountNumber: number.nilIfEmpty,
                     addressLine1: account.address.nilIfEmpty, addressLine2: nil, city: nil,
                     state: nil, postalCode: nil, country: "US", latitude: account.latitude,
-                    longitude: account.longitude, phone: account.phone.nilIfEmpty, archived: false
+                    longitude: account.longitude, phone: account.phone.nilIfEmpty, archived: false,
+                    updatedAt: Date(), syncVersion: 1
                 )
                 if !number.isEmpty { byNumber[number] = synthesized }
                 byIdentity[identity] = synthesized
@@ -341,16 +466,20 @@ enum FireVaultAccountSyncService {
     static func importCSV(
         data: Data,
         fileName: String,
-        analysis: FireVaultCSVAnalysis,
-        localAccounts: [FireVaultWorkspaceAccount]
+        analysis: FireVaultCSVAnalysis
     ) async throws -> FireVaultCloudImportResult {
         let session = try await SupabaseManager.client.auth.session
         let userID = session.user.id
         let jobID = UUID()
         let safeFileName = sanitizedFileName(fileName)
         let storagePath = "\(userID.uuidString.lowercased())/\(jobID.uuidString.lowercased())/\(safeFileName)"
-        let acceptedRecords = analysis.records.filter { $0.rowResult.status != .rejected }
-        let skippedRows = analysis.records.count - acceptedRecords.count
+        var seenAccountNumbers = Set<String>()
+        let acceptedRecords = analysis.records.filter { record in
+            guard record.rowResult.status != .rejected else { return false }
+            let number = canonicalAccountID(record.accountID)
+            return number.isEmpty || seenAccountNumbers.insert(number).inserted
+        }
+        var skippedRows = analysis.records.count - acceptedRecords.count
 
         try await SupabaseManager.client
             .from("csv_import_jobs")
@@ -379,22 +508,40 @@ enum FireVaultAccountSyncService {
                 )
 
             let existingRows = try await fetchAccounts()
-            let rows = makeAccountRows(
+            let plans = makeAccountImportPlans(
                 records: acceptedRecords,
-                localAccounts: localAccounts,
                 existingRows: existingRows,
                 userID: userID,
                 jobID: jobID
             )
+            skippedRows += acceptedRecords.count - plans.count
 
-            for start in stride(from: 0, to: rows.count, by: 200) {
-                let end = min(start + 200, rows.count)
-                let batch = Array(rows[start..<end])
-                try await SupabaseManager.client
-                    .from("accounts")
-                    .upsert(batch)
-                    .execute()
-                importedRows += batch.count
+            for start in stride(from: 0, to: plans.count, by: concurrentImportUpdateLimit) {
+                let end = min(start + concurrentImportUpdateLimit, plans.count)
+                let batch = Array(plans[start..<end])
+                let outcomes = await withTaskGroup(
+                    of: CloudAccountImportMutationOutcome.self,
+                    returning: [CloudAccountImportMutationOutcome].self
+                ) { group in
+                    for plan in batch {
+                        group.addTask {
+                            await applyAccountImportPlan(plan, userID: userID)
+                        }
+                    }
+                    var results: [CloudAccountImportMutationOutcome] = []
+                    for await outcome in group {
+                        results.append(outcome)
+                    }
+                    return results
+                }
+
+                importedRows += outcomes.filter { $0 == .applied }.count
+                if outcomes.contains(.conflict) {
+                    throw FireVaultAccountSyncError.concurrentModification
+                }
+                if outcomes.contains(.failed) {
+                    throw FireVaultAccountSyncError.cloudImportFailed
+                }
             }
 
             try await SupabaseManager.client
@@ -433,13 +580,12 @@ enum FireVaultAccountSyncService {
         }
     }
 
-    private static func makeAccountRows(
+    private static func makeAccountImportPlans(
         records: [FireVaultCSVParsedRecord],
-        localAccounts: [FireVaultWorkspaceAccount],
         existingRows: [FireVaultCloudAccountRow],
         userID: UUID,
         jobID: UUID
-    ) -> [CloudAccountUpsert] {
+    ) -> [CloudAccountImportPlan] {
         var existingByNumber: [String: FireVaultCloudAccountRow] = [:]
         var existingByIdentity: [String: FireVaultCloudAccountRow] = [:]
 
@@ -453,39 +599,77 @@ enum FireVaultAccountSyncService {
             }
         }
 
-        return records.map { record in
+        var plansByID: [UUID: CloudAccountImportPlan] = [:]
+        var orderedIDs: [UUID] = []
+        for record in records {
             let accountNumber = canonicalAccountID(record.accountID)
             let identity = identityKey(name: record.name, address: record.address)
             let existing = accountNumber.isEmpty
                 ? existingByIdentity[identity]
                 : existingByNumber[accountNumber]
-            let local = localAccounts.first { account in
-                if !accountNumber.isEmpty {
-                    return canonicalAccountID(account.accountId) == accountNumber
-                }
-                return identityKey(name: account.name, address: account.address) == identity
-            }
-            let accountID = existing?.id
-                ?? local.flatMap { UUID(uuidString: $0.id) }
-                ?? UUID()
+            let hasImportedAddress = !record.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let addressChanged = hasImportedAddress
+                && normalizedAddress(record.address) != normalizedAddress(existing?.combinedAddress ?? "")
+            let latitude = record.latitude ?? (addressChanged ? nil : existing?.latitude)
+            let longitude = record.longitude ?? (addressChanged ? nil : existing?.longitude)
+            // Cloud primary keys are global. A new random UUID avoids turning a
+            // device-local UUID collision from another login into a forbidden
+            // cross-user update.
+            let accountID = existing?.id ?? UUID()
 
-            return .init(
-                id: accountID,
-                userID: userID,
-                importID: jobID,
-                accountName: record.name,
-                accountNumber: accountNumber.nilIfEmpty,
-                addressLine1: record.addressLine1.nilIfEmpty,
-                addressLine2: nil,
-                city: record.city.nilIfEmpty,
-                state: record.state.nilIfEmpty,
-                postalCode: record.postalCode.nilIfEmpty,
-                country: "US",
-                latitude: record.latitude,
-                longitude: record.longitude,
-                phone: record.phone.nilIfEmpty,
-                archived: false
+            let plan = CloudAccountImportPlan(
+                row: .init(
+                    id: accountID,
+                    userID: userID,
+                    importID: jobID,
+                    accountName: record.name,
+                    accountNumber: accountNumber.nilIfEmpty ?? existing?.accountNumber,
+                    addressLine1: hasImportedAddress
+                        ? record.addressLine1.nilIfEmpty
+                        : existing?.addressLine1,
+                    addressLine2: hasImportedAddress ? nil : existing?.addressLine2,
+                    city: hasImportedAddress ? record.city.nilIfEmpty : existing?.city,
+                    state: hasImportedAddress ? record.state.nilIfEmpty : existing?.state,
+                    postalCode: hasImportedAddress ? record.postalCode.nilIfEmpty : existing?.postalCode,
+                    country: existing?.country ?? "US",
+                    latitude: latitude,
+                    longitude: longitude,
+                    phone: record.phone.nilIfEmpty ?? existing?.phone,
+                    archived: false
+                ),
+                expectedVersion: existing?.syncVersion
             )
+            if plansByID[accountID] == nil { orderedIDs.append(accountID) }
+            plansByID[accountID] = plan
+        }
+        return orderedIDs.compactMap { plansByID[$0] }
+    }
+
+    private static func applyAccountImportPlan(
+        _ plan: CloudAccountImportPlan,
+        userID: UUID
+    ) async -> CloudAccountImportMutationOutcome {
+        do {
+            if let expectedVersion = plan.expectedVersion {
+                let updated: [FireVaultCloudAccountRow] = try await SupabaseManager.client
+                    .from("accounts")
+                    .update(CloudAccountImportUpdate(row: plan.row))
+                    .eq("id", value: plan.row.id)
+                    .eq("user_id", value: userID)
+                    .eq("sync_version", value: expectedVersion)
+                    .select(accountSelect)
+                    .execute()
+                    .value
+                return updated.isEmpty ? .conflict : .applied
+            }
+
+            try await SupabaseManager.client
+                .from("accounts")
+                .insert(plan.row)
+                .execute()
+            return .applied
+        } catch {
+            return .failed
         }
     }
 
@@ -509,6 +693,19 @@ enum FireVaultAccountSyncService {
 
     private static func identityKey(name: String, address: String) -> String {
         "\(name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())|\(address.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func normalizedAddress(_ value: String) -> String {
+        let result = value
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+            .joined(separator: ",")
+        return result == "no address supplied" ? "" : result
     }
 }
 
@@ -568,7 +765,18 @@ private struct CSVImportJobCompletion: Encodable {
     }
 }
 
-private struct CloudAccountUpsert: Encodable {
+private struct CloudAccountImportPlan: Sendable {
+    let row: CloudAccountUpsert
+    let expectedVersion: Int?
+}
+
+private enum CloudAccountImportMutationOutcome: Equatable, Sendable {
+    case applied
+    case conflict
+    case failed
+}
+
+private struct CloudAccountUpsert: Encodable, Sendable {
     let id: UUID
     let userID: UUID
     let importID: UUID?
@@ -601,6 +809,135 @@ private struct CloudAccountUpsert: Encodable {
         case longitude
         case phone
         case archived
+    }
+}
+
+private struct CloudAccountImportUpdate: Encodable, Sendable {
+    let importID: UUID?
+    let accountName: String
+    let accountNumber: String?
+    let addressLine1: String?
+    let addressLine2: String?
+    let city: String?
+    let state: String?
+    let postalCode: String?
+    let country: String
+    let latitude: Double?
+    let longitude: Double?
+    let phone: String?
+    let archived: Bool
+
+    init(row: CloudAccountUpsert) {
+        importID = row.importID
+        accountName = row.accountName
+        accountNumber = row.accountNumber
+        addressLine1 = row.addressLine1
+        addressLine2 = row.addressLine2
+        city = row.city
+        state = row.state
+        postalCode = row.postalCode
+        country = row.country
+        latitude = row.latitude
+        longitude = row.longitude
+        phone = row.phone
+        archived = row.archived
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case importID = "import_id"
+        case accountName = "account_name"
+        case accountNumber = "account_number"
+        case addressLine1 = "address_line_1"
+        case addressLine2 = "address_line_2"
+        case city
+        case state
+        case postalCode = "postal_code"
+        case country
+        case latitude
+        case longitude
+        case phone
+        case archived
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(importID, forKey: .importID)
+        try container.encode(accountName, forKey: .accountName)
+        try container.encode(accountNumber, forKey: .accountNumber)
+        try container.encode(addressLine1, forKey: .addressLine1)
+        try container.encode(addressLine2, forKey: .addressLine2)
+        try container.encode(city, forKey: .city)
+        try container.encode(state, forKey: .state)
+        try container.encode(postalCode, forKey: .postalCode)
+        try container.encode(country, forKey: .country)
+        try container.encode(latitude, forKey: .latitude)
+        try container.encode(longitude, forKey: .longitude)
+        try container.encode(phone, forKey: .phone)
+        try container.encode(archived, forKey: .archived)
+    }
+}
+
+private struct CloudAccountUpdate: Encodable {
+    let accountName: String
+    let accountNumber: String?
+    let addressLine1: String?
+    let addressLine2: String?
+    let city: String?
+    let state: String?
+    let postalCode: String?
+    let country: String
+    let latitude: Double?
+    let longitude: Double?
+    let phone: String?
+    let archived: Bool
+
+    init(account: FireVaultWorkspaceAccount) {
+        accountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        accountNumber = account.accountId.nilIfEmpty
+        let address = account.address.trimmingCharacters(in: .whitespacesAndNewlines)
+        addressLine1 = address.caseInsensitiveCompare("No address supplied") == .orderedSame
+            ? nil
+            : address.nilIfEmpty
+        addressLine2 = nil
+        city = nil
+        state = nil
+        postalCode = nil
+        country = "US"
+        latitude = account.latitude
+        longitude = account.longitude
+        phone = account.phone.nilIfEmpty
+        archived = false
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case accountName = "account_name"
+        case accountNumber = "account_number"
+        case addressLine1 = "address_line_1"
+        case addressLine2 = "address_line_2"
+        case city
+        case state
+        case postalCode = "postal_code"
+        case country
+        case latitude
+        case longitude
+        case phone
+        case archived
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(accountName, forKey: .accountName)
+        try container.encode(accountNumber, forKey: .accountNumber)
+        try container.encode(addressLine1, forKey: .addressLine1)
+        try container.encode(addressLine2, forKey: .addressLine2)
+        try container.encode(city, forKey: .city)
+        try container.encode(state, forKey: .state)
+        try container.encode(postalCode, forKey: .postalCode)
+        try container.encode(country, forKey: .country)
+        try container.encode(latitude, forKey: .latitude)
+        try container.encode(longitude, forKey: .longitude)
+        try container.encode(phone, forKey: .phone)
+        try container.encode(archived, forKey: .archived)
     }
 }
 
