@@ -325,6 +325,17 @@ actor FireVaultFieldMediaBackupStore {
         try persist()
     }
 
+    /// Removes stale work created from legacy document records whose local
+    /// attachment was already missing before automatic backup was enabled.
+    func removeUnavailableLocalFiles() throws {
+        let previousCount = items.count
+        items.removeAll {
+            $0.state != .backedUp
+                && !FileManager.default.fileExists(atPath: $0.localFileURL.path)
+        }
+        if items.count != previousCount { try persist() }
+    }
+
     func pruneBackedUp(olderThan days: Int = 7) throws {
         let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? .distantPast
         items.removeAll {
@@ -773,6 +784,9 @@ final class FireVaultFieldMediaBackupService: ObservableObject {
     ) async {
         self.storagePreferences = storagePreferences
         self.isDemoMode = isDemoMode
+        if let store {
+            try? await store.removeUnavailableLocalFiles()
+        }
         if storagePreferences.backupOverlayCopies != true, let store {
             try? await store.removePending(variant: "overlay")
         }
@@ -791,6 +805,7 @@ final class FireVaultFieldMediaBackupService: ObservableObject {
     ) async -> UUID? {
         guard isEnabled, let store else { return nil }
         if variant == "overlay", storagePreferences.backupOverlayCopies != true { return nil }
+        guard FileManager.default.fileExists(atPath: localFileURL.path) else { return nil }
 
         let attributes = try? FileManager.default.attributesOfItem(atPath: localFileURL.path)
         let modified = attributes?[.modificationDate] as? Date

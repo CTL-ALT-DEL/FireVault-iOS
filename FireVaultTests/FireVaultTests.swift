@@ -202,6 +202,28 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(pendingIDs, [item.id])
     }
 
+    func testFieldMediaQueueRemovesUnavailableLegacyAttachments() async throws {
+        let fixture = try makeFieldMediaQueueFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        let store = try FireVaultFieldMediaBackupStore(fileURL: fixture.queueURL)
+        let item = FireVaultFieldMediaBackupItem(
+            localAccountID: "legacy-account",
+            userID: UUID(),
+            accountID: UUID(),
+            localFileURL: fixture.mediaURL,
+            originalFilename: fixture.mediaURL.lastPathComponent,
+            category: .documents,
+            mimeType: "application/pdf"
+        )
+        try await store.enqueueIfNeeded(item)
+        try FileManager.default.removeItem(at: fixture.mediaURL)
+
+        try await store.removeUnavailableLocalFiles()
+
+        let remaining = await store.allItems()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
     func testFieldMediaRetryUsesBoundedExponentialBackoff() {
         XCTAssertEqual(FireVaultFieldMediaBackupCoordinator.backoffSeconds(for: 1), 60)
         XCTAssertEqual(FireVaultFieldMediaBackupCoordinator.backoffSeconds(for: 2), 300)
