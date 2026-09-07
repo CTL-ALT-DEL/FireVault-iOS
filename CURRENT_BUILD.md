@@ -2,8 +2,14 @@
 
 ## Official `main` release candidate
 
-- Visible version: **1.08.73**
-- Build number: **133**
+- Visible version: **1.08.84**
+- Build number: **149**
+- Adds cryptographically verified App Store subscription linking and prepares
+  server-enforced paid-feature access with a deliberately disabled rollout flag.
+- Keeps expired/free users' existing cloud data readable, downloadable,
+  exportable, and deletable while preventing new cloud writes after enforcement.
+- Adds server-side paid-access checks for AI, geocoding, and emailed Trip Reports.
+- Adds a read-only portal state for users without an active subscription.
 - Includes the tested CarPlay optimization and four-widget portfolio:
   Dashboard, Trip Log, Field Account, and Cloud Status.
 - Includes the rebuilt searchable Help Center with task-based guides, concise
@@ -19,7 +25,7 @@
 
 ## Release rule
 
-1. Development happens on a protected `build/*` branch.
+1. Development happens on a protected feature branch, normally `codex/*`.
 2. The generic iOS device build and automated tests must pass.
 3. Location-related changes require a physical-device field test.
 4. The visible version/build is changed only after approval.

@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { paidAccessDecision } from "../_shared/paid-access.ts";
 import {
   PDFDocument,
   StandardFonts,
@@ -77,6 +78,14 @@ Deno.serve(async (request) => {
     let sent = 0;
     let skipped = 0;
     for (const preference of (preferences ?? []) as Preference[]) {
+      const access = await paidAccessDecision(admin, preference.user_id);
+      if (!access.allowed) {
+        if (userID) {
+          return json({ error: "Subscription Required", code: access.reason }, 402);
+        }
+        skipped++;
+        continue;
+      }
       const requestedKind = body.kind as ReportKind | undefined;
       const kinds: ReportKind[] = requestedKind ? [requestedKind] : ["daily", "weekly"];
       for (const kind of kinds) {
