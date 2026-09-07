@@ -1435,6 +1435,73 @@ final class FireVaultTests: XCTestCase {
         )
     }
 
+    func testLegacyBackfillDoesNotReuseCloudRowOwnedBySettledAccount() {
+        let remoteID = UUID()
+        let remote = makeCloudAccountRow(
+            id: remoteID,
+            name: "Acme Fire",
+            accountNumber: "FV-100",
+            address: "100 Main Street",
+            syncVersion: 3
+        )
+        var settled = makeWorkspaceAccount(
+            cloudID: remoteID,
+            name: "Acme Fire",
+            accountNumber: "FV-100",
+            address: "100 Main Street"
+        )
+        settled.cloudSyncedAt = remote.updatedAt
+        settled.cloudSyncVersion = remote.syncVersion
+        var pendingDuplicate = makeWorkspaceAccount(
+            cloudID: UUID(),
+            name: "Acme Fire Duplicate",
+            accountNumber: "FV-100",
+            address: "100 Main Street"
+        )
+        pendingDuplicate.cloudID = nil
+
+        let mappings = FireVaultAccountSyncService.legacyBackfillExistingMappings(
+            [settled, pendingDuplicate],
+            remoteRows: [remote]
+        )
+
+        XCTAssertNil(mappings[settled.id])
+        XCTAssertNil(mappings[pendingDuplicate.id])
+    }
+
+    func testLegacyBackfillAssignsExistingCloudRowToOnlyOnePendingAccount() {
+        let remoteID = UUID()
+        let remote = makeCloudAccountRow(
+            id: remoteID,
+            name: "Acme Fire",
+            accountNumber: "FV-100",
+            address: "100 Main Street",
+            syncVersion: 3
+        )
+        var first = makeWorkspaceAccount(
+            cloudID: UUID(),
+            name: "Acme Fire",
+            accountNumber: "FV-100",
+            address: "100 Main Street"
+        )
+        first.cloudID = nil
+        var second = makeWorkspaceAccount(
+            cloudID: UUID(),
+            name: "Acme Fire Duplicate",
+            accountNumber: "FV-100",
+            address: "100 Main Street"
+        )
+        second.cloudID = nil
+
+        let mappings = FireVaultAccountSyncService.legacyBackfillExistingMappings(
+            [first, second],
+            remoteRows: [remote]
+        )
+
+        XCTAssertEqual(mappings.count, 1)
+        XCTAssertEqual(Set(mappings.values), [remoteID])
+    }
+
     func testDeletingDifferentCloudLoginPreservesLocalVault() throws {
         let suite = "FireVaultTests.CloudDeleteMismatch.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
