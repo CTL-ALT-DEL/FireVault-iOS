@@ -2,8 +2,12 @@
 
 ## Official `main` release candidate
 
-- Visible version: **1.08.85**
-- Build number: **150**
+- Visible version: **1.08.86**
+- Build number: **151**
+- Expands the app privacy manifest to match cloud-synced customer records,
+  photos, Trip Report email delivery, verified purchases, and operational logs.
+- Warns that deleting a FireVault account does not cancel Apple billing and
+  links directly to Apple subscription management before deletion.
 - Restores verified App Store subscriptions even when Apple's product catalog
   is temporarily unavailable and reports accurately when no purchase exists.
 - Adds cryptographically verified App Store subscription linking and prepares
