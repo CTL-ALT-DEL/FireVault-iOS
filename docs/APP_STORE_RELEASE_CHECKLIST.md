@@ -7,7 +7,7 @@ Never commit reviewer passwords, App Store credentials, or production secrets.
 ## Current candidate
 
 - Version: **1.08.86**
-- Build: **151**
+- Build: **154**
 - Bundle ID: `us.bannerman.firevault`
 - Display name: **FireVault Pro**
 - Minimum iOS/iPadOS: **26.5**
@@ -15,7 +15,7 @@ Never commit reviewer passwords, App Store credentials, or production secrets.
 - Privacy policy: `https://firevault.bannerman.us/privacy`
 - Terms of Use: `https://firevault.bannerman.us/terms`
 
-Any code change after build 151 requires a new build number and TestFlight
+Any code change after build 154 requires a new build number and TestFlight
 upload before submission.
 
 ## Blocking business requirement

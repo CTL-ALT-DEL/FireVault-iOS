@@ -3,7 +3,7 @@
 ## Official `main` release candidate
 
 - Visible version: **1.08.86**
-- Build number: **151**
+- Build number: **154**
 - Expands the app privacy manifest to match cloud-synced customer records,
   photos, Trip Report email delivery, verified purchases, and operational logs.
 - Warns that deleting a FireVault account does not cancel Apple billing and
@@ -25,6 +25,8 @@
   icons, and a true compile-time build timestamp on the About screen.
 - Moves account identity, compact Cloud Sync status, Sync Now, and Sign Out into
   Technician Profile while keeping required account deletion under Security.
+- Scopes Technician Profile identity fields to the signed-in FireVault user so
+  a new account cannot inherit another user's name or contact details.
 - Adds Cloudflare Turnstile verification to native sign-in, sign-up, and
   password-reset requests while preserving the current 1.08.72 feature set.
 - Intended distribution: TestFlight.
