@@ -274,6 +274,7 @@ struct FireVaultTechnicianStorefrontView: View {
                 Label("Restore", systemImage: "arrow.clockwise")
                     .frame(maxWidth: .infinity)
             }
+            .disabled(isPurchasing || subscriptions.isLoading)
             Button {
                 manageSubscription()
             } label: {
@@ -386,10 +387,8 @@ struct FireVaultTechnicianStorefrontView: View {
         Task {
             defer { isPurchasing = false }
             do {
-                try await subscriptions.restorePurchases()
-                message = subscriptions.access.grantsFullAccess
-                    ? "Your FireVault Technician subscription was restored."
-                    : "No active FireVault Technician subscription was found for this Apple Account."
+                let outcome = try await subscriptions.restorePurchases()
+                message = outcome.message
             } catch {
                 message = error.localizedDescription
             }
