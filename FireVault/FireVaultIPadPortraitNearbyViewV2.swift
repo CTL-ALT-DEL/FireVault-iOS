@@ -750,11 +750,11 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(row.account.name)
                         .font(.subheadline.bold())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NativeShellPalette.primaryText)
                         .lineLimit(1)
                     Text(row.account.address)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(NativeShellPalette.secondaryText)
                         .lineLimit(1)
                 }
 
@@ -783,7 +783,6 @@ struct FireVaultIPadPortraitNearbyViewV2: View {
                 radius: isSelected ? 9 : 6,
                 y: isSelected ? 5 : 3
             )
-            .opacity(selectedID == nil || isSelected ? 1 : 0.38)
             .animation(.easeOut(duration: 0.18), value: selectedID)
         }
         .buttonStyle(.plain)

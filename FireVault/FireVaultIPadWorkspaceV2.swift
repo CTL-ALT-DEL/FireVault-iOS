@@ -717,12 +717,12 @@ private struct FireVaultIPadNearbyWorkspaceV2: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(row.account.name)
                             .font(.subheadline.bold())
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NativeShellPalette.primaryText)
                             .lineLimit(2)
 
                         Text(row.account.address)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(NativeShellPalette.secondaryText)
                             .lineLimit(2)
 
                         Text(row.distanceLabel)

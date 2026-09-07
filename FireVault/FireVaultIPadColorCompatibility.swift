@@ -10,7 +10,7 @@ import SwiftUI
 extension Color {
     /// A subdued semantic color for metadata and unselected controls.
     static var tertiary: Color {
-        Color.secondary.opacity(0.62)
+        NativeShellPalette.tertiaryText
     }
 }
 

@@ -898,6 +898,21 @@ final class FireVaultTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(contrastRatio(accent, surface), 4.5)
     }
 
+    func testAdaptiveSupportingTextMeetsContrastTargetsOnIPadSurfaces() {
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            let canvas = NativeShellPalette.backgroundUIColor.resolvedColor(with: traits)
+            let surface = NativeShellPalette.surfaceUIColor.resolvedColor(with: traits)
+            let secondary = NativeShellPalette.secondaryTextUIColor.resolvedColor(with: traits)
+            let tertiary = NativeShellPalette.tertiaryTextUIColor.resolvedColor(with: traits)
+
+            XCTAssertGreaterThanOrEqual(contrastRatio(secondary, canvas), 4.5)
+            XCTAssertGreaterThanOrEqual(contrastRatio(secondary, surface), 4.5)
+            XCTAssertGreaterThanOrEqual(contrastRatio(tertiary, canvas), 4.5)
+            XCTAssertGreaterThanOrEqual(contrastRatio(tertiary, surface), 4.5)
+        }
+    }
+
     private func rgba(_ color: UIColor) -> (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) {
         var red: CGFloat = 0
         var green: CGFloat = 0
