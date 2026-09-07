@@ -3784,6 +3784,55 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(reloaded.preferences.webDAV.serverURL, "https://storage.example.com")
     }
 
+    func testTechnicianProfileIsScopedToSignedInUserAndMigratesToVaultOwner() throws {
+        let suite = "FireVaultTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let ownerUserID = UUID()
+        let newUserID = UUID()
+        let legacyStore = FireVaultNativeSettingsStore(defaults: defaults)
+        var legacyPreferences = legacyStore.preferences
+        legacyPreferences.technician = FireVaultTechnicianPreferences(
+            name: "David Bannerman",
+            company: "Bannerman US LLC",
+            phone: "307-555-0100",
+            email: "david@example.com",
+            license: "DB-1"
+        )
+        legacyStore.save(legacyPreferences)
+
+        let newUserStore = FireVaultNativeSettingsStore(defaults: defaults)
+        newUserStore.activateTechnicianProfile(
+            for: newUserID,
+            legacyOwnerUserID: ownerUserID
+        )
+        XCTAssertEqual(newUserStore.preferences.technician, FireVaultTechnicianPreferences())
+
+        var newUserPreferences = newUserStore.preferences
+        newUserPreferences.technician.name = "New Technician"
+        newUserStore.save(newUserPreferences)
+
+        let ownerStore = FireVaultNativeSettingsStore(defaults: defaults)
+        ownerStore.activateTechnicianProfile(
+            for: ownerUserID,
+            legacyOwnerUserID: ownerUserID
+        )
+        XCTAssertEqual(ownerStore.preferences.technician.name, "David Bannerman")
+        XCTAssertEqual(ownerStore.preferences.technician.company, "Bannerman US LLC")
+
+        let reloadedNewUserStore = FireVaultNativeSettingsStore(defaults: defaults)
+        reloadedNewUserStore.activateTechnicianProfile(
+            for: newUserID,
+            legacyOwnerUserID: ownerUserID
+        )
+        XCTAssertEqual(reloadedNewUserStore.preferences.technician.name, "New Technician")
+        XCTAssertNotEqual(
+            reloadedNewUserStore.preferences.technician.name,
+            ownerStore.preferences.technician.name
+        )
+    }
+
     func testPreferredSettingsViewAndAdvancedOptionsPersist() throws {
         let suite = "FireVaultTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

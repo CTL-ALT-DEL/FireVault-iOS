@@ -10,8 +10,8 @@ import UIKit
 import CoreLocation
 
 struct ContentView: View {
-    @StateObject private var store = FireVaultStore()
-    @StateObject private var settings = FireVaultNativeSettingsStore()
+    @StateObject private var store: FireVaultStore
+    @StateObject private var settings: FireVaultNativeSettingsStore
     @StateObject private var subscriptions = FireVaultSubscriptionStore()
     @StateObject private var locationService = FireVaultLocationService.shared
     @StateObject private var liveBreadcrumbs = FireVaultBreadcrumbStore.shared
@@ -28,7 +28,17 @@ struct ContentView: View {
     @State private var widgetSnapshotTask: Task<Void, Never>?
     @State private var hasStartedInitialCloudSync = false
 
-    init() {
+    init(authenticatedUserID: UUID? = nil) {
+        let store = FireVaultStore()
+        let settings = FireVaultNativeSettingsStore()
+        if let authenticatedUserID {
+            settings.activateTechnicianProfile(
+                for: authenticatedUserID,
+                legacyOwnerUserID: store.localVaultOwnerUserID
+            )
+        }
+        _store = StateObject(wrappedValue: store)
+        _settings = StateObject(wrappedValue: settings)
         _demoBreadcrumbs = State(initialValue: FireVaultDemoShowroom.makeBreadcrumbStore())
     }
 

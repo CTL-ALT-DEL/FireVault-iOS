@@ -536,6 +536,7 @@ struct FireVaultNativePreferences: Codable, Equatable {
 final class FireVaultNativeSettingsStore: ObservableObject {
     private enum Key {
         static let preferences = "firevault.native.settings.all.v2"
+        static let technicianProfilePrefix = "firevault.native.settings.technician.v1."
         static let settingsView = "firevault.native.settings.view.v1"
         static let developer = "firevault.native.settings.developer.v1"
         static let appearance = "firevault.native.settings.appearance.v1"
@@ -552,6 +553,7 @@ final class FireVaultNativeSettingsStore: ObservableObject {
     private let defaults: UserDefaults
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private var activeTechnicianUserID: UUID?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -587,6 +589,41 @@ final class FireVaultNativeSettingsStore: ObservableObject {
         var merged = updated
         merged.overlay = FireVaultOverlayEditorBridge.merge(into: updated.overlay)
         preferences = merged.normalized
+        persist()
+    }
+
+    /// Technician identity is personal account data, unlike the remaining
+    /// device preferences. Load it from a user-specific slot before showing
+    /// authenticated content so a different login cannot inherit it.
+    func activateTechnicianProfile(for userID: UUID, legacyOwnerUserID: UUID?) {
+        let legacyProfile = preferences.technician
+
+        // Builds before account-scoped profiles stored the technician in the
+        // shared preferences payload. Preserve that profile for the user who
+        // already owns this device's cloud vault, even when another user is
+        // signed in during the upgrade.
+        if let legacyOwnerUserID,
+           loadTechnicianProfile(for: legacyOwnerUserID) == nil,
+           legacyProfile.hasEnteredDetails {
+            persistTechnicianProfile(legacyProfile, for: legacyOwnerUserID)
+        }
+
+        activeTechnicianUserID = userID
+        if let saved = loadTechnicianProfile(for: userID) {
+            preferences.technician = saved
+        } else if legacyOwnerUserID == userID, legacyProfile.hasEnteredDetails {
+            preferences.technician = legacyProfile
+            persistTechnicianProfile(legacyProfile, for: userID)
+        } else {
+            preferences.technician = FireVaultTechnicianPreferences()
+        }
+        persist()
+    }
+
+    func removeTechnicianProfile(for userID: UUID) {
+        defaults.removeObject(forKey: technicianProfileKey(for: userID))
+        guard activeTechnicianUserID == userID else { return }
+        preferences.technician = FireVaultTechnicianPreferences()
         persist()
     }
 
@@ -682,7 +719,39 @@ final class FireVaultNativeSettingsStore: ObservableObject {
     }
 
     private func persist() {
-        guard let data = try? encoder.encode(preferences) else { return }
+        if let activeTechnicianUserID {
+            persistTechnicianProfile(preferences.technician, for: activeTechnicianUserID)
+        }
+
+        var sharedPreferences = preferences
+        if activeTechnicianUserID != nil {
+            // Do not leave personal identity in the device-wide payload once
+            // this installation has migrated to account-scoped profiles.
+            sharedPreferences.technician = FireVaultTechnicianPreferences()
+        }
+        guard let data = try? encoder.encode(sharedPreferences) else { return }
         defaults.set(data, forKey: Key.preferences)
+    }
+
+    private func technicianProfileKey(for userID: UUID) -> String {
+        Key.technicianProfilePrefix + userID.uuidString.lowercased()
+    }
+
+    private func loadTechnicianProfile(for userID: UUID) -> FireVaultTechnicianPreferences? {
+        guard let data = defaults.data(forKey: technicianProfileKey(for: userID)) else { return nil }
+        return try? decoder.decode(FireVaultTechnicianPreferences.self, from: data)
+    }
+
+    private func persistTechnicianProfile(_ profile: FireVaultTechnicianPreferences, for userID: UUID) {
+        guard let data = try? encoder.encode(profile) else { return }
+        defaults.set(data, forKey: technicianProfileKey(for: userID))
+    }
+}
+
+private extension FireVaultTechnicianPreferences {
+    var hasEnteredDetails: Bool {
+        [name, company, phone, email, license].contains {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 }
