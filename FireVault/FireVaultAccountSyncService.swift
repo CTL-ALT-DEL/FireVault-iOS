@@ -396,16 +396,9 @@ enum FireVaultAccountSyncService {
     ) async throws -> FireVaultLegacyBackfillResult {
         let session = try await SupabaseManager.client.auth.session
         let remote = if let remoteRows { remoteRows } else { try await fetchAccounts() }
-        var byNumber: [String: FireVaultCloudAccountRow] = [:]
-        var byIdentity: [String: FireVaultCloudAccountRow] = [:]
-        for row in remote {
-            let number = canonicalAccountID(row.accountNumber ?? "")
-            if !number.isEmpty, byNumber[number] == nil { byNumber[number] = row }
-            if byIdentity[row.identityKey] == nil { byIdentity[row.identityKey] = row }
-        }
-        var mappings: [String: UUID] = [:]
+        var mappings = legacyBackfillExistingMappings(accounts, remoteRows: remote)
         var uploaded = 0
-        var matched = 0
+        let matched = mappings.count
         // Include every record the status UI considers pending. In particular,
         // accounts linked by the legacy sync can have a cloud ID and timestamp
         // but no revision, and must be rematched before reconciliation.
@@ -413,47 +406,76 @@ enum FireVaultAccountSyncService {
 
         for (offset, account) in candidates.enumerated() {
             try Task.checkCancellation()
+            if mappings[account.id] != nil {
+                await progress(offset + 1, candidates.count)
+                continue
+            }
+
             let number = canonicalAccountID(account.accountId)
-            let identity = identityKey(name: account.name, address: account.address)
-            let existing = account.cloudID.flatMap(UUID.init(uuidString:)).flatMap { id in
-                remote.first { $0.id == id }
-            } ?? (!number.isEmpty ? byNumber[number] : nil) ?? byIdentity[identity]
             // Supabase uses one global primary-key namespace for this table.
             // Never reuse the device-local UUID when creating a cloud row: an
             // older vault may already have uploaded that UUID under another
             // user, and an upsert would then attempt a forbidden cross-user
             // update instead of a safe insert.
-            let remoteID = existing?.id ?? UUID()
-
-            if existing == nil {
-                let row = CloudAccountUpsert(
-                    id: remoteID, userID: session.user.id, importID: nil,
-                    accountName: account.name, accountNumber: number.nilIfEmpty,
-                    addressLine1: account.address.nilIfEmpty, addressLine2: nil,
-                    city: nil, state: nil, postalCode: nil, country: "US",
-                    latitude: account.latitude, longitude: account.longitude,
-                    phone: account.phone.nilIfEmpty, archived: false
-                )
-                try await withRetry {
-                    try await SupabaseManager.client.from("accounts").upsert(row).execute()
-                }
-                uploaded += 1
-                let synthesized = FireVaultCloudAccountRow(
-                    id: remoteID, accountName: account.name, accountNumber: number.nilIfEmpty,
-                    addressLine1: account.address.nilIfEmpty, addressLine2: nil, city: nil,
-                    state: nil, postalCode: nil, country: "US", latitude: account.latitude,
-                    longitude: account.longitude, phone: account.phone.nilIfEmpty, archived: false,
-                    updatedAt: Date(), syncVersion: 1
-                )
-                if !number.isEmpty { byNumber[number] = synthesized }
-                byIdentity[identity] = synthesized
-            } else {
-                matched += 1
+            let remoteID = UUID()
+            let row = CloudAccountUpsert(
+                id: remoteID, userID: session.user.id, importID: nil,
+                accountName: account.name, accountNumber: number.nilIfEmpty,
+                addressLine1: account.address.nilIfEmpty, addressLine2: nil,
+                city: nil, state: nil, postalCode: nil, country: "US",
+                latitude: account.latitude, longitude: account.longitude,
+                phone: account.phone.nilIfEmpty, archived: false
+            )
+            try await withRetry {
+                try await SupabaseManager.client.from("accounts").upsert(row).execute()
             }
+            uploaded += 1
             mappings[account.id] = remoteID
             await progress(offset + 1, candidates.count)
         }
         return .init(uploaded: uploaded, matched: matched, mappings: mappings)
+    }
+
+    /// Matches legacy local records to existing rows without ever assigning one
+    /// cloud row to two iPhone accounts. A settled account owns its cloud row;
+    /// any additional local record with the same number or identity must receive
+    /// a distinct row during backfill rather than remaining pending forever.
+    static func legacyBackfillExistingMappings(
+        _ accounts: [FireVaultWorkspaceAccount],
+        remoteRows: [FireVaultCloudAccountRow]
+    ) -> [String: UUID] {
+        let candidates = accounts.filter(\.needsCloudAccountSync)
+        let remoteIDs = Set(remoteRows.map(\.id))
+        var claimedRemoteIDs = Set(
+            accounts.lazy
+                .filter { !$0.needsCloudAccountSync }
+                .compactMap { $0.cloudID.flatMap(UUID.init(uuidString:)) }
+        )
+        var mappings: [String: UUID] = [:]
+
+        // Preserve valid explicit links before attempting fuzzy legacy matches.
+        for account in candidates {
+            guard let linkedID = account.cloudID.flatMap(UUID.init(uuidString:)),
+                  remoteIDs.contains(linkedID),
+                  claimedRemoteIDs.insert(linkedID).inserted else { continue }
+            mappings[account.id] = linkedID
+        }
+
+        for account in candidates where mappings[account.id] == nil {
+            let number = canonicalAccountID(account.accountId)
+            let identity = identityKey(name: account.name, address: account.address)
+            let match = remoteRows.first { row in
+                guard !claimedRemoteIDs.contains(row.id) else { return false }
+                let remoteNumber = canonicalAccountID(row.accountNumber ?? "")
+                if !number.isEmpty, number == remoteNumber { return true }
+                return row.identityKey == identity
+            }
+            guard let match else { continue }
+            claimedRemoteIDs.insert(match.id)
+            mappings[account.id] = match.id
+        }
+
+        return mappings
     }
 
     static func isTransientNetworkError(_ error: Error) -> Bool {
