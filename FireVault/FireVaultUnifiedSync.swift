@@ -398,7 +398,8 @@ struct FireVaultUnifiedSyncCard: View {
 extension View {
     func fireVaultNavigationActionStyle() -> some View {
         font(.system(.subheadline, design: .rounded, weight: .bold))
-            .buttonStyle(.glass)
-            .buttonBorderShape(.capsule)
+            .foregroundStyle(NativeShellPalette.blue)
+            .buttonStyle(.plain)
+            .fixedSize(horizontal: true, vertical: false)
     }
 }
