@@ -327,7 +327,7 @@ struct FireVaultIPadAccountLocationsDetailsViewV2: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(account.name)
                     .font(.title3.bold())
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NativeShellPalette.primaryText)
                     .lineLimit(1)
                 Text("LOCATIONS & DETAILS")
                     .font(.caption2.bold())
@@ -435,7 +435,7 @@ struct FireVaultIPadAccountLocationsDetailsViewV2: View {
 
                         Text(account.name)
                             .font(.largeTitle.bold())
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NativeShellPalette.primaryText)
 
                         Label(account.address, systemImage: "mappin.and.ellipse")
                             .font(.subheadline)
@@ -508,7 +508,7 @@ struct FireVaultIPadAccountLocationsDetailsViewV2: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(location.label)
                         .font(.subheadline.bold())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NativeShellPalette.primaryText)
                     Text([location.subtitle, location.plusCode].filter { !$0.isEmpty }.joined(separator: " • "))
                         .font(.caption)
                         .foregroundStyle(.secondary)

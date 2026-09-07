@@ -4838,6 +4838,14 @@ enum NativeShellPalette {
         light: UIColor(red: 0.145, green: 0.137, blue: 0.122, alpha: 1),
         dark: UIColor(white: 0.96, alpha: 1)
     )
+    static let secondaryTextUIColor = adaptiveUIColor(
+        light: UIColor(red: 0.361, green: 0.341, blue: 0.306, alpha: 1),
+        dark: UIColor(white: 0.72, alpha: 1)
+    )
+    static let tertiaryTextUIColor = adaptiveUIColor(
+        light: UIColor(red: 0.412, green: 0.388, blue: 0.349, alpha: 1),
+        dark: UIColor(white: 0.67, alpha: 1)
+    )
     static let borderUIColor = adaptiveUIColor(
         light: UIColor(red: 0.31, green: 0.28, blue: 0.24, alpha: 0.22),
         dark: UIColor(white: 1, alpha: 0.14)
@@ -4845,6 +4853,9 @@ enum NativeShellPalette {
 
     static let background = Color(uiColor: backgroundUIColor)
     static let surface = Color(uiColor: surfaceUIColor)
+    static let primaryText = Color(uiColor: primaryTextUIColor)
+    static let secondaryText = Color(uiColor: secondaryTextUIColor)
+    static let tertiaryText = Color(uiColor: tertiaryTextUIColor)
     static let surfaceRaised = adaptive(
         light: UIColor(red: 0.984, green: 0.957, blue: 0.902, alpha: 1),
         dark: UIColor(red: 0.090, green: 0.116, blue: 0.148, alpha: 1)
