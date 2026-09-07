@@ -13,6 +13,67 @@ import SwiftUI
 
 @MainActor
 final class FireVaultTests: XCTestCase {
+    func testPrivacyManifestCoversCloudCollectedData() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let manifestURL = repositoryRoot.appendingPathComponent("FireVault/PrivacyInfo.xcprivacy")
+        let data = try Data(contentsOf: manifestURL)
+        let propertyList = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+        let declarations = try XCTUnwrap(
+            propertyList["NSPrivacyCollectedDataTypes"] as? [[String: Any]]
+        )
+        let declarationsByType = Dictionary(
+            uniqueKeysWithValues: declarations.compactMap { declaration in
+                (declaration["NSPrivacyCollectedDataType"] as? String).map { ($0, declaration) }
+            }
+        )
+        let expectedTypes: Set<String> = [
+            "NSPrivacyCollectedDataTypeName",
+            "NSPrivacyCollectedDataTypeEmailAddress",
+            "NSPrivacyCollectedDataTypePhoneNumber",
+            "NSPrivacyCollectedDataTypePhysicalAddress",
+            "NSPrivacyCollectedDataTypeUserID",
+            "NSPrivacyCollectedDataTypePreciseLocation",
+            "NSPrivacyCollectedDataTypePhotosorVideos",
+            "NSPrivacyCollectedDataTypeEmailsOrTextMessages",
+            "NSPrivacyCollectedDataTypePurchaseHistory",
+            "NSPrivacyCollectedDataTypeOtherUserContent",
+            "NSPrivacyCollectedDataTypeOtherDiagnosticData"
+        ]
+
+        XCTAssertTrue(
+            expectedTypes.isSubset(of: Set(declarationsByType.keys)),
+            "PrivacyInfo.xcprivacy must cover every data type retained by FireVault cloud services."
+        )
+        for type in expectedTypes {
+            let declaration = try XCTUnwrap(declarationsByType[type])
+            XCTAssertEqual(declaration["NSPrivacyCollectedDataTypeLinked"] as? Bool, true, type)
+            XCTAssertEqual(declaration["NSPrivacyCollectedDataTypeTracking"] as? Bool, false, type)
+            XCTAssertTrue(
+                (declaration["NSPrivacyCollectedDataTypePurposes"] as? [String])?
+                    .contains("NSPrivacyCollectedDataTypePurposeAppFunctionality") == true,
+                type
+            )
+        }
+    }
+
+    func testAccountDeletionPolicyWarnsAboutAppleBilling() {
+        XCTAssertTrue(
+            FireVaultAccountDeletionPolicy.subscriptionNotice
+                .localizedCaseInsensitiveContains("does not cancel")
+        )
+        XCTAssertTrue(
+            FireVaultAccountDeletionPolicy.subscriptionNotice
+                .localizedCaseInsensitiveContains("Apple")
+        )
+        XCTAssertEqual(FireVaultAccountDeletionPolicy.manageSubscriptionURL.scheme, "https")
+        XCTAssertEqual(FireVaultAccountDeletionPolicy.manageSubscriptionURL.host, "apps.apple.com")
+        XCTAssertEqual(FireVaultAccountDeletionPolicy.manageSubscriptionURL.path, "/account/subscriptions")
+    }
+
     func testScanPreviewCanRouteDirectlyToAccountFilesAndScans() throws {
         let suite = "FireVaultTests.ScanLibraryRoute.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

@@ -1072,6 +1072,11 @@ private struct FireVaultAccountSyncConflictDetailView: View {
     }
 }
 
+enum FireVaultAccountDeletionPolicy {
+    static let subscriptionNotice = "Deleting your FireVault account does not cancel an App Store subscription. Cancel it before deleting if you do not want future charges from Apple."
+    static let manageSubscriptionURL = URL(string: "https://apps.apple.com/account/subscriptions")!
+}
+
 struct FireVaultAccountDeletionView: View {
     @EnvironmentObject private var authentication: FireVaultAuthentication
     @ObservedObject var store: FireVaultStore
@@ -1085,6 +1090,15 @@ struct FireVaultAccountDeletionView: View {
                 Text("This removes your FireVault cloud sign-in and associated cloud data. Local account records are cleared only when they belong to this login.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+            }
+
+            Section("Apple Subscription") {
+                Text(FireVaultAccountDeletionPolicy.subscriptionNotice)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Link(destination: FireVaultAccountDeletionPolicy.manageSubscriptionURL) {
+                    Label("Manage Apple Subscription", systemImage: "arrow.up.right.square")
+                }
             }
 
             Section {
@@ -1108,7 +1122,7 @@ struct FireVaultAccountDeletionView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This cannot be undone. If cloud deletion fails, local data will remain on this iPhone.")
+            Text("This cannot be undone and does not cancel Apple billing. If cloud deletion fails, local data will remain on this iPhone.")
         }
     }
 }
