@@ -35,7 +35,7 @@ Billing-retry status without an Apple grace-period expiration is read-only.
 
    `https://dgzriqqflbhioflblirm.supabase.co/functions/v1/app-store-notifications`
 
-5. Install build 149 through TestFlight. Open **Settings → FireVault Plan** and
+5. Install build 150 or later through TestFlight. Open **Settings → FireVault Plan** and
    use **Restore** once. This submits the latest signed transaction and creates
    the first `user_subscription_access` row.
 6. Confirm the user's row has the expected product, Sandbox environment, status,
