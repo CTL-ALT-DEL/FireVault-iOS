@@ -498,6 +498,33 @@ final class FireVaultTests: XCTestCase {
         }
     }
 
+    func testServerSubscriptionSyncResponseDecodes() throws {
+        let payload = try XCTUnwrap(
+            """
+            {
+              "ok": true,
+              "updated": true,
+              "status": "active",
+              "productID": "us.bannerman.firevault.technician.annual",
+              "expiresAt": "2027-09-06T18:00:00.000Z",
+              "environment": "Sandbox"
+            }
+            """.data(using: .utf8)
+        )
+
+        let response = try JSONDecoder().decode(
+            FireVaultServerSubscriptionResponse.self,
+            from: payload
+        )
+
+        XCTAssertTrue(response.ok)
+        XCTAssertTrue(response.updated)
+        XCTAssertEqual(response.status, "active")
+        XCTAssertEqual(response.productID, FireVaultSubscriptionCatalog.annualProductID)
+        XCTAssertEqual(response.expiresAt, "2027-09-06T18:00:00.000Z")
+        XCTAssertEqual(response.environment, "Sandbox")
+    }
+
     func testCachedPaidFeatureGateFailsClosedWithoutVerifiedEntitlement() throws {
         let suite = "FireVaultTests.Subscription.PaidGate.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

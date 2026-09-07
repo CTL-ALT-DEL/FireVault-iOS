@@ -1,3 +1,6 @@
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { paidAccessDecision } from "../_shared/paid-access.ts";
+
 type LookupRequest = {
   latitude?: unknown;
   longitude?: unknown;
@@ -31,8 +34,14 @@ Deno.serve(async (request) => {
     if (!authorization?.toLowerCase().startsWith("bearer ")) {
       return json({ error: "Unauthorized" }, 401);
     }
-    if (!await isAuthenticatedUser(authorization)) {
+    const admin = adminClient();
+    const userID = await authenticatedUserID(admin, authorization);
+    if (!userID) {
       return json({ error: "Unauthorized" }, 401);
+    }
+    const access = await paidAccessDecision(admin, userID);
+    if (!access.allowed) {
+      return json({ error: "Subscription Required", code: access.reason }, 402);
     }
 
     const apiKey = Deno.env.get("GOOGLE_PLACES_API_KEY") ?? Deno.env.get("GOOGLE_MAPS_API_KEY");
@@ -119,21 +128,24 @@ function finiteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-async function isAuthenticatedUser(authorization: string): Promise<boolean> {
-  const supabaseURL = Deno.env.get("SUPABASE_URL");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  if (!supabaseURL || !anonKey) {
-    console.error("Supabase authentication environment is unavailable");
-    return false;
-  }
+async function authenticatedUserID(
+  admin: ReturnType<typeof adminClient>,
+  authorization: string,
+): Promise<string | null> {
+  const token = authorization.slice(7);
+  const { data, error } = await admin.auth.getUser(token);
+  return error ? null : data.user?.id ?? null;
+}
 
-  const response = await fetch(`${supabaseURL}/auth/v1/user`, {
-    headers: {
-      Authorization: authorization,
-      apikey: anonKey,
-    },
+function adminClient() {
+  const supabaseURL = Deno.env.get("SUPABASE_URL");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseURL || !serviceRoleKey) {
+    throw new Error("Supabase server configuration is unavailable");
+  }
+  return createClient(supabaseURL, serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
   });
-  return response.ok;
 }
 
 function distanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {

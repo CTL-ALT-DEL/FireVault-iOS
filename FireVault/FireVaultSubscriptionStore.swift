@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import StoreKit
+import Supabase
 
 enum FireVaultSubscriptionCatalog {
     static let groupReferenceName = "FireVault Technician"
@@ -132,6 +133,41 @@ enum FireVaultPurchaseOutcome: Equatable {
     case cancelled
 }
 
+struct FireVaultServerSubscriptionResponse: Decodable, Equatable {
+    let ok: Bool
+    let updated: Bool
+    let status: String
+    let productID: String
+    let expiresAt: String?
+    let environment: String
+}
+
+enum FireVaultSubscriptionServer {
+    private struct SyncRequest: Encodable {
+        let signedTransaction: String
+        let signedRenewalInfo: String?
+    }
+
+    static func appAccountToken() async throws -> UUID {
+        try await SupabaseManager.client.auth.session.user.id
+    }
+
+    static func synchronize(
+        signedTransaction: String,
+        signedRenewalInfo: String? = nil
+    ) async throws -> FireVaultServerSubscriptionResponse {
+        try await SupabaseManager.client.functions.invoke(
+            "app-store-entitlement-sync",
+            options: FunctionInvokeOptions(
+                body: SyncRequest(
+                    signedTransaction: signedTransaction,
+                    signedRenewalInfo: signedRenewalInfo
+                )
+            )
+        )
+    }
+}
+
 enum FireVaultSubscriptionError: LocalizedError {
     case failedVerification
     case productsUnavailable
@@ -243,13 +279,17 @@ final class FireVaultSubscriptionStore: ObservableObject {
             throw FireVaultSubscriptionError.failedVerification
         }
 
-        let result = try await product.purchase()
+        let appAccountToken = try await FireVaultSubscriptionServer.appAccountToken()
+        let result = try await product.purchase(
+            options: [.appAccountToken(appAccountToken)]
+        )
         switch result {
         case .success(let verification):
             let transaction = try verified(verification)
             guard FireVaultSubscriptionCatalog.productIDs.contains(transaction.productID) else {
                 throw FireVaultSubscriptionError.failedVerification
             }
+            await synchronizeServerEntitlement(verification.jwsRepresentation)
             await transaction.finish()
             await refresh()
             return .purchased
@@ -274,12 +314,16 @@ final class FireVaultSubscriptionStore: ObservableObject {
         }
 
         let statuses = try await subscription.status
-        var bestCandidate: (priority: Int, access: FireVaultSubscriptionAccess, cache: CachedEntitlement?)?
+        var bestCandidate: (
+            priority: Int,
+            access: FireVaultSubscriptionAccess,
+            cache: CachedEntitlement?,
+            signedTransaction: String
+        )?
 
         for status in statuses {
             guard case .verified(let transaction) = status.transaction,
                   FireVaultSubscriptionCatalog.productIDs.contains(transaction.productID),
-                  transaction.revocationDate == nil,
                   !transaction.isUpgraded else { continue }
 
             let expirationDate = transaction.expirationDate
@@ -292,15 +336,21 @@ final class FireVaultSubscriptionStore: ObservableObject {
                 verifiedAt: Date()
             )
 
-            let candidate: (Int, FireVaultSubscriptionAccess, CachedEntitlement?)
-            switch status.state {
+            let candidate: (Int, FireVaultSubscriptionAccess, CachedEntitlement?, String)
+            if transaction.revocationDate != nil {
+                // Keep a revoked transaction available for server reconciliation,
+                // but never let an older revocation outrank another active renewal.
+                candidate = (2, .expired, nil, status.transaction.jwsRepresentation)
+            } else {
+                switch status.state {
             case .subscribed:
                 candidate = (
                     5,
                     isTrial
                         ? .trial(productID: transaction.productID, expiresAt: expirationDate)
                         : .active(productID: transaction.productID, expiresAt: expirationDate),
-                    cache
+                    transaction.revocationDate == nil ? cache : nil,
+                    status.transaction.jwsRepresentation
                 )
             case .inGracePeriod:
                 let graceExpiration: Date?
@@ -315,14 +365,16 @@ final class FireVaultSubscriptionStore: ObservableObject {
                         productID: transaction.productID,
                         expiresAt: graceExpiration
                     ),
-                    cache
+                    transaction.revocationDate == nil ? cache : nil,
+                    status.transaction.jwsRepresentation
                 )
             case .inBillingRetryPeriod:
-                candidate = (3, .billingRetry, nil)
+                candidate = (3, .billingRetry, nil, status.transaction.jwsRepresentation)
             case .expired, .revoked:
-                candidate = (2, .expired, nil)
+                candidate = (2, .expired, nil, status.transaction.jwsRepresentation)
             default:
                 continue
+                }
             }
 
             if bestCandidate == nil || candidate.0 > bestCandidate!.priority {
@@ -337,6 +389,12 @@ final class FireVaultSubscriptionStore: ObservableObject {
             } else if !bestCandidate.access.grantsFullAccess {
                 clearCache()
             }
+            await synchronizeServerEntitlement(
+                bestCandidate.signedTransaction,
+                signedRenewalInfo: statuses
+                    .first(where: { $0.transaction.jwsRepresentation == bestCandidate.signedTransaction })?
+                    .renewalInfo.jwsRepresentation
+            )
         } else {
             access = .notSubscribed
             clearCache()
@@ -348,6 +406,7 @@ final class FireVaultSubscriptionStore: ObservableObject {
             for await result in Transaction.updates {
                 guard !Task.isCancelled else { return }
                 if case .verified(let transaction) = result {
+                    await self?.synchronizeServerEntitlement(result.jwsRepresentation)
                     await transaction.finish()
                 }
                 await self?.refresh()
@@ -367,6 +426,21 @@ final class FireVaultSubscriptionStore: ObservableObject {
     private func persist(_ entitlement: CachedEntitlement) {
         guard let data = try? JSONEncoder().encode(entitlement) else { return }
         defaults.set(data, forKey: CacheKey.entitlement)
+    }
+
+    private func synchronizeServerEntitlement(
+        _ signedTransaction: String,
+        signedRenewalInfo: String? = nil
+    ) async {
+        do {
+            _ = try await FireVaultSubscriptionServer.synchronize(
+                signedTransaction: signedTransaction,
+                signedRenewalInfo: signedRenewalInfo
+            )
+        } catch {
+            // StoreKit remains the on-device source of truth. A later refresh,
+            // restore, or transaction update safely retries server linking.
+        }
     }
 
     private func clearCache() {
