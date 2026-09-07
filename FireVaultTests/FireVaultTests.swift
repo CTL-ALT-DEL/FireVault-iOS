@@ -525,6 +525,120 @@ final class FireVaultTests: XCTestCase {
         XCTAssertEqual(response.environment, "Sandbox")
     }
 
+    func testCurrentEntitlementResolverRestoresActiveSubscriptionWithoutCatalog() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let candidate = try XCTUnwrap(
+            FireVaultCurrentEntitlementResolver.bestCandidate(
+                from: [
+                    FireVaultCurrentEntitlementSnapshot(
+                        productID: "unrelated.product",
+                        expirationDate: now.addingTimeInterval(90 * 86_400),
+                        isTrial: false,
+                        isRevoked: false,
+                        isUpgraded: false,
+                        signedTransaction: "unrelated"
+                    ),
+                    FireVaultCurrentEntitlementSnapshot(
+                        productID: FireVaultSubscriptionCatalog.monthlyProductID,
+                        expirationDate: now.addingTimeInterval(14 * 86_400),
+                        isTrial: true,
+                        isRevoked: false,
+                        isUpgraded: false,
+                        signedTransaction: "verified-monthly"
+                    )
+                ],
+                now: now
+            )
+        )
+
+        XCTAssertEqual(candidate.signedTransaction, "verified-monthly")
+        XCTAssertEqual(
+            FireVaultCurrentEntitlementResolver.access(for: candidate),
+            .trial(
+                productID: FireVaultSubscriptionCatalog.monthlyProductID,
+                expiresAt: now.addingTimeInterval(14 * 86_400)
+            )
+        )
+    }
+
+    func testCurrentEntitlementResolverRejectsExpiredRevokedAndUpgradedTransactions() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let invalidSnapshots = [
+            FireVaultCurrentEntitlementSnapshot(
+                productID: FireVaultSubscriptionCatalog.monthlyProductID,
+                expirationDate: now.addingTimeInterval(-1),
+                isTrial: false,
+                isRevoked: false,
+                isUpgraded: false,
+                signedTransaction: "expired"
+            ),
+            FireVaultCurrentEntitlementSnapshot(
+                productID: FireVaultSubscriptionCatalog.monthlyProductID,
+                expirationDate: now.addingTimeInterval(86_400),
+                isTrial: false,
+                isRevoked: true,
+                isUpgraded: false,
+                signedTransaction: "revoked"
+            ),
+            FireVaultCurrentEntitlementSnapshot(
+                productID: FireVaultSubscriptionCatalog.annualProductID,
+                expirationDate: now.addingTimeInterval(86_400),
+                isTrial: false,
+                isRevoked: false,
+                isUpgraded: true,
+                signedTransaction: "upgraded"
+            )
+        ]
+
+        XCTAssertNil(
+            FireVaultCurrentEntitlementResolver.bestCandidate(
+                from: invalidSnapshots,
+                now: now
+            )
+        )
+    }
+
+    func testCurrentEntitlementResolverPrefersLongestActiveEntitlement() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let candidate = try XCTUnwrap(
+            FireVaultCurrentEntitlementResolver.bestCandidate(
+                from: [
+                    FireVaultCurrentEntitlementSnapshot(
+                        productID: FireVaultSubscriptionCatalog.monthlyProductID,
+                        expirationDate: now.addingTimeInterval(7 * 86_400),
+                        isTrial: false,
+                        isRevoked: false,
+                        isUpgraded: false,
+                        signedTransaction: "monthly"
+                    ),
+                    FireVaultCurrentEntitlementSnapshot(
+                        productID: FireVaultSubscriptionCatalog.annualProductID,
+                        expirationDate: now.addingTimeInterval(300 * 86_400),
+                        isTrial: false,
+                        isRevoked: false,
+                        isUpgraded: false,
+                        signedTransaction: "annual"
+                    )
+                ],
+                now: now
+            )
+        )
+
+        XCTAssertEqual(candidate.productID, FireVaultSubscriptionCatalog.annualProductID)
+        XCTAssertEqual(candidate.signedTransaction, "annual")
+    }
+
+    func testRestoreOutcomeMessagesDoNotClaimMissingPurchaseWasRestored() {
+        XCTAssertEqual(
+            FireVaultRestoreOutcome.restored.message,
+            "Your FireVault Technician subscription was restored."
+        )
+        XCTAssertEqual(
+            FireVaultRestoreOutcome.noActiveSubscription.message,
+            "No active FireVault Technician subscription was found for this Apple Account."
+        )
+    }
+
     func testCachedPaidFeatureGateFailsClosedWithoutVerifiedEntitlement() throws {
         let suite = "FireVaultTests.Subscription.PaidGate.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

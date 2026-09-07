@@ -133,6 +133,57 @@ enum FireVaultPurchaseOutcome: Equatable {
     case cancelled
 }
 
+enum FireVaultRestoreOutcome: Equatable {
+    case restored
+    case noActiveSubscription
+
+    var message: String {
+        switch self {
+        case .restored:
+            "Your FireVault Technician subscription was restored."
+        case .noActiveSubscription:
+            "No active FireVault Technician subscription was found for this Apple Account."
+        }
+    }
+}
+
+struct FireVaultCurrentEntitlementSnapshot: Equatable {
+    let productID: String
+    let expirationDate: Date?
+    let isTrial: Bool
+    let isRevoked: Bool
+    let isUpgraded: Bool
+    let signedTransaction: String
+}
+
+enum FireVaultCurrentEntitlementResolver {
+    static func bestCandidate(
+        from snapshots: [FireVaultCurrentEntitlementSnapshot],
+        now: Date = Date()
+    ) -> FireVaultCurrentEntitlementSnapshot? {
+        snapshots
+            .filter {
+                FireVaultSubscriptionCatalog.productIDs.contains($0.productID)
+                    && !$0.isRevoked
+                    && !$0.isUpgraded
+                    && ($0.expirationDate.map { $0 >= now } ?? true)
+            }
+            .max { lhs, rhs in
+                let lhsExpiration = lhs.expirationDate ?? .distantFuture
+                let rhsExpiration = rhs.expirationDate ?? .distantFuture
+                return lhsExpiration < rhsExpiration
+            }
+    }
+
+    static func access(
+        for snapshot: FireVaultCurrentEntitlementSnapshot
+    ) -> FireVaultSubscriptionAccess {
+        snapshot.isTrial
+            ? .trial(productID: snapshot.productID, expiresAt: snapshot.expirationDate)
+            : .active(productID: snapshot.productID, expiresAt: snapshot.expirationDate)
+    }
+}
+
 struct FireVaultServerSubscriptionResponse: Decodable, Equatable {
     let ok: Bool
     let updated: Bool
@@ -225,7 +276,12 @@ final class FireVaultSubscriptionStore: ObservableObject {
     }
 
     func refresh() async {
-        guard !isLoading else { return }
+        _ = await refreshState()
+    }
+
+    @discardableResult
+    private func refreshState(now: Date = Date()) async -> Bool {
+        guard !isLoading else { return access.grantsFullAccess }
         isLoading = true
         defer { isLoading = false }
 
@@ -240,11 +296,21 @@ final class FireVaultSubscriptionStore: ObservableObject {
                 }
             }
             introOfferEligibleProductIDs = eligibleProductIDs
-            try await refreshVerifiedAccess()
+            let hasVerifiedPaidAccess = try await refreshVerifiedAccess()
+            if !hasVerifiedPaidAccess,
+               await refreshFromCurrentEntitlements(now: now) {
+                lastErrorMessage = nil
+                return true
+            }
             lastErrorMessage = nil
+            return hasVerifiedPaidAccess
         } catch {
             lastErrorMessage = error.localizedDescription
+            if await refreshFromCurrentEntitlements(now: now) {
+                return true
+            }
             restoreCachedAccessIfNeeded()
+            return false
         }
     }
 
@@ -302,15 +368,24 @@ final class FireVaultSubscriptionStore: ObservableObject {
         }
     }
 
-    func restorePurchases() async throws {
+    func restorePurchases() async throws -> FireVaultRestoreOutcome {
         try await AppStore.sync()
-        await refresh()
+
+        // AppStore.sync() can cause Transaction.updates to start a refresh.
+        // Let that refresh finish before performing the explicit restore check,
+        // so this result never reflects state from before Apple's sync completed.
+        while isLoading {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+
+        return await refreshState() ? .restored : .noActiveSubscription
     }
 
-    private func refreshVerifiedAccess() async throws {
+    @discardableResult
+    private func refreshVerifiedAccess() async throws -> Bool {
         guard let subscription = products.compactMap(\.subscription).first else {
             access = .unavailable
-            return
+            return false
         }
 
         let statuses = try await subscription.status
@@ -395,10 +470,59 @@ final class FireVaultSubscriptionStore: ObservableObject {
                     .first(where: { $0.transaction.jwsRepresentation == bestCandidate.signedTransaction })?
                     .renewalInfo.jwsRepresentation
             )
+            return bestCandidate.access.grantsFullAccess
         } else {
             access = .notSubscribed
             clearCache()
+            return false
         }
+    }
+
+    /// `Product.products(for:)` can temporarily return an empty catalog when
+    /// App Store metadata or agreements are propagating. Verified current
+    /// entitlements remain independently available and must still restore a
+    /// subscriber's access in that state.
+    private func refreshFromCurrentEntitlements(now: Date) async -> Bool {
+        var snapshots: [FireVaultCurrentEntitlementSnapshot] = []
+
+        for await verification in Transaction.currentEntitlements {
+            guard case .verified(let transaction) = verification,
+                  FireVaultSubscriptionCatalog.productIDs.contains(transaction.productID) else {
+                continue
+            }
+
+            snapshots.append(
+                FireVaultCurrentEntitlementSnapshot(
+                    productID: transaction.productID,
+                    expirationDate: transaction.expirationDate,
+                    isTrial: transaction.offer?.type == .introductory
+                        && transaction.offer?.paymentMode == .freeTrial,
+                    isRevoked: transaction.revocationDate != nil,
+                    isUpgraded: transaction.isUpgraded,
+                    signedTransaction: verification.jwsRepresentation
+                )
+            )
+        }
+
+        guard let candidate = FireVaultCurrentEntitlementResolver.bestCandidate(
+            from: snapshots,
+            now: now
+        ) else {
+            return false
+        }
+
+        let resolvedAccess = FireVaultCurrentEntitlementResolver.access(for: candidate)
+        access = resolvedAccess
+        persist(
+            CachedEntitlement(
+                productID: candidate.productID,
+                expirationDate: candidate.expirationDate,
+                isTrial: candidate.isTrial,
+                verifiedAt: now
+            )
+        )
+        await synchronizeServerEntitlement(candidate.signedTransaction)
+        return true
     }
 
     private func observeTransactionUpdates() -> Task<Void, Never> {
