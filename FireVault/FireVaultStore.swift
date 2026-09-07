@@ -1769,6 +1769,10 @@ final class FireVaultStore: ObservableObject {
         defaults.string(forKey: Key.cloudVaultOwnerUserID).flatMap(UUID.init(uuidString:))
     }
 
+    var localVaultOwnerUserID: UUID? {
+        cloudVaultOwnerUserID
+    }
+
     func validateCloudVaultOwnership(
         userID: UUID,
         cloudRows: [FireVaultCloudAccountRow]

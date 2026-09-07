@@ -16,6 +16,7 @@ final class FireVaultAuthentication: ObservableObject {
     @Published var errorMessage: String?
     @Published var confirmationMessage: String?
     @Published private(set) var signedInEmail = ""
+    @Published private(set) var signedInUserID: UUID?
 
     private var hasStarted = false
     private var listenerTask: Task<Void, Never>?
@@ -31,10 +32,11 @@ final class FireVaultAuthentication: ObservableObject {
         listenerTask = Task { [weak self] in
             for await (_, session) in SupabaseManager.client.auth.authStateChanges {
                 guard let self, !Task.isCancelled else { return }
-                phase = session == nil || session?.isExpired == true ? .signedOut : .signedIn
                 signedInEmail = session?.user.email?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .lowercased() ?? ""
+                signedInUserID = session?.isExpired == false ? session?.user.id : nil
+                phase = session == nil || session?.isExpired == true ? .signedOut : .signedIn
             }
         }
     }
@@ -54,6 +56,7 @@ final class FireVaultAuthentication: ObservableObject {
             signedInEmail = session.user.email?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased() ?? ""
+            signedInUserID = session.user.id
             phase = .signedIn
         } catch {
             errorMessage = friendlyMessage(for: error)
@@ -78,6 +81,10 @@ final class FireVaultAuthentication: ObservableObject {
                 confirmationMessage = "Account created. Check your email and confirm your address, then sign in."
                 phase = .signedOut
             } else {
+                signedInEmail = response.session?.user.email?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased() ?? ""
+                signedInUserID = response.session?.user.id
                 phase = .signedIn
             }
         } catch {
@@ -112,13 +119,14 @@ final class FireVaultAuthentication: ObservableObject {
         do {
             try await SupabaseManager.client.auth.signOut()
             signedInEmail = ""
+            signedInUserID = nil
             phase = .signedOut
         } catch {
             errorMessage = friendlyMessage(for: error)
         }
     }
 
-    func deleteAccount(store: FireVaultStore) async {
+    func deleteAccount(store: FireVaultStore, settings: FireVaultNativeSettingsStore) async {
         guard !isWorking else { return }
         clearMessages()
         isWorking = true
@@ -128,8 +136,10 @@ final class FireVaultAuthentication: ObservableObject {
             let userID = session.user.id
             _ = try await SupabaseManager.client.functions.invoke("delete-account")
             let removedLocalVault = store.eraseLocalAccountDataAfterCloudDeletion(for: userID)
+            settings.removeTechnicianProfile(for: userID)
             try? await SupabaseManager.client.auth.signOut()
             signedInEmail = ""
+            signedInUserID = nil
             confirmationMessage = removedLocalVault
                 ? "Your FireVault account and its local account records were deleted."
                 : "Your cloud account was deleted. This iPhone's local vault belongs to a different login and was kept safely on the device."
@@ -203,7 +213,11 @@ struct FireVaultAuthGate: View {
             FireVaultAuthenticationView()
                 .preferredColorScheme(.dark)
         case .signedIn:
-            ContentView()
+            if let userID = authentication.signedInUserID {
+                ContentView(authenticatedUserID: userID)
+            } else {
+                ProgressView("Loading your profile…")
+            }
         }
     }
 
@@ -1080,6 +1094,7 @@ enum FireVaultAccountDeletionPolicy {
 struct FireVaultAccountDeletionView: View {
     @EnvironmentObject private var authentication: FireVaultAuthentication
     @ObservedObject var store: FireVaultStore
+    @ObservedObject var settings: FireVaultNativeSettingsStore
     @State private var showsDeleteConfirmation = false
 
     var body: some View {
@@ -1118,7 +1133,7 @@ struct FireVaultAccountDeletionView: View {
             titleVisibility: .visible
         ) {
             Button("Delete Account and Data", role: .destructive) {
-                Task { await authentication.deleteAccount(store: store) }
+                Task { await authentication.deleteAccount(store: store, settings: settings) }
             }
             Button("Cancel", role: .cancel) {}
         } message: {

@@ -911,7 +911,7 @@ struct NativeSecuritySettingsView: View {
 
             Section("Account Management") {
                 NavigationLink {
-                    FireVaultAccountDeletionView(store: store)
+                    FireVaultAccountDeletionView(store: store, settings: settings)
                 } label: {
                     Label("Account Data & Deletion", systemImage: "person.crop.circle.badge.minus")
                 }
