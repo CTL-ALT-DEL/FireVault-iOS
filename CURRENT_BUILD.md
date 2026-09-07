@@ -2,8 +2,10 @@
 
 ## Official `main` release candidate
 
-- Visible version: **1.08.84**
-- Build number: **149**
+- Visible version: **1.08.85**
+- Build number: **150**
+- Restores verified App Store subscriptions even when Apple's product catalog
+  is temporarily unavailable and reports accurately when no purchase exists.
 - Adds cryptographically verified App Store subscription linking and prepares
   server-enforced paid-feature access with a deliberately disabled rollout flag.
 - Keeps expired/free users' existing cloud data readable, downloadable,
