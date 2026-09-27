@@ -55,5 +55,8 @@ jobs:
             --apply
       - name: Check restored data and inactive jobs
         run: |
-          psql --no-psqlrc --tuples-only --no-align --dbname "$TARGET_SUPABASE_DB_URL" --command "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public') AS public_tables, (SELECT count(*) FROM auth.users) AS auth_users, (SELECT count(*) FROM storage.objects) AS storage_objects;"
+          counts="$(psql --no-psqlrc --tuples-only --no-align --dbname "$TARGET_SUPABASE_DB_URL" --command "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public'), (SELECT count(*) FROM auth.users), (SELECT count(*) FROM storage.objects);")"
+          IFS='|' read -r table_count user_count object_count <<< "$counts"
+          echo "Restored totals: $table_count public tables, $user_count Auth users, $object_count Storage objects"
+          [[ "$table_count" -gt 0 && "$user_count" -gt 0 && "$object_count" -gt 0 ]] || { echo "::error::Restored totals are incomplete"; exit 1; }
           psql --no-psqlrc --tuples-only --no-align --dbname "$TARGET_SUPABASE_DB_URL" --command "DO \$do\$ BEGIN IF to_regclass('cron.job') IS NOT NULL AND EXISTS (SELECT 1 FROM cron.job WHERE active) THEN RAISE EXCEPTION 'Active restored scheduled job'; END IF; END \$do\$;"
