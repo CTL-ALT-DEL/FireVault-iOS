@@ -12,8 +12,9 @@ objects). In the target project, ensure the database password and the
 `Recovery test` S3 key are safely stored. The S3 key grants full Storage
 access to this test project; never copy it to production.
 
-Create a GitHub environment named `firevault-recovery-test` and add these
-**environment secrets** from the password manager:
+The GitHub environment `firevault-recovery-test` is already created and limited
+to the `main` branch. Add these **environment secrets** from the password
+manager:
 
 - `RECOVERY_TEST_DB_PASSWORD` — the target project database password.
 - `RECOVERY_TEST_STORAGE_ACCESS_KEY_ID` — target S3 key ID.
