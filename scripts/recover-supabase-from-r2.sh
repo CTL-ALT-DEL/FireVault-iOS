@@ -301,14 +301,14 @@ restore_database() {
   gzip -dc "$snapshot_dir/database/data.sql.gz" > "$sql_dir/data.sql"
 
   if [[ "$disable_restored_cron_jobs" == true ]]; then
-    # Supabase manages this logging parameter and rejects it on fresh projects.
-    # It does not affect restored roles, data, or permissions.
-    grep -qi "log_min_messages" "$sql_dir/roles.sql" || \
-      fail "Expected nonportable log_min_messages role setting was not found."
-    # A role statement can span several lines in a Supabase CLI dump.
-    sed -i -z -E "s/ALTER[[:space:]]+ROLE[^;]*log_min_messages[^;]*;[[:space:]]*//Ig" "$sql_dir/roles.sql"
+    # A production role dump includes this Supabase-managed parameter grant.
+    # A fresh project disallows changing it; omit only this exact grant.
+    local managed_grant='GRANT SET ON PARAMETER "log_min_messages" TO "supabase_realtime_admin";'
+    [[ "$(grep -Fxc "$managed_grant" "$sql_dir/roles.sql" || true)" == 1 ]] || \
+      fail "Expected exactly one Supabase-managed log_min_messages grant."
+    sed -i '/^GRANT SET ON PARAMETER "log_min_messages" TO "supabase_realtime_admin";$/d' "$sql_dir/roles.sql"
     if grep -qi "log_min_messages" "$sql_dir/roles.sql"; then
-      fail "Could not isolate the nonportable log_min_messages role statement."
+      fail "Another log_min_messages statement remains in the role dump."
     fi
   fi
 
