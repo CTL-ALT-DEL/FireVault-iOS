@@ -280,7 +280,7 @@ restore_database() {
   local -a post_restore_commands=()
 
   if [[ "$disable_restored_cron_jobs" == true ]]; then
-    post_restore_commands+=(--command "DO \$do\$ BEGIN IF to_regclass('cron.job') IS NOT NULL THEN UPDATE cron.job SET active = false; END IF; END \$do\$;")
+    post_restore_commands+=(--command "DO \$do\$ BEGIN IF to_regclass('cron.job') IS NOT NULL AND EXISTS (SELECT 1 FROM cron.job WHERE active) THEN RAISE EXCEPTION 'Recovery test would activate scheduled jobs'; END IF; END \$do\$;")
   fi
 
   require_environment_names "${REQUIRED_TARGET_DATABASE_ENV[@]}"
