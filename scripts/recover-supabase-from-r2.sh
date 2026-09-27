@@ -300,6 +300,14 @@ restore_database() {
   gzip -dc "$snapshot_dir/database/schema.sql.gz" > "$sql_dir/schema.sql"
   gzip -dc "$snapshot_dir/database/data.sql.gz" > "$sql_dir/data.sql"
 
+  if [[ "$disable_restored_cron_jobs" == true ]]; then
+    # Supabase manages this logging parameter and rejects it on fresh projects.
+    # It does not affect restored roles, data, or permissions.
+    grep -Eqi "^[[:space:]]*ALTER[[:space:]]+ROLE.*log_min_messages" "$sql_dir/roles.sql" || \
+      fail "Expected nonportable log_min_messages role setting was not found."
+    sed -i -E "/^[[:space:]]*ALTER[[:space:]]+ROLE.*log_min_messages/Id" "$sql_dir/roles.sql"
+  fi
+
   log "Restoring roles, schema, and data in one database transaction."
   psql \
     --no-psqlrc \
