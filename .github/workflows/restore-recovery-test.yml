@@ -1,0 +1,59 @@
+name: Restore encrypted backup to recovery test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firevault-recovery-test
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: firevault-recovery-test
+    env:
+      R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_RECOVERY_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_RECOVERY_SECRET_ACCESS_KEY }}
+      BACKUP_ENCRYPTION_PASSWORD: ${{ secrets.BACKUP_ENCRYPTION_PASSWORD }}
+      BACKUP_ENCRYPTION_SALT: ${{ secrets.BACKUP_ENCRYPTION_SALT }}
+      TARGET_SUPABASE_PROJECT_REF: llfvzebabfkxslrlgwav
+      TARGET_SUPABASE_DB_URL: postgresql://postgres.llfvzebabfkxslrlgwav@aws-0-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require
+      PGPASSWORD: ${{ secrets.RECOVERY_TEST_DB_PASSWORD }}
+      TARGET_SUPABASE_STORAGE_REGION: us-east-1
+      TARGET_SUPABASE_STORAGE_ACCESS_KEY_ID: ${{ secrets.RECOVERY_TEST_STORAGE_ACCESS_KEY_ID }}
+      TARGET_SUPABASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.RECOVERY_TEST_STORAGE_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install restore tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client jq
+          version=1.75.1
+          archive="rclone-v${version}-linux-amd64.zip"
+          curl --fail --silent --show-error --location "https://downloads.rclone.org/v${version}/${archive}" --output "${RUNNER_TEMP}/${archive}"
+          echo "982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab  ${RUNNER_TEMP}/${archive}" | sha256sum --check
+          unzip -q "${RUNNER_TEMP}/${archive}" -d "${RUNNER_TEMP}"
+          sudo install -m 0755 "${RUNNER_TEMP}/rclone-v${version}-linux-amd64/rclone" /usr/local/bin/rclone
+      - name: Check required credentials
+        run: |
+          for name in R2_ENDPOINT R2_BUCKET R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY BACKUP_ENCRYPTION_PASSWORD BACKUP_ENCRYPTION_SALT PGPASSWORD TARGET_SUPABASE_STORAGE_ACCESS_KEY_ID TARGET_SUPABASE_STORAGE_SECRET_ACCESS_KEY; do
+            if [[ -z "${!name:-}" ]]; then echo "::error::Missing ${name}"; exit 1; fi
+          done
+      - name: Restore latest snapshot to empty test project
+        run: |
+          scripts/recover-supabase-from-r2.sh restore \
+            --snapshot latest \
+            --phase all \
+            --confirm-target-project-ref llfvzebabfkxslrlgwav \
+            --disable-restored-cron-jobs \
+            --apply
+      - name: Check restored data and inactive jobs
+        run: |
+          psql --no-psqlrc --tuples-only --no-align --dbname "$TARGET_SUPABASE_DB_URL" --command "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public') AS public_tables, (SELECT count(*) FROM auth.users) AS auth_users, (SELECT count(*) FROM storage.objects) AS storage_objects;"
+          psql --no-psqlrc --tuples-only --no-align --dbname "$TARGET_SUPABASE_DB_URL" --command "DO \$do\$ BEGIN IF to_regclass('cron.job') IS NOT NULL AND EXISTS (SELECT 1 FROM cron.job WHERE active) THEN RAISE EXCEPTION 'Active restored scheduled job'; END IF; END \$do\$;"
