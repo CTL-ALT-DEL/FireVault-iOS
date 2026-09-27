@@ -303,9 +303,13 @@ restore_database() {
   if [[ "$disable_restored_cron_jobs" == true ]]; then
     # Supabase manages this logging parameter and rejects it on fresh projects.
     # It does not affect restored roles, data, or permissions.
-    grep -Eqi "^[[:space:]]*ALTER[[:space:]]+ROLE.*log_min_messages" "$sql_dir/roles.sql" || \
+    grep -qi "log_min_messages" "$sql_dir/roles.sql" || \
       fail "Expected nonportable log_min_messages role setting was not found."
-    sed -i -E "/^[[:space:]]*ALTER[[:space:]]+ROLE.*log_min_messages/Id" "$sql_dir/roles.sql"
+    # A role statement can span several lines in a Supabase CLI dump.
+    sed -i -z -E "s/ALTER[[:space:]]+ROLE[^;]*log_min_messages[^;]*;[[:space:]]*//Ig" "$sql_dir/roles.sql"
+    if grep -qi "log_min_messages" "$sql_dir/roles.sql"; then
+      fail "Could not isolate the nonportable log_min_messages role statement."
+    fi
   fi
 
   log "Restoring roles, schema, and data in one database transaction."
