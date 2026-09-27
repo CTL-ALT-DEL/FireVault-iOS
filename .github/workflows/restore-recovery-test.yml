@@ -2,6 +2,20 @@ name: Restore encrypted backup to recovery test
 
 on:
   workflow_dispatch:
+    inputs:
+      phase:
+        description: 'Restore both parts to a blank test project, or resume files only'
+        type: choice
+        required: true
+        default: all
+        options:
+          - all
+          - storage
+      snapshot:
+        description: 'Snapshot ID; use the same ID as the database restore when resuming files'
+        type: string
+        required: true
+        default: latest
 
 permissions:
   contents: read
@@ -16,6 +30,8 @@ jobs:
     timeout-minutes: 120
     environment: firevault-recovery-test
     env:
+      RECOVERY_PHASE: ${{ inputs.phase }}
+      RECOVERY_SNAPSHOT: ${{ inputs.snapshot }}
       R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
       R2_BUCKET: ${{ vars.R2_BUCKET }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_RECOVERY_ACCESS_KEY_ID }}
@@ -48,8 +64,8 @@ jobs:
       - name: Restore latest snapshot to empty test project
         run: |
           scripts/recover-supabase-from-r2.sh restore \
-            --snapshot latest \
-            --phase all \
+            --snapshot "$RECOVERY_SNAPSHOT" \
+            --phase "$RECOVERY_PHASE" \
             --confirm-target-project-ref llfvzebabfkxslrlgwav \
             --disable-restored-cron-jobs \
             --apply
