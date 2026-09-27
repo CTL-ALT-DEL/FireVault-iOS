@@ -345,12 +345,17 @@ restore_storage() {
 
     if [[ -d "$snapshot_dir/storage/$bucket" ]]; then
       log "Restoring Storage bucket '${bucket}'."
+      # Database metadata already lists these files, but their payloads are absent.
+      # Force an upload instead of trying to update timestamps on missing objects.
       rclone copy "$snapshot_dir/storage/$bucket" "targetsupabase:${bucket}" \
-        --metadata \
+        --ignore-times \
+        --no-update-modtime \
         --checkers 8 \
         --transfers 4 \
         --retries 3 \
         --low-level-retries 10
+      # Listing alone can reflect restored metadata without physical file bytes.
+      rclone check "$snapshot_dir/storage/$bucket" "targetsupabase:${bucket}" --download --checkers 8
     fi
 
     stats="$(rclone size "targetsupabase:${bucket}" --json)"
