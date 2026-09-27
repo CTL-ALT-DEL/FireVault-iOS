@@ -40,7 +40,8 @@ Usage:
   recover-supabase-from-r2.sh list
   recover-supabase-from-r2.sh download [--snapshot latest|ID] --output DIRECTORY
   recover-supabase-from-r2.sh restore [--snapshot latest|ID] \
-    --phase database|storage|all --confirm-target-project-ref PROJECT_REF --apply
+    --phase database|storage|all --confirm-target-project-ref PROJECT_REF \
+    [--disable-restored-cron-jobs] --apply
 
 All commands read the encrypted R2 credentials from the environment. Restore
 also requires TARGET_SUPABASE_PROJECT_REF plus the target database and/or
@@ -276,6 +277,11 @@ restore_database() {
   local snapshot_dir="$1"
   local sql_dir="$2"
   local target_state
+  local -a post_restore_commands=()
+
+  if [[ "$disable_restored_cron_jobs" == true ]]; then
+    post_restore_commands+=(--command "DO \$do\$ BEGIN IF to_regclass('cron.job') IS NOT NULL THEN UPDATE cron.job SET active = false; END IF; END \$do\$;")
+  fi
 
   require_environment_names "${REQUIRED_TARGET_DATABASE_ENV[@]}"
   reject_whitespace "TARGET_SUPABASE_DB_URL" "$TARGET_SUPABASE_DB_URL"
@@ -303,6 +309,7 @@ restore_database() {
     --file "$sql_dir/schema.sql" \
     --command 'SET session_replication_role = replica' \
     --file "$sql_dir/data.sql" \
+    "${post_restore_commands[@]}" \
     --dbname "$TARGET_SUPABASE_DB_URL"
   log "Database restore completed."
 }
@@ -355,6 +362,7 @@ output_dir=''
 restore_phase=all
 confirmed_target=''
 apply_restore=false
+disable_restored_cron_jobs=false
 
 while (($#)); do
   case "$1" in
@@ -382,6 +390,10 @@ while (($#)); do
       apply_restore=true
       shift
       ;;
+    --disable-restored-cron-jobs)
+      disable_restored_cron_jobs=true
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -400,12 +412,12 @@ configure_r2_remote
 
 case "$command_name" in
   list)
-    [[ -z "$output_dir" && "$snapshot_selector" == latest && "$restore_phase" == all && -z "$confirmed_target" && "$apply_restore" == false ]] || \
+    [[ -z "$output_dir" && "$snapshot_selector" == latest && "$restore_phase" == all && -z "$confirmed_target" && "$apply_restore" == false && "$disable_restored_cron_jobs" == false ]] || \
       fail "The list command does not accept options."
     list_completed_snapshots | LC_ALL=C sort
     ;;
   download)
-    [[ "$restore_phase" == all && -z "$confirmed_target" && "$apply_restore" == false ]] || \
+    [[ "$restore_phase" == all && -z "$confirmed_target" && "$apply_restore" == false && "$disable_restored_cron_jobs" == false ]] || \
       fail "The download command does not accept restore-only options."
     snapshot_id="$(resolve_snapshot_id "$snapshot_selector")"
     download_snapshot "$snapshot_id" "$output_dir"
