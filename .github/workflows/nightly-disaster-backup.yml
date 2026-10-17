@@ -57,4 +57,22 @@ jobs:
           rclone version
 
       - name: Back up Supabase to encrypted R2 snapshot
-        run: scripts/backup-supabase-to-r2.sh
+        shell: python
+        run: |
+          import re, subprocess, sys
+          result = subprocess.run(['bash', 'scripts/backup-supabase-to-r2.sh'],
+              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+          # Emit aggregate progress only; raw tool errors can contain user keys.
+          allowed = re.compile(
+              r'^\[firevault-backup\] (Creating logical database dump\.|'
+              r'Backing up immutable Storage versions\.|'
+              r'Storage inventory: [0-9]+ objects; [0-9]+ bytes; [0-9]+ without reusable MD5 \([0-9]+ bytes\)|'
+              r'Storage payload downloaded from Supabase: [0-9]+ bytes; seeded from legacy R2: [0-9]+ bytes|'
+              r'Uploading and verifying the database artifacts\.|'
+              r'Backup completed successfully at [A-Za-z0-9._/-]+\.|'
+              r'Snapshot already committed; leaving it unchanged\.)$')
+          for line in result.stdout.splitlines():
+              if allowed.fullmatch(line):
+                  print(line, flush=True)
+          if result.returncode:
+              sys.exit('Disaster backup failed; raw diagnostics suppressed.')

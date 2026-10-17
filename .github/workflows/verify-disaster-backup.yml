@@ -31,10 +31,14 @@ jobs:
       BACKUP_ENCRYPTION_PASSWORD: ${{ secrets.BACKUP_ENCRYPTION_PASSWORD }}
       BACKUP_ENCRYPTION_SALT: ${{ secrets.BACKUP_ENCRYPTION_SALT }}
       RECOVERY_SNAPSHOT: ${{ inputs.snapshot || 'latest' }}
+      RCLONE_CONFIG: /dev/null
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Install rclone
         env:
@@ -52,8 +56,72 @@ jobs:
             /usr/local/bin/rclone
           rclone version
 
-      - name: Decrypt and verify recovery package
+      - name: Bound, decrypt, and verify recovery package
+        shell: python
         run: |
-          scripts/recover-supabase-from-r2.sh download \
-            --snapshot "$RECOVERY_SNAPSHOT" \
-            --output "$RUNNER_TEMP/firevault-recovery-verified"
+          import json, os, pathlib, shutil, subprocess, sys
+          cap = 300 * 1024 * 1024
+          output = pathlib.Path(os.environ['RUNNER_TEMP']) / 'firevault-recovery-verified'
+          env = dict(os.environ)
+          def capture(args):
+              result = subprocess.run(args, env=env, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, check=False, timeout=4800)
+              if result.returncode:
+                  raise ValueError('Read-only command failed')
+              return result.stdout
+          try:
+              if output.exists():
+                  raise ValueError('Recovery output already exists')
+              env.update({
+                  'RCLONE_CONFIG_R2_TYPE': 's3',
+                  'RCLONE_CONFIG_R2_PROVIDER': 'Cloudflare',
+                  'RCLONE_CONFIG_R2_ENV_AUTH': 'false',
+                  'RCLONE_CONFIG_R2_ACCESS_KEY_ID': env['R2_ACCESS_KEY_ID'],
+                  'RCLONE_CONFIG_R2_SECRET_ACCESS_KEY': env['R2_SECRET_ACCESS_KEY'],
+                  'RCLONE_CONFIG_R2_ENDPOINT': env['R2_ENDPOINT'].rstrip('/'),
+                  'RCLONE_CONFIG_R2_REGION': 'auto',
+                  'RCLONE_CONFIG_R2_NO_CHECK_BUCKET': 'true',
+                  'RCLONE_CONFIG_R2CRYPT_TYPE': 'crypt',
+                  'RCLONE_CONFIG_R2CRYPT_REMOTE': 'r2:' + env['R2_BUCKET'],
+                  'RCLONE_CONFIG_R2CRYPT_FILENAME_ENCRYPTION': 'standard',
+                  'RCLONE_CONFIG_R2CRYPT_DIRECTORY_NAME_ENCRYPTION': 'true',
+                  'RCLONE_CONFIG_R2CRYPT_STRICT_NAMES': 'true',
+              })
+              env['RCLONE_CONFIG_R2CRYPT_PASSWORD'] = capture(
+                  ['rclone', 'obscure', env['BACKUP_ENCRYPTION_PASSWORD']]).decode().strip()
+              env['RCLONE_CONFIG_R2CRYPT_PASSWORD2'] = capture(
+                  ['rclone', 'obscure', env['BACKUP_ENCRYPTION_SALT']]).decode().strip()
+              stats = json.loads(capture(['python3', 'scripts/backup-storage.py', 'preflight',
+                  'firevault', env['RECOVERY_SNAPSHOT'], str(cap)]))
+              print(json.dumps(stats, sort_keys=True), flush=True)
+              capture(['bash', 'scripts/recover-supabase-from-r2.sh', 'download',
+                       '--snapshot', stats['snapshot_id'], '--output', str(output)])
+              files = [p for p in output.rglob('*') if p.is_file()]
+              actual = sum(p.stat().st_size for p in files)
+              if actual != stats['logical_recovery_bytes'] or actual > cap:
+                  raise ValueError('Payload changed or exceeds authorized cap')
+              print(json.dumps({'recovery_verified': True, 'format_version': stats['format_version'],
+                  'r2_decrypted_logical_bytes': actual, 'verified_file_count': len(files),
+                  'database_artifacts_verified': 3}), flush=True)
+          except Exception:
+              sys.exit('Read-only recovery verification failed; raw diagnostics suppressed.')
+          finally:
+              try:
+                  if output.is_dir():
+                      shutil.rmtree(output)
+              except Exception:
+                  sys.exit('Ephemeral recovery cleanup failed; paths suppressed.')
+
+      - name: Remove any remaining ephemeral recovery files
+        if: always()
+        shell: python
+        run: |
+          import os, pathlib, shutil, sys
+          try:
+              root = pathlib.Path(os.environ['RUNNER_TEMP'])
+              paths = [root / 'firevault-recovery-verified', *root.glob('.firevault-recovery.*')]
+              for path in paths:
+                  if path.is_dir() and not path.is_symlink():
+                      shutil.rmtree(path)
+          except Exception:
+              sys.exit('Ephemeral recovery cleanup failed; paths suppressed.')

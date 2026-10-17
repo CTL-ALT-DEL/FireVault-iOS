@@ -66,6 +66,7 @@ require_command rclone
 require_command gzip
 require_command jq
 require_command awk
+require_command python3
 
 validate_identifier "SUPABASE_PROJECT_REF" "$SUPABASE_PROJECT_REF"
 validate_identifier "R2_BUCKET" "$R2_BUCKET"
@@ -101,9 +102,7 @@ cleanup() {
 trap cleanup EXIT
 
 readonly database_dir="$work_dir/database"
-readonly bucket_rows="$work_dir/storage-buckets.jsonl"
 mkdir -p "$database_dir"
-: > "$bucket_rows"
 
 # Environment-backed rclone remotes keep all credentials out of files and logs.
 export RCLONE_CONFIG_SUPABASE_TYPE=s3
@@ -133,6 +132,14 @@ RCLONE_CONFIG_R2CRYPT_PASSWORD="$(rclone obscure "$BACKUP_ENCRYPTION_PASSWORD")"
 RCLONE_CONFIG_R2CRYPT_PASSWORD2="$(rclone obscure "$BACKUP_ENCRYPTION_SALT")"
 export RCLONE_CONFIG_R2CRYPT_FILENAME_ENCRYPTION=standard
 export RCLONE_CONFIG_R2CRYPT_DIRECTORY_NAME_ENCRYPTION=true
+export RCLONE_CONFIG_R2CRYPT_STRICT_NAMES=true
+
+readonly existing_files="$work_dir/existing.json"
+rclone lsjson "r2crypt:${SNAPSHOT_PATH}" --files-only > "$existing_files"
+if jq -e 'any(.[]; .Name == "_SUCCESS")' "$existing_files" >/dev/null; then
+  log "Snapshot already committed; leaving it unchanged."
+  exit 0
+fi
 
 log "Creating logical database dump."
 supabase db dump --db-url "$SUPABASE_DB_URL" -f "$database_dir/roles.sql" --role-only
@@ -153,57 +160,24 @@ for artifact in "$database_dir/roles.sql.gz" "$database_dir/schema.sql.gz" "$dat
   printf '%s  %s\n' "$(sha256_hex "$artifact")" "$(basename "$artifact")" >> "$checksums_file"
 done
 
-log "Copying every Supabase Storage bucket."
-readonly buckets_file="$work_dir/buckets.txt"
-rclone lsf supabase: --dirs-only > "$buckets_file"
-
-bucket_count=0
-while IFS= read -r bucket_entry || [[ -n "$bucket_entry" ]]; do
-  [[ -n "$bucket_entry" ]] || continue
-  bucket="${bucket_entry%/}"
-  validate_identifier "Supabase Storage bucket name" "$bucket"
-
-  destination="r2crypt:${SNAPSHOT_PATH}/storage/${bucket}"
-  log "Copying Storage bucket '${bucket}'."
-  rclone copy "supabase:${bucket}" "$destination" \
-    --metadata \
-    --checkers 8 \
-    --transfers 4 \
-    --retries 3 \
-    --low-level-retries 10
-
-  source_stats="$(rclone size "supabase:${bucket}" --json)"
-  destination_stats="$(rclone size "$destination" --json)"
-  source_count="$(jq -er '.count | numbers' <<< "$source_stats")"
-  source_bytes="$(jq -er '.bytes | numbers' <<< "$source_stats")"
-  destination_count="$(jq -er '.count | numbers' <<< "$destination_stats")"
-  destination_bytes="$(jq -er '.bytes | numbers' <<< "$destination_stats")"
-
-  [[ "$source_count" == "$destination_count" ]] || fail "Object-count verification failed for bucket '${bucket}'."
-  [[ "$source_bytes" == "$destination_bytes" ]] || fail "Byte-count verification failed for bucket '${bucket}'."
-
-  jq -nc \
-    --arg name "$bucket" \
-    --argjson object_count "$source_count" \
-    --argjson bytes "$source_bytes" \
-    '{name: $name, object_count: $object_count, bytes: $bytes}' >> "$bucket_rows"
-  bucket_count=$((bucket_count + 1))
-done < "$buckets_file"
+log "Backing up immutable Storage versions."
+readonly storage_manifest="$work_dir/storage.json"
+python3 "$(dirname "$0")/backup-storage.py" backup "$BACKUP_PREFIX" "$SUPABASE_PROJECT_REF" "$storage_manifest"
 
 readonly manifest_file="$work_dir/manifest.json"
-jq -s \
+jq -n \
   --arg created_at "$CREATED_AT" \
   --arg project_ref "$SUPABASE_PROJECT_REF" \
   --arg snapshot_path "$SNAPSHOT_PATH" \
-  --argjson bucket_count "$bucket_count" \
+  --slurpfile storage "$storage_manifest" \
   '{
-    format_version: 1,
+    format_version: 2,
     created_at: $created_at,
     source: {provider: "supabase", project_ref: $project_ref},
     destination: {provider: "cloudflare-r2", snapshot_path: $snapshot_path},
     database: {files: ["roles.sql.gz", "schema.sql.gz", "data.sql.gz"], checksum_algorithm: "SHA-256"},
-    storage: {bucket_count: $bucket_count, buckets: .}
-  }' "$bucket_rows" > "$manifest_file"
+    storage: $storage[0]
+  }' > "$manifest_file"
 
 log "Uploading and verifying the database artifacts."
 readonly database_destination="r2crypt:${SNAPSHOT_PATH}/database"
@@ -215,6 +189,9 @@ rclone copy "$database_dir" "$database_destination" \
 rclone check "$database_dir" "$database_destination" --one-way --size-only
 
 rclone copyto "$manifest_file" "r2crypt:${SNAPSHOT_PATH}/manifest.json"
+rclone cat "r2crypt:${SNAPSHOT_PATH}/manifest.json" > "$work_dir/uploaded-manifest.json"
+[[ "$(sha256_hex "$manifest_file")" == "$(sha256_hex "$work_dir/uploaded-manifest.json")" ]] || \
+  fail "Manifest readback checksum failed."
 
 # This marker is the commit record. Snapshots without it are incomplete and must
 # never be selected for a restore.

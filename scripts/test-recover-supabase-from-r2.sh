@@ -80,6 +80,13 @@ case "$1" in
       exit 64
     fi
     ;;
+  lsjson)
+    if [[ "$2" == *'incomplete'* ]]; then
+      printf '[]\n'
+    else
+      printf '[{"Name":"_SUCCESS"}]\n'
+    fi
+    ;;
   cat)
     if [[ "$2" == *'incomplete'* ]]; then
       exit 1
@@ -90,6 +97,8 @@ case "$1" in
     if [[ "$2" == r2crypt:* ]]; then
       cp -R "$MOCK_FIXTURE_DIR/." "$3/"
     fi
+    ;;
+  check)
     ;;
   size)
     case "$2" in
