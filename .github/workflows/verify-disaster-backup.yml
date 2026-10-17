@@ -1,15 +1,13 @@
 name: Verify latest disaster backup
+run-name: One-time read-only backup preflight (300 MiB cap)
 
 on:
-  schedule:
-    # A weekly decrypt-and-verify drill every Sunday at 3:11 AM MDT / 2:11 AM MST.
-    - cron: "11 9 * * 0"
   workflow_dispatch:
     inputs:
       snapshot:
-        description: Snapshot ID, or latest
+        description: Explicit authorized legacy snapshot ID
         required: true
-        default: latest
+        default: '2026-10-16T13-22-01Z-38907268599-1'
         type: string
 
 permissions:
@@ -21,26 +19,35 @@ concurrency:
 
 jobs:
   verify:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/backup/read-only-preflight-20261017'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 20
     env:
-      R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
-      R2_BUCKET: ${{ vars.R2_BUCKET }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_RECOVERY_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_RECOVERY_SECRET_ACCESS_KEY }}
-      BACKUP_ENCRYPTION_PASSWORD: ${{ secrets.BACKUP_ENCRYPTION_PASSWORD }}
-      BACKUP_ENCRYPTION_SALT: ${{ secrets.BACKUP_ENCRYPTION_SALT }}
-      RECOVERY_SNAPSHOT: ${{ inputs.snapshot || 'latest' }}
+      RECOVERY_SNAPSHOT: ${{ inputs.snapshot }}
+      RCLONE_CONFIG: /dev/null
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
+      - name: Validate the authorized snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RECOVERY_SNAPSHOT" == '2026-10-16T13-22-01Z-38907268599-1' ]] || {
+            echo 'Unapproved snapshot selector.' >&2
+            exit 1
+          }
 
-      - name: Install rclone
+      - name: Check out exact reviewed commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Install pinned rclone
         env:
           RCLONE_INSTALL_VERSION: 1.75.1
           RCLONE_INSTALL_SHA256: 982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab
         run: |
+          set -euo pipefail
           archive="rclone-v${RCLONE_INSTALL_VERSION}-linux-amd64.zip"
           curl --fail --silent --show-error --location \
             "https://downloads.rclone.org/v${RCLONE_INSTALL_VERSION}/${archive}" \
@@ -50,10 +57,110 @@ jobs:
           sudo install -m 0755 \
             "${RUNNER_TEMP}/rclone-v${RCLONE_INSTALL_VERSION}-linux-amd64/rclone" \
             /usr/local/bin/rclone
-          rclone version
 
-      - name: Decrypt and verify recovery package
+      - name: Read aggregate Supabase S3 checksum coverage
+        timeout-minutes: 10
+        env:
+          RCLONE_CONFIG_SUPABASE_TYPE: s3
+          RCLONE_CONFIG_SUPABASE_PROVIDER: Other
+          RCLONE_CONFIG_SUPABASE_ENV_AUTH: 'false'
+          RCLONE_CONFIG_SUPABASE_ACCESS_KEY_ID: ${{ secrets.SUPABASE_STORAGE_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_SUPABASE_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_STORAGE_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_SUPABASE_ENDPOINT: https://${{ vars.SUPABASE_PROJECT_REF }}.storage.supabase.co/storage/v1/s3
+          RCLONE_CONFIG_SUPABASE_REGION: ${{ vars.SUPABASE_STORAGE_REGION }}
+          RCLONE_CONFIG_SUPABASE_FORCE_PATH_STYLE: 'true'
+          RCLONE_CONFIG_SUPABASE_LIST_VERSION: '2'
+        run: python3 scripts/verify-storage-inventory.py
+
+      - name: Bound and decrypt the authorized R2 snapshot
+        timeout-minutes: 10
+        env:
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_RECOVERY_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_RECOVERY_SECRET_ACCESS_KEY }}
+          BACKUP_ENCRYPTION_PASSWORD: ${{ secrets.BACKUP_ENCRYPTION_PASSWORD }}
+          BACKUP_ENCRYPTION_SALT: ${{ secrets.BACKUP_ENCRYPTION_SALT }}
+        shell: python
         run: |
-          scripts/recover-supabase-from-r2.sh download \
-            --snapshot "$RECOVERY_SNAPSHOT" \
-            --output "$RUNNER_TEMP/firevault-recovery-verified"
+          import json, os, pathlib, shutil, subprocess, sys
+          cap = 300 * 1024 * 1024
+          snapshot = '2026-10-16T13-22-01Z-38907268599-1'
+          output = pathlib.Path(os.environ['RUNNER_TEMP']) / 'firevault-recovery-verified'
+          env = dict(os.environ)
+          def capture(args):
+              result = subprocess.run(args, env=env, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, check=False, timeout=540)
+              if result.returncode:
+                  raise ValueError('Read-only command failed')
+              return result.stdout
+          try:
+              if os.environ['RECOVERY_SNAPSHOT'] != snapshot or output.exists():
+                  raise ValueError('Unexpected snapshot or output path')
+              env.update({
+                  'RCLONE_CONFIG_R2_TYPE': 's3',
+                  'RCLONE_CONFIG_R2_PROVIDER': 'Cloudflare',
+                  'RCLONE_CONFIG_R2_ENV_AUTH': 'false',
+                  'RCLONE_CONFIG_R2_ACCESS_KEY_ID': env['R2_ACCESS_KEY_ID'],
+                  'RCLONE_CONFIG_R2_SECRET_ACCESS_KEY': env['R2_SECRET_ACCESS_KEY'],
+                  'RCLONE_CONFIG_R2_ENDPOINT': env['R2_ENDPOINT'].rstrip('/'),
+                  'RCLONE_CONFIG_R2_REGION': 'auto',
+                  'RCLONE_CONFIG_R2_NO_CHECK_BUCKET': 'true',
+                  'RCLONE_CONFIG_R2CRYPT_TYPE': 'crypt',
+                  'RCLONE_CONFIG_R2CRYPT_REMOTE': 'r2:' + env['R2_BUCKET'],
+                  'RCLONE_CONFIG_R2CRYPT_FILENAME_ENCRYPTION': 'standard',
+                  'RCLONE_CONFIG_R2CRYPT_DIRECTORY_NAME_ENCRYPTION': 'true',
+                  'RCLONE_CONFIG_R2CRYPT_STRICT_NAMES': 'true',
+              })
+              env['RCLONE_CONFIG_R2CRYPT_PASSWORD'] = capture(
+                  ['rclone', 'obscure', env['BACKUP_ENCRYPTION_PASSWORD']]).decode().strip()
+              env['RCLONE_CONFIG_R2CRYPT_PASSWORD2'] = capture(
+                  ['rclone', 'obscure', env['BACKUP_ENCRYPTION_SALT']]).decode().strip()
+              stats = json.loads(capture(['rclone', 'size', 'r2crypt:firevault/' + snapshot,
+                  '--json', '--retries', '1', '--low-level-retries', '1', '--timeout', '30s']))
+              size, count = stats['bytes'], stats['count']
+              if type(size) is not int or type(count) is not int or size < 0 or count <= 0:
+                  raise ValueError('Invalid preflight size')
+              print(json.dumps({'r2_preflight_logical_bytes': size, 'r2_preflight_files': count,
+                                'logical_cap_bytes': cap}), flush=True)
+              if size > cap:
+                  raise ValueError('Snapshot exceeds authorized logical cap')
+              manifest_bytes = capture(['rclone', 'cat', 'r2crypt:firevault/' + snapshot + '/manifest.json',
+                  '--retries', '1', '--low-level-retries', '1', '--timeout', '30s'])
+              manifest = json.loads(manifest_bytes)
+              if (manifest.get('format_version') != 1
+                      or manifest.get('destination', {}).get('snapshot_path') != 'firevault/' + snapshot):
+                  raise ValueError('Only the authorized legacy format is permitted')
+              # Existing reader at pinned base: download only, never restore.
+              capture(['bash', 'scripts/recover-supabase-from-r2.sh', 'download',
+                       '--snapshot', snapshot, '--output', str(output)])
+              files = [p for p in output.rglob('*') if p.is_file()]
+              actual = sum(p.stat().st_size for p in files)
+              if actual != size or len(files) != count or actual > cap:
+                  raise ValueError('Payload changed or exceeds authorized cap')
+              print(json.dumps({'recovery_verified': True, 'r2_decrypted_logical_bytes': actual,
+                                'verified_file_count': len(files), 'database_artifacts_verified': 3,
+                                'r2_manifest_probe_bytes': len(manifest_bytes),
+                                'source_payload_bytes_downloaded': 0}), flush=True)
+          except Exception:
+              sys.exit('Read-only R2 verification failed; raw diagnostics suppressed.')
+          finally:
+              try:
+                  if output.is_dir():
+                      shutil.rmtree(output)
+              except Exception:
+                  sys.exit('Ephemeral recovery cleanup failed; paths suppressed.')
+
+      - name: Remove any remaining ephemeral recovery files
+        if: always()
+        shell: python
+        run: |
+          import os, pathlib, shutil, sys
+          try:
+              root = pathlib.Path(os.environ['RUNNER_TEMP'])
+              paths = [root / 'firevault-recovery-verified', *root.glob('.firevault-recovery.*')]
+              for path in paths:
+                  if path.is_dir() and not path.is_symlink():
+                      shutil.rmtree(path)
+          except Exception:
+              sys.exit('Ephemeral recovery cleanup failed; paths suppressed.')
