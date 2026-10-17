@@ -117,13 +117,20 @@ configure_r2_remote() {
 }
 
 list_completed_snapshots() {
-  local listing entry snapshot_id
-  listing="$(rclone lsf "r2crypt:${BACKUP_PREFIX}" --dirs-only)"
+  local listing entry snapshot_id files
+  listing="$(rclone lsf "r2crypt:${BACKUP_PREFIX}" --dirs-only)" || fail "Cannot list snapshot history."
   while IFS= read -r entry || [[ -n "$entry" ]]; do
     [[ -n "$entry" ]] || continue
     snapshot_id="${entry%/}"
+    [[ "$snapshot_id" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]] || continue
     validate_identifier "Snapshot ID" "$snapshot_id"
-    if rclone cat "r2crypt:${BACKUP_PREFIX}/${snapshot_id}/_SUCCESS" >/dev/null 2>&1; then
+    files="$(rclone lsjson "r2crypt:${BACKUP_PREFIX}/${snapshot_id}" --files-only)" || \
+      fail "Cannot inspect snapshot '${snapshot_id}'."
+    jq -e 'type == "array" and all(.[]; (.Name | type == "string"))' <<< "$files" >/dev/null || \
+      fail "Invalid snapshot listing '${snapshot_id}'."
+    if jq -e 'any(.[]; .Name == "_SUCCESS")' <<< "$files" >/dev/null; then
+      rclone cat "r2crypt:${BACKUP_PREFIX}/${snapshot_id}/_SUCCESS" >/dev/null || \
+        fail "Cannot read completed snapshot marker '${snapshot_id}'."
       printf '%s\n' "$snapshot_id"
     fi
   done <<< "$listing"
@@ -134,13 +141,14 @@ resolve_snapshot_id() {
   local snapshot_id
 
   if [[ "$selector" == latest ]]; then
-    snapshot_id="$(list_completed_snapshots | LC_ALL=C sort | tail -n 1)"
+    snapshot_id="$(list_completed_snapshots | LC_ALL=C sort | tail -n 1)" || \
+      fail "Cannot select latest snapshot because history inspection failed."
     [[ -n "$snapshot_id" ]] || fail "No completed snapshots were found."
   else
     snapshot_id="${selector#${BACKUP_PREFIX}/}"
     validate_identifier "Snapshot ID" "$snapshot_id"
     rclone cat "r2crypt:${BACKUP_PREFIX}/${snapshot_id}/_SUCCESS" >/dev/null 2>&1 || \
-      fail "Snapshot '${snapshot_id}' is missing its _SUCCESS marker."
+      fail "Snapshot '${snapshot_id}' has a missing or unreadable _SUCCESS marker."
   fi
 
   printf '%s\n' "$snapshot_id"
@@ -209,7 +217,7 @@ verify_snapshot_directory() {
 
   jq -e \
     --arg expected_path "$expected_path" \
-    '.format_version == 1
+    '(.format_version == 1 or .format_version == 2)
       and (.created_at | type == "string")
       and (.source.provider == "supabase")
       and (.source.project_ref | type == "string")
@@ -250,6 +258,11 @@ download_snapshot() {
     --transfers 4 \
     --retries 3 \
     --low-level-retries 10
+  if [[ "$(jq -er '.format_version' "$staging_dir/manifest.json")" == 2 ]]; then
+    require_command python3
+    python3 "$(dirname "$0")/backup-storage.py" materialize "$BACKUP_PREFIX" \
+      "${BACKUP_PREFIX}/${snapshot_id}" "$staging_dir/manifest.json" "$staging_dir/storage"
+  fi
   verify_snapshot_directory "$staging_dir" "$snapshot_id"
   mv -- "$staging_dir" "$output_dir"
   log "Verified recovery package written to ${output_dir}."
@@ -321,7 +334,7 @@ restore_database() {
     --file "$sql_dir/schema.sql" \
     --command 'SET session_replication_role = replica' \
     --file "$sql_dir/data.sql" \
-    "${post_restore_commands[@]}" \
+    ${post_restore_commands[@]+"${post_restore_commands[@]}"} \
     --dbname "$TARGET_SUPABASE_DB_URL"
   log "Database restore completed."
 }
@@ -343,7 +356,11 @@ restore_storage() {
     grep -Fx -- "${bucket}/" "$target_buckets_file" >/dev/null || \
       fail "Target Storage bucket '${bucket}' does not exist after the database restore."
 
-    if [[ -d "$snapshot_dir/storage/$bucket" ]]; then
+    if [[ "$(jq -er '.format_version' "$manifest_file")" == 2 ]]; then
+      log "Restoring versioned Storage bucket '${bucket}' with manifest metadata."
+      python3 "$(dirname "$0")/backup-storage.py" restore-bucket "$BACKUP_PREFIX" \
+        "$manifest_file" "$snapshot_dir" "$bucket"
+    elif [[ -d "$snapshot_dir/storage/$bucket" ]]; then
       log "Restoring Storage bucket '${bucket}'."
       # Database metadata already lists these files, but their payloads are absent.
       # Force an upload instead of trying to update timestamps on missing objects.
@@ -354,7 +371,9 @@ restore_storage() {
         --transfers 4 \
         --retries 3 \
         --low-level-retries 10
-      # Listing alone can reflect restored metadata without physical file bytes.
+    fi
+    if [[ -d "$snapshot_dir/storage/$bucket" ]]; then
+      # Both formats must verify physical target bytes, not only metadata totals.
       rclone check "$snapshot_dir/storage/$bucket" "targetsupabase:${bucket}" --download --checkers 8
     fi
 

@@ -8,7 +8,9 @@ The process has two levels:
 
 1. A safe weekly workflow decrypts the newest snapshot on an ephemeral GitHub
    runner and verifies its manifest, SHA-256 checksums, gzip streams, and Storage
-   object counts and byte totals. It never connects to a target database.
+   object counts and byte totals. For format-2 snapshots it also checks every
+   restored object against the SHA-256 in the daily manifest. It never connects
+   to a target database.
 2. An authorized operator can restore a verified snapshot into a newly created
    Supabase project from a trusted computer.
 
@@ -44,8 +46,8 @@ Supabase.
    percent-encode special characters in its password.
 4. Enable the new project's Storage S3 protocol and generate a new S3 access-key
    pair.
-5. On a trusted computer, install current `rclone`, `jq`, `gzip`, and PostgreSQL
-   `psql`.
+5. On a trusted computer, install `rclone` (tested with 1.75.1), Python 3, `jq`,
+   `gzip`, and PostgreSQL `psql`.
 6. Obtain an R2 Object Read only credential scoped to the disaster-backup bucket
    and the backup encryption password and salt from the offline password
    manager.
@@ -85,6 +87,43 @@ scripts/recover-supabase-from-r2.sh download \
 
 The command refuses to use an existing output path. Treat the resulting folder
 as highly sensitive because it contains decrypted Auth records and user data.
+
+## Full snapshots and incremental snapshots
+
+The same commands support legacy format 1 and incremental format 2. The weekly
+workflow preflights the full logical recovery size against 300 MiB, including
+shared version references; this is a logical-data cap, not a network retry-byte
+meter. Oversized snapshots require an explicit later limit decision. Manual
+workstation downloads should also apply an approved size budget. Format 1
+stores files inside the dated snapshot. Format 2 stores a complete daily
+inventory referencing immutable encrypted versions in
+`<BACKUP_PREFIX>/_storage-versions/`. The downloader assembles only the selected
+date's referenced files into the familiar local `storage/<bucket>/<key>` layout
+and verifies each file's SHA-256. During format-2 Storage restore, the helper
+applies the selected date's object metadata (including MIME type/cache headers)
+to the separate target project. Source keys absent from that date's manifest
+are not restored, so historical deletions and recreations resolve correctly.
+The database dumps and target-project guards use the existing restore path.
+
+Keep the helper `scripts/backup-storage.py` beside the recovery shell script.
+Copying only the dated R2 prefix is **not** a complete format-2 recovery package.
+Use the downloader, or preserve the dated manifest/database plus every referenced
+version. Older daily manifests are not needed to reconstruct the selected date.
+The shared pool is not a selectable snapshot and must not be pruned by object
+age. Never remove an R2 version still referenced by any retained date.
+
+If a version is missing, unreadable, or has a wrong checksum, download fails and
+no verified output directory is published. Stop and investigate; do not skip the
+file, edit the manifest, or restore a partial package. Interrupted downloads can
+be rerun with a new output directory. Existing outputs are never overwritten.
+Use a case-sensitive recovery filesystem if keys differ only by letter case;
+unsafe or specially encoded keys fail validation instead of silently renaming.
+
+For a local offline regression check, run
+`scripts/test-backup-supabase-to-r2.sh` and
+`scripts/test-recover-supabase-from-r2.sh`. These fixture tests prove byte-level
+reconstruction and exercise guards; they do not prove SQL compatibility with a
+new live Supabase project. No production write is needed for these tests.
 
 ## Restore into the separate target project
 
